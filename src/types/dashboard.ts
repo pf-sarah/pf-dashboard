@@ -33,8 +33,10 @@ export interface DesignerFrameData {
   designers: {
     name: string;
     weeks: number[];
+    otherCount: number;
     total: number;
     ordersByWeek: string[][];
+    otherOrders: string[];
   }[];
   weekKeys: string[];
 }

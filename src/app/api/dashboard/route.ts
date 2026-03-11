@@ -89,19 +89,27 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
 
     const allWeekKeys = [...new Set(
       Object.values(byDesigner).flatMap(d => Object.keys(d.weeks))
-    )].sort().slice(-8);
+    )].sort();
+    const shownWeekKeys = allWeekKeys.slice(-8);
+    const shownSet = new Set(shownWeekKeys);
 
     const designers = Object.entries(byDesigner)
-      .map(([name, d]) => ({
-        name,
-        weeks: allWeekKeys.map(k => d.weeks[k] ?? 0),
-        total: allWeekKeys.reduce((s, k) => s + (d.weeks[k] ?? 0), 0),
-        ordersByWeek: allWeekKeys.map(k => d.orders[k] ?? []),
-      }))
+      .map(([name, d]) => {
+        const shownTotal = shownWeekKeys.reduce((s, k) => s + (d.weeks[k] ?? 0), 0);
+        const grandTotal = Object.values(d.weeks).reduce((s, n) => s + n, 0);
+        return {
+          name,
+          weeks: shownWeekKeys.map(k => d.weeks[k] ?? 0),
+          otherCount: grandTotal - shownTotal,
+          total: grandTotal,
+          ordersByWeek: shownWeekKeys.map(k => d.orders[k] ?? []),
+          otherOrders: Object.entries(d.orders).filter(([wk]) => !shownSet.has(wk)).flatMap(([, o]) => o),
+        };
+      })
       .filter(d => d.total > 0)
       .sort((a, b) => b.total - a.total);
 
-    return designers.length ? { designers, weekKeys: allWeekKeys } : null;
+    return designers.length ? { designers, weekKeys: shownWeekKeys } : null;
   } catch {
     return null;
   }
@@ -147,7 +155,7 @@ export async function GET() {
     .select('value')
     .eq('key', 'design_anchor_week')
     .single()
-    .catch(() => ({ data: null }));
+    .then(r => r, () => ({ data: null }));
 
   const anchorStr = configRow?.value ?? null;
   const anchorDate = anchorStr
