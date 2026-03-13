@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { Header } from '@/components/dashboard/Header';
 import { PipelineSection } from '@/components/dashboard/PipelineSection';
 import { DesignerFrameSection } from '@/components/dashboard/DesignerFrameSection';
+import { ResponseTimeSection } from '@/components/dashboard/ResponseTimeSection';
 import { pfGet, pfGetAll, pfPost, fmtDate, weekMonday } from '@/lib/pf-api';
 import { supabase } from '@/lib/supabase';
 import type { WeeklyReportItem, SearchResponse, DesignerFrameData, LastWeekFrameCounts } from '@/types/dashboard';
@@ -39,6 +40,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
 
     const BATCH = 50;
     const orderDesignerMap: Record<string, string> = {};
+    const orderUuidMap: Record<string, string> = {};
     for (let i = 0; i < orderNums.length; i += BATCH) {
       const batch = orderNums.slice(i, i + BATCH);
       const results = await Promise.all(
@@ -50,6 +52,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
         const fn = item.assignedToUserFirstName, ln = item.assignedToUserLastName;
         if (!fn && !ln) return;
         orderDesignerMap[batch[j]] = `${fn ?? ''} ${ln ?? ''}`.trim();
+        if (item.orderUuid) orderUuidMap[batch[j]] = item.orderUuid;
       });
     }
     if (!Object.keys(orderDesignerMap).length) return null;
@@ -85,7 +88,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
       })
       .filter(d => d.total > 0)
       .sort((a, b) => b.total - a.total);
-    return designers.length ? { designers, weekKeys: shownWeekKeys } : null;
+    return designers.length ? { designers, weekKeys: shownWeekKeys, orderUuidMap } : null;
   } catch { return null; }
 }
 
@@ -143,6 +146,7 @@ export default async function DashboardPage() {
               frameData={designerFrameData}
               lastWeek={lastWeekFrameCounts}
             />
+            <ResponseTimeSection frameData={designerFrameData} />
           </>
         )}
       </main>

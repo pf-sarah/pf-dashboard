@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
     // Search each order individually to find frameValetKey + assigned designer
     const BATCH = 50;
     const orderDesignerMap: Record<string, string> = {}; // orderNum → designer name
+    const orderUuidMap: Record<string, string> = {};     // orderNum → orderUuid
     for (let i = 0; i < orderNums.length; i += BATCH) {
       const batch = orderNums.slice(i, i + BATCH);
       const results = await Promise.all(
@@ -82,6 +83,7 @@ export async function GET(req: NextRequest) {
         const ln = item.assignedToUserLastName;
         if (!fn && !ln) return;
         orderDesignerMap[batch[j]] = `${fn ?? ''} ${ln ?? ''}`.trim();
+        if (item.orderUuid) orderUuidMap[batch[j]] = item.orderUuid;
       });
     }
 
@@ -128,7 +130,7 @@ export async function GET(req: NextRequest) {
       .filter(d => d.total > 0)
       .sort((a, b) => b.total - a.total);
 
-    return NextResponse.json({ designers, weekKeys: shownWeekKeys });
+    return NextResponse.json({ designers, weekKeys: shownWeekKeys, orderUuidMap });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

@@ -2,6 +2,7 @@
 
 import React, { useState, useTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConversationDrawer } from '@/components/dashboard/ConversationDrawer';
 import type { DesignerFrameData, LastWeekFrameCounts } from '@/types/dashboard';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -43,6 +44,13 @@ export function DesignerFrameSection({
   const [frameData, setFrameData]       = useState<DesignerFrameData | null>(initialFrameData);
   const [error, setError]               = useState('');
   const [isPending, startTransition]    = useTransition();
+  const [conversation, setConversation] = useState<{ orderNum: string; orderUuid: string } | null>(null);
+
+  function openConversation(orderNum: string) {
+    const uuid = frameData?.orderUuidMap?.[orderNum];
+    if (!uuid) return;
+    setConversation({ orderNum, orderUuid: uuid });
+  }
 
   function applyRange() {
     if (!cohortStart || !cohortEnd) return;
@@ -57,6 +65,13 @@ export function DesignerFrameSection({
 
   return (
     <section className="space-y-4">
+      {conversation && (
+        <ConversationDrawer
+          orderNum={conversation.orderNum}
+          orderUuid={conversation.orderUuid}
+          onClose={() => setConversation(null)}
+        />
+      )}
       <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
         Design Production
       </h2>
@@ -204,7 +219,22 @@ export function DesignerFrameSection({
                         return (
                           <tr key={`${cellKey}-expand`} className="bg-indigo-50">
                             <td colSpan={frameData.weekKeys.length + 3} className="py-2 px-4 text-xs text-indigo-700 border-b border-indigo-100">
-                              📄 {orders.map(o => `#${o}`).join(', ')}
+                              📄 {orders.map((o, oi) => (
+                                <span key={o}>
+                                  {oi > 0 && ', '}
+                                  {frameData.orderUuidMap?.[o] ? (
+                                    <button
+                                      onClick={() => openConversation(o)}
+                                      className="underline decoration-dotted hover:text-indigo-900 cursor-pointer"
+                                      title="View conversation"
+                                    >
+                                      #{o}
+                                    </button>
+                                  ) : (
+                                    <span>#{o}</span>
+                                  )}
+                                </span>
+                              ))}
                             </td>
                           </tr>
                         );
@@ -212,7 +242,22 @@ export function DesignerFrameSection({
                       {expandedCell === otherCellKey && designer.otherOrders.length > 0 && (
                         <tr key={`${designer.name}-other-expand`} className="bg-slate-50">
                           <td colSpan={frameData.weekKeys.length + 3} className="py-2 px-4 text-xs text-slate-500 border-b border-slate-100">
-                            📄 {designer.otherOrders.map(o => `#${o}`).join(', ')}
+                            📄 {designer.otherOrders.map((o, oi) => (
+                              <span key={o}>
+                                {oi > 0 && ', '}
+                                {frameData.orderUuidMap?.[o] ? (
+                                  <button
+                                    onClick={() => openConversation(o)}
+                                    className="underline decoration-dotted hover:text-slate-700 cursor-pointer"
+                                    title="View conversation"
+                                  >
+                                    #{o}
+                                  </button>
+                                ) : (
+                                  <span>#{o}</span>
+                                )}
+                              </span>
+                            ))}
                           </td>
                         </tr>
                       )}

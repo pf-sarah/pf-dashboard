@@ -20,6 +20,7 @@ export interface SearchItem {
   assignedToUserFirstName?: string;
   assignedToUserLastName?: string;
   assignedToUserUuid?: string;
+  orderUuid?: string;
   status?: string;
 }
 
@@ -39,6 +40,30 @@ export interface DesignerFrameData {
     otherOrders: string[];
   }[];
   weekKeys: string[];
+  orderUuidMap: Record<string, string>; // orderNumber → orderUuid
+}
+
+export interface ConversationMessage {
+  uuid: string;
+  messageText: string;
+  userUuid: string;
+  userFirstName: string;
+  userLastName: string;
+  dateCreated: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+}
+
+export interface ConversationUser {
+  userUuid: string;
+  userFirstName: string;
+  userLastName: string;
+  role?: string;
+}
+
+export interface ResponseTimeResult {
+  byDesigner: Record<string, { avgMinutes: number; sampleSize: number }>;
+  overall: { avgMinutes: number; sampleSize: number };
 }
 
 export interface FrameSnapshot {

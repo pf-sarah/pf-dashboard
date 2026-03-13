@@ -54,7 +54,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
     // Batch Search all orders
     const BATCH = 50;
     const orderDesignerMap: Record<string, string> = {};
-    const ordersByCell: Record<string, string[]> = {};
+    const orderUuidMap: Record<string, string> = {};
 
     for (let i = 0; i < orderNums.length; i += BATCH) {
       const batch = orderNums.slice(i, i + BATCH);
@@ -72,6 +72,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
         if (!fn && !ln) return;
         const name = `${fn ?? ''} ${ln ?? ''}`.trim();
         orderDesignerMap[batch[j]] = name;
+        if (item.orderUuid) orderUuidMap[batch[j]] = item.orderUuid;
       });
     }
 
@@ -109,7 +110,7 @@ async function getDesignerFrameData(anchorDate: Date): Promise<DesignerFrameData
       .filter(d => d.total > 0)
       .sort((a, b) => b.total - a.total);
 
-    return designers.length ? { designers, weekKeys: shownWeekKeys } : null;
+    return designers.length ? { designers, weekKeys: shownWeekKeys, orderUuidMap } : null;
   } catch {
     return null;
   }
