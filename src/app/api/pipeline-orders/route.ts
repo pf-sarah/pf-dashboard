@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch all months in parallel batches of 8
     const seen   = new Set<string>();
-    const orders: { num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; days: number; daysLabel: string }[] = [];
+    const orders: { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; days: number; daysLabel: string }[] = [];
 
     for (let i = 0; i < paths.length; i += 8) {
       const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 8));
@@ -94,8 +94,10 @@ export async function GET(req: NextRequest) {
           if (item.status !== status) return;
           if (item.location !== location) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
-          if (!num || seen.has(num)) return;
-          seen.add(num);
+          if (!num) return;
+          const id = `${num}|${item.variantTitle ?? ''}`;
+          if (seen.has(id)) return;
+          seen.add(id);
           // Use orderDateUpdated (status change) if available, else fall back to order received date
           const statusDateStr = item.orderDateUpdated ?? item.originalOrderDate ?? null;
           const days = statusDateStr
@@ -104,6 +106,7 @@ export async function GET(req: NextRequest) {
           const daysLabel = item.orderDateUpdated ? 'in status' : 'order age';
 
           orders.push({
+            id,
             num,
             name:      item.orderName ?? '',
             variant:   item.variantTitle ?? '',
