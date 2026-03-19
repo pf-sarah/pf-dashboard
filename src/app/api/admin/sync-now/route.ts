@@ -1,20 +1,17 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
+import { runStatusSnapshot } from '@/lib/status-snapshot';
 
-// Triggers the cron snapshot server-side, gated by Clerk auth (no cron secret needed).
+export const maxDuration = 300;
+
 export async function POST() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const base = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'http://localhost:3000';
+  const result = await runStatusSnapshot();
+  if (result.error) {
+    return NextResponse.json({ error: result.error }, { status: 500 });
+  }
 
-  const res = await fetch(`${base}/api/cron/status-snapshot`, {
-    headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
-    cache: 'no-store',
-  });
-
-  const json = await res.json().catch(() => ({}));
-  return NextResponse.json({ ok: res.ok, status: res.status, ...json });
+  return NextResponse.json({ ok: true, scanned: result.scanned, timestamp: new Date().toISOString() });
 }

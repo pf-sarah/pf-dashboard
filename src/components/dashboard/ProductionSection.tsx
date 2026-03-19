@@ -86,8 +86,8 @@ export function ProductionSection({ location = 'Utah' }: { location?: string }) 
     try {
       const res  = await fetch('/api/admin/sync-now', { method: 'POST' });
       const json = await res.json();
-      if (json.ok === false) {
-        setSyncMsg(`Sync failed: ${json.error ?? 'unknown error'}`);
+      if (json.error) {
+        setSyncMsg(`Sync failed: ${json.error}`);
       } else {
         setSyncMsg(`Synced — ${json.scanned ?? 0} records scanned`);
         await load(start, end);
