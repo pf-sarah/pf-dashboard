@@ -76,7 +76,27 @@ export function ProductionSection({ location = 'Utah' }: { location?: string }) 
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState('');
   // expanded key = "Dept|staff name"
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded,  setExpanded]  = useState<string | null>(null);
+  const [syncing,   setSyncing]   = useState(false);
+  const [syncMsg,   setSyncMsg]   = useState('');
+
+  async function syncNow() {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const res  = await fetch('/api/admin/sync-now', { method: 'POST' });
+      const json = await res.json();
+      if (json.ok === false) {
+        setSyncMsg(`Sync failed: ${json.error ?? 'unknown error'}`);
+      } else {
+        setSyncMsg(`Synced — ${json.scanned ?? 0} records scanned`);
+        await load(start, end);
+      }
+    } catch {
+      setSyncMsg('Sync failed');
+    }
+    setSyncing(false);
+  }
 
   async function load(s: string, e: string) {
     setLoading(true);
@@ -103,11 +123,23 @@ export function ProductionSection({ location = 'Utah' }: { location?: string }) 
 
   return (
     <section className="space-y-4">
-      <div className="flex items-baseline gap-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Production
-        </h2>
-        <span className="text-xs text-slate-400">order products entering key status per team member</span>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-baseline gap-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Production
+          </h2>
+          <span className="text-xs text-slate-400">order products entering key status per team member</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {syncMsg && <span className="text-xs text-slate-400">{syncMsg}</span>}
+          <button
+            onClick={syncNow}
+            disabled={syncing}
+            className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
       </div>
 
       {/* Date range controls */}
