@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { pfGetAll, pfPost, fmtDate } from '@/lib/pf-api';
+import { pfPost } from '@/lib/pf-api';
+import { supabase } from '@/lib/supabase';
 
 export const maxDuration = 120;
 
+// Preservation and Fulfillment: single tracked status, query by first_seen_at
 const PRES_STATUS = 'bouquetReceived';
 const FULL_STATUS = 'readyToPackage';
+
+// Design: track all three statuses; entered_at is the actual PF API status-change date.
 const DESIGN_TRACK = ['frameCompleted', 'approved', 'disapproved'] as const;
-const ALL_TARGETS = new Set<string>([PRES_STATUS, FULL_STATUS, ...DESIGN_TRACK]);
 
 const PRESERVATION_STATUSES = new Set([
   'bouquetReceived', 'checkedOn', 'progress', 'almostReadyToFrame',
@@ -15,18 +18,6 @@ const PRESERVATION_STATUSES = new Set([
 const DESIGN_STATUSES = new Set([
   'readyToFrame', 'frameCompleted', 'disapproved', 'approved',
 ]);
-
-interface WeeklyReportItem {
-  orderNumber?: string | number;
-  shopifyOrderNumber?: string | number;
-  orderName?: string;
-  status?: string;
-  location?: string;
-  originalOrderDate?: string;
-  orderDateUpdated?: string | null;
-  variantTitle?: string;
-  eventDate?: string;
-}
 
 interface SearchItem {
   assignedToUserFirstName?: string;
@@ -59,10 +50,10 @@ function staffForStatus(item: SearchItem, status: string): string {
 }
 
 export interface OrderDetail {
-  orderNum:  string;
-  variant:   string;
-  enteredAt: string;
-  eventDate: string;
+  orderNum:   string;
+  variant:    string;
+  enteredAt:  string;
+  eventDate:  string;
 }
 
 export interface StaffRow {
@@ -71,13 +62,11 @@ export interface StaffRow {
   orders: OrderDetail[];
 }
 
-type CapturedItem = {
-  orderNum:  string;
-  variant:   string;
-  orderDate: string;
-  eventDate: string;
-  enteredAt: string;
-  status:    string;
+type DeptRow = {
+  orderProductKey: string;
+  orderNum:        string;
+  variant:         string;
+  enteredAt:       string;
 };
 
 export async function GET(req: NextRequest) {
@@ -87,91 +76,95 @@ export async function GET(req: NextRequest) {
   const start    = req.nextUrl.searchParams.get('start');
   const end      = req.nextUrl.searchParams.get('end');
   const location = req.nextUrl.searchParams.get('location') ?? 'Utah';
-  if (!start || !end) return NextResponse.json({ error: 'start and end required' }, { status: 400 });
+  if (!start || !end) {
+    return NextResponse.json({ error: 'start and end required' }, { status: 400 });
+  }
 
-  // Mountain Time bounds for filtering orderDateUpdated
-  const startMs = new Date(`${start}T00:00:00-06:00`).getTime();
-  const endMs   = new Date(`${end}T23:59:59-06:00`).getTime();
+  const startISO = new Date(`${start}T00:00:00-06:00`).toISOString();
+  const endISO   = new Date(`${end}T23:59:59-06:00`).toISOString();
 
   try {
-    // Scan last 4 months of WeeklyReport — same coverage as cron
-    const paths: string[] = [];
-    const today = new Date();
-    for (let m = 0; m < 4; m++) {
-      const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
-      const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
-      paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
+    // Debug mode: show table stats to diagnose empty results
+    if (req.nextUrl.searchParams.get('debug') === '1') {
+      const { data: sample } = await supabase
+        .from('order_status_history')
+        .select('status, location, first_seen_at, entered_at')
+        .in('status', [PRES_STATUS, FULL_STATUS, ...DESIGN_TRACK])
+        .order('first_seen_at', { ascending: false })
+        .limit(5);
+      const { count } = await supabase
+        .from('order_status_history')
+        .select('*', { count: 'exact', head: true });
+      return NextResponse.json({ debug: true, totalRows: count, startISO, endISO, recentSample: sample });
     }
 
-    const allResults = await pfGetAll<WeeklyReportItem[]>(paths);
+    // ── Preservation + Fulfillment ──────────────────────────────────────────
+    const pfQuery = supabase
+      .from('order_status_history')
+      .select('order_product_key, order_num, status, first_seen_at')
+      .in('status', [PRES_STATUS, FULL_STATUS])
+      .gte('first_seen_at', startISO)
+      .lte('first_seen_at', endISO);
 
-    // Debug mode: show raw field values for matching-status items
-    const debugMode = req.nextUrl.searchParams.get('debug') === '1';
-    if (debugMode) {
-      const sample: unknown[] = [];
-      allResults.forEach(items => {
-        if (!items) return;
-        items.forEach(item => {
-          if (ALL_TARGETS.has(item.status ?? '') && sample.length < 10) {
-            sample.push({
-              status: item.status,
-              location: item.location,
-              orderDateUpdated: item.orderDateUpdated,
-              originalOrderDate: item.originalOrderDate,
-              orderNumber: item.orderNumber ?? item.shopifyOrderNumber,
-            });
-          }
-        });
-      });
-      return NextResponse.json({ debug: true, startISO: new Date(`${start}T00:00:00-06:00`).toISOString(), endISO: new Date(`${end}T23:59:59-06:00`).toISOString(), sample });
-    }
+    if (location !== 'All') pfQuery.eq('location', location);
 
-    // byStatus buckets; deduplicate by order_product_key
-    const byStatus = new Map<string, Map<string, CapturedItem>>();
-    for (const s of ALL_TARGETS) byStatus.set(s, new Map());
+    const { data: pfRows, error: pfError } = await pfQuery;
+    if (pfError) return NextResponse.json({ error: pfError.message }, { status: 500 });
 
-    allResults.forEach(items => {
-      if (!items) return;
-      items.forEach(item => {
-        if (!item.status || !ALL_TARGETS.has(item.status)) return;
-        if (location !== 'All' && item.location !== location) return;
-        if (!item.orderDateUpdated) return;
+    // ── Design ──────────────────────────────────────────────────────────────
+    const dQuery = supabase
+      .from('order_status_history')
+      .select('order_product_key, order_num, status, first_seen_at, entered_at')
+      .in('status', [...DESIGN_TRACK])
+      .gte('first_seen_at', startISO)
+      .lte('first_seen_at', endISO);
 
-        const itemMs = new Date(item.orderDateUpdated).getTime();
-        if (itemMs < startMs || itemMs > endMs) return;
+    if (location !== 'All') dQuery.eq('location', location);
 
-        const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
-        if (!num) return;
-        const key = `${num}|${item.variantTitle ?? ''}`;
-        const bucket = byStatus.get(item.status)!;
-        if (!bucket.has(key)) {
-          bucket.set(key, {
-            orderNum:  num,
-            variant:   item.variantTitle ?? '',
-            orderDate: item.originalOrderDate?.split('T')[0] ?? '',
-            eventDate: item.eventDate?.split('T')[0] ?? '',
-            enteredAt: item.orderDateUpdated.split('T')[0],
-            status:    item.status,
-          });
-        }
+    const { data: dRows, error: dError } = await dQuery;
+    if (dError) return NextResponse.json({ error: dError.message }, { status: 500 });
+
+    const empty = { Preservation: [], Design: [], Fulfillment: [] };
+    if (!pfRows?.length && !dRows?.length) return NextResponse.json(empty);
+
+    // ── Build byStatus ──────────────────────────────────────────────────────
+    const byStatus: Record<string, DeptRow[]> = {
+      [PRES_STATUS]: [],
+      frameCompleted: [],
+      [FULL_STATUS]:  [],
+    };
+
+    pfRows?.forEach(r => {
+      if (!byStatus[r.status]) return;
+      const variant = r.order_product_key.split('|').slice(1).join('|');
+      byStatus[r.status].push({
+        orderProductKey: r.order_product_key,
+        orderNum:  r.order_num,
+        variant,
+        enteredAt: (r.first_seen_at ?? '').split('T')[0],
       });
     });
 
-    // Deduplicate design rows: prefer frameCompleted > approved/disapproved
-    const designMap = new Map<string, CapturedItem>();
-    for (const s of DESIGN_TRACK) {
-      byStatus.get(s)?.forEach((item, key) => {
-        const existing = designMap.get(key);
-        if (!existing || s === 'frameCompleted') designMap.set(key, item);
+    // Dedupe design rows per order_product_key — prefer frameCompleted
+    const designBest: Record<string, { order_product_key: string; order_num: string; status: string; entered_at: string | null; first_seen_at: string | null }> = {};
+    dRows?.forEach(r => {
+      const existing = designBest[r.order_product_key];
+      if (!existing || r.status === 'frameCompleted') {
+        designBest[r.order_product_key] = r;
+      }
+    });
+
+    Object.values(designBest).forEach(r => {
+      const variant = r.order_product_key.split('|').slice(1).join('|');
+      byStatus['frameCompleted'].push({
+        orderProductKey: r.order_product_key,
+        orderNum:  r.order_num,
+        variant,
+        enteredAt: (r.entered_at ?? r.first_seen_at ?? '').split('T')[0],
       });
-    }
+    });
 
-    const DEPT_ENTRIES: [string, Map<string, CapturedItem>][] = [
-      ['Preservation', byStatus.get(PRES_STATUS)!],
-      ['Design',       designMap],
-      ['Fulfillment',  byStatus.get(FULL_STATUS)!],
-    ];
-
+    // ── Build results per dept ──────────────────────────────────────────────
     const DEPT_STATUS: Record<string, string> = {
       Preservation: PRES_STATUS,
       Design:       'frameCompleted',
@@ -184,16 +177,16 @@ export async function GET(req: NextRequest) {
       Fulfillment:  [],
     };
 
-    for (const [dept, itemMap] of DEPT_ENTRIES) {
-      if (!itemMap.size) continue;
-      const status    = DEPT_STATUS[dept];
-      const deptItems = [...itemMap.values()];
-      const uniqueNums = [...new Set(deptItems.map(i => i.orderNum))];
-      const infoByNum: Record<string, { staff: string; eventDate: string }> = {};
+    for (const [dept, status] of Object.entries(DEPT_STATUS)) {
+      const deptRows = byStatus[status];
+      if (!deptRows.length) continue;
 
+      const uniqueOrderNums = [...new Set(deptRows.map(r => r.orderNum))];
+      const infoByOrderNum: Record<string, { staff: string; eventDate: string }> = {};
       const BATCH = 50;
-      for (let i = 0; i < uniqueNums.length; i += BATCH) {
-        const batch = uniqueNums.slice(i, i + BATCH);
+
+      for (let i = 0; i < uniqueOrderNums.length; i += BATCH) {
+        const batch = uniqueOrderNums.slice(i, i + BATCH);
         const results = await Promise.all(
           batch.map(num =>
             pfPost<SearchResponse>('/OrderProducts/Search', {
@@ -209,7 +202,7 @@ export async function GET(req: NextRequest) {
                data?.items?.find(i => i.status === 'approved' || i.status === 'disapproved') ??
                data?.items?.[0])
             : (data?.items?.find(i => i.status === status) ?? data?.items?.[0]);
-          infoByNum[batch[j]] = {
+          infoByOrderNum[batch[j]] = {
             staff:     item ? staffForStatus(item, status) : '',
             eventDate: item?.eventDate?.split('T')[0] ?? '',
           };
@@ -217,15 +210,15 @@ export async function GET(req: NextRequest) {
       }
 
       const staffMap: Record<string, OrderDetail[]> = {};
-      deptItems.forEach(({ orderNum, variant, enteredAt, eventDate }) => {
-        const info  = infoByNum[orderNum];
+      deptRows.forEach(({ orderNum, variant, enteredAt }) => {
+        const info  = infoByOrderNum[orderNum];
         const staff = info?.staff || 'Unassigned';
         if (!staffMap[staff]) staffMap[staff] = [];
         staffMap[staff].push({
           orderNum,
           variant,
           enteredAt,
-          eventDate: info?.eventDate || eventDate,
+          eventDate: info?.eventDate ?? '',
         });
       });
 
@@ -233,9 +226,7 @@ export async function GET(req: NextRequest) {
         .map(([staff, orders]) => ({
           staff,
           count:  orders.length,
-          orders: orders.sort((a, b) =>
-            a.orderNum.localeCompare(b.orderNum, undefined, { numeric: true })
-          ),
+          orders: orders.sort((a, b) => a.orderNum.localeCompare(b.orderNum, undefined, { numeric: true })),
         }))
         .sort((a, b) => b.count - a.count);
     }
