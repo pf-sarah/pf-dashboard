@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import type { DesignerFrameData, ResponseTimeResult } from '@/types/dashboard';
+import type { ResponseTimeResult } from '@/types/dashboard';
 
 function fmtDuration(minutes: number): string {
   if (minutes < 60) return `${Math.round(minutes)}m`;
@@ -20,41 +20,37 @@ function speedColor(minutes: number): string {
   return 'text-red-600';
 }
 
-export function ResponseTimeSection({ frameData }: { frameData: DesignerFrameData | null }) {
-  const [result, setResult]   = useState<ResponseTimeResult | null>(null);
+function lastWeekRange(): { start: string; end: string } {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const lastMonday = new Date(today);
+  lastMonday.setDate(today.getDate() - ((dayOfWeek + 6) % 7) - 7);
+  const lastSunday = new Date(lastMonday);
+  lastSunday.setDate(lastMonday.getDate() + 6);
+  return {
+    start: lastMonday.toISOString().split('T')[0],
+    end:   lastSunday.toISOString().split('T')[0],
+  };
+}
+
+export function ResponseTimeSection({ location = 'Utah' }: { location?: string }) {
+  const defaultRange = lastWeekRange();
+  const [start,   setStart]   = useState(defaultRange.start);
+  const [end,     setEnd]     = useState(defaultRange.end);
+  const [result,  setResult]  = useState<ResponseTimeResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
+  const [error,   setError]   = useState('');
 
   async function calculate() {
-    if (!frameData) return;
     setLoading(true);
     setError('');
     setResult(null);
-
-    // Build order list: [{orderUuid, orderNum, designerName}]
-    const orders: Array<{ orderUuid: string; orderNum: string; designerName: string }> = [];
-    for (const designer of frameData.designers) {
-      const allOrderNums = [
-        ...designer.ordersByWeek.flat(),
-        ...designer.otherOrders,
-      ];
-      for (const num of allOrderNums) {
-        const uuid = frameData.orderUuidMap?.[num];
-        if (uuid) orders.push({ orderUuid: uuid, orderNum: num, designerName: designer.name });
-      }
-    }
-
-    if (!orders.length) {
-      setError('No orders with conversation data found.');
-      setLoading(false);
-      return;
-    }
 
     try {
       const res = await fetch('/api/response-times', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orders }),
+        body: JSON.stringify({ start, end, location }),
       });
       const data = await res.json() as ResponseTimeResult & { error?: string };
       if (data.error) { setError(data.error); return; }
@@ -82,24 +78,41 @@ export function ResponseTimeSection({ frameData }: { frameData: DesignerFrameDat
           <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="text-sm font-semibold text-slate-700">
               Client Message → First Designer Reply
-              <span className="ml-2 font-normal text-slate-400 text-xs">
-                based on orders in current date range
-              </span>
             </CardTitle>
-            <button
-              onClick={calculate}
-              disabled={loading || !frameData}
-              className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Calculating…' : result ? 'Recalculate' : 'Calculate Response Times'}
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs text-slate-500 flex items-center gap-1">
+                From
+                <input
+                  type="date"
+                  value={start}
+                  onChange={e => setStart(e.target.value)}
+                  className="ml-1 border border-slate-200 rounded px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                />
+              </label>
+              <label className="text-xs text-slate-500 flex items-center gap-1">
+                To
+                <input
+                  type="date"
+                  value={end}
+                  onChange={e => setEnd(e.target.value)}
+                  className="ml-1 border border-slate-200 rounded px-2 py-1 text-xs text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                />
+              </label>
+              <button
+                onClick={calculate}
+                disabled={loading}
+                className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Calculating…' : result ? 'Recalculate' : 'Calculate Response Times'}
+              </button>
+            </div>
           </div>
           {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
         </CardHeader>
         <CardContent>
           {!result && !loading && (
             <p className="text-sm text-slate-400 py-6 text-center">
-              Click &ldquo;Calculate Response Times&rdquo; to analyze designer reply speed.
+              Select a date range and click &ldquo;Calculate Response Times&rdquo; to analyze designer reply speed.
             </p>
           )}
           {loading && (
@@ -109,7 +122,6 @@ export function ResponseTimeSection({ frameData }: { frameData: DesignerFrameDat
           )}
           {result && !loading && (
             <>
-              {/* Overall */}
               {result.overall.sampleSize > 0 && (
                 <div className="mb-4 p-3 bg-slate-50 rounded-lg flex items-center gap-4">
                   <div>
@@ -123,8 +135,6 @@ export function ResponseTimeSection({ frameData }: { frameData: DesignerFrameDat
                   </p>
                 </div>
               )}
-
-              {/* Per designer */}
               {designerRows.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-4">
                   No response data found. The API account may need Admin or Manager access to read conversations.

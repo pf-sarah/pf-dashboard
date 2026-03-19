@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { pfGetAll, pfPost, fmtDate } from '@/lib/pf-api';
+import { supabase } from '@/lib/supabase';
 
 export const maxDuration = 120;
 
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
     const paths: string[] = [];
     const today = new Date();
 
-    for (let m = 0; m < 30; m++) {
+    for (let m = 0; m < 48; m++) {
       const y  = today.getFullYear();
       const mo = today.getMonth() - m;
       const firstOfMonth = new Date(y, mo, 1);
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch all months in parallel batches of 8
     const seen   = new Set<string>();
-    const orders: { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; days: number; daysLabel: string }[] = [];
+    const orders: { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string }[] = [];
 
     for (let i = 0; i < paths.length; i += 8) {
       const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 8));
@@ -92,7 +93,7 @@ export async function GET(req: NextRequest) {
         if (!items) return;
         items.forEach(item => {
           if (item.status !== status) return;
-          if (item.location !== location) return;
+          if (location !== 'All' && item.location !== location) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
           if (!num) return;
           const id = `${num}|${item.variantTitle ?? ''}`;
@@ -113,6 +114,7 @@ export async function GET(req: NextRequest) {
             orderDate: item.originalOrderDate?.split('T')[0] ?? '',
             eventDate: item.eventDate?.split('T')[0] ?? '',
             staff:     '',
+            enteredAt: '',
             days,
             daysLabel,
           });
@@ -151,6 +153,20 @@ export async function GET(req: NextRequest) {
         if (!item) return;
         batch[j].staff = staffForStatus(item, status);
       });
+    }
+
+    // Look up entered_at dates from Supabase status history
+    const keys = orders.map(o => o.id);
+    const { data: historyRows } = await supabase
+      .from('order_status_history')
+      .select('order_product_key, entered_at')
+      .eq('status', status)
+      .in('order_product_key', keys);
+
+    if (historyRows?.length) {
+      const enteredMap: Record<string, string> = {};
+      historyRows.forEach(r => { enteredMap[r.order_product_key] = r.entered_at?.split('T')[0] ?? ''; });
+      orders.forEach(o => { o.enteredAt = enteredMap[o.id] ?? ''; });
     }
 
     return NextResponse.json({ orders, total: orders.length });

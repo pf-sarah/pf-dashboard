@@ -20,11 +20,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Fetch last 6 months of weekly reports to cover all active orders
+  // Fetch last 3 months of weekly reports (excludes stale old orders)
   const paths: string[] = [];
   const today = new Date();
 
-  for (let m = 0; m < 6; m++) {
+  for (let m = 0; m < 4; m++) {
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
     const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
     paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     results.forEach(items => {
       if (!items) return;
       items.forEach(item => {
-        if (item.location !== 'Utah') return;
+        if (!item.location) return;
         if (!item.status) return;
         const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
         if (!num) return;
@@ -57,8 +57,8 @@ export async function GET(req: NextRequest) {
           order_num: num,
           variant_title: item.variantTitle ?? null,
           status: item.status,
-          location: 'Utah',
-          entered_at: item.orderDateUpdated ?? item.originalOrderDate ?? null,
+          location: item.location ?? '',
+          entered_at: item.orderDateUpdated ?? null,
         });
       });
     });
@@ -69,10 +69,9 @@ export async function GET(req: NextRequest) {
   }
 
   // Insert only — skip if (order_product_key, status) already exists
-  const { error, count } = await supabase
+  const { error } = await supabase
     .from('order_status_history')
-    .upsert(records, { onConflict: 'order_product_key,status', ignoreDuplicates: true })
-    .select('id', { count: 'exact', head: true });
+    .upsert(records, { onConflict: 'order_product_key,status', ignoreDuplicates: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -80,7 +79,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     scanned: records.length,
-    inserted: count ?? 0,
     timestamp: new Date().toISOString(),
   });
 }

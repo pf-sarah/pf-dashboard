@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
@@ -17,7 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
   progress:              'In Progress',
   almostReadyToFrame:    'Almost Ready to Frame',
   readyToFrame:          'Ready to Frame',
-  frameCompleted:        'Frame Completed',
+  frameCompleted:        'No Response',
   approved:              'Approved',
   disapproved:           'Disapproved',
   readyToSeal:           'Ready to Seal',
@@ -45,11 +45,11 @@ const DEPT_TEXT: Record<string, string> = {
   Fulfillment:  'text-amber-800',
 };
 
-type SortCol = 'num' | 'name' | 'variant' | 'staff' | 'eventDate' | 'orderDate';
+type SortCol = 'num' | 'name' | 'variant' | 'staff' | 'eventDate' | 'orderDate' | 'enteredAt';
 type SortDir = 'asc' | 'desc';
 
-export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null }) {
-  type OrderRow = { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; days: number; daysLabel: string };
+export function PipelineSection({ pipeline, location }: { pipeline: PipelineCount[] | null; location: string }) {
+  type OrderRow = { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string };
 
   const [expanded, setExpanded]     = useState<string | null>(null);
   const [orders, setOrders]         = useState<Record<string, OrderRow[]>>({});
@@ -58,15 +58,41 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
   const [search, setSearch]         = useState('');
   const [sortCol, setSortCol]       = useState<SortCol>('eventDate');
   const [sortDir, setSortDir]       = useState<SortDir>('asc');
+  const [holdCount, setHoldCount]   = useState<number | null>(null);
+  const [holdOrders, setHoldOrders] = useState<{ name: string; customer: string | null; tags: string }[]>([]);
+  const [holdExpanded, setHoldExpanded] = useState(false);
+
+  // Reset expanded orders when location changes
+  useEffect(() => {
+    setExpanded(null);
+    setOrders({});
+  }, [location]);
+
+  // Fetch Shopify hold count + orders whenever location changes
+  useEffect(() => {
+    setHoldCount(null);
+    setHoldOrders([]);
+    setHoldExpanded(false);
+    fetch(`/api/shopify-hold-count?location=${encodeURIComponent(location)}`)
+      .then(r => r.json())
+      .then((d: { count?: number; orders?: { name: string; customer: string | null; tags: string }[] }) => {
+        setHoldCount(d.count ?? 0);
+        setHoldOrders(d.orders ?? []);
+      })
+      .catch(() => setHoldCount(0));
+  }, [location]);
 
   if (!pipeline) return null;
 
-  const utahCounts: Record<string, number> = {};
+  // Build counts for the selected location (or sum all if 'All')
+  const counts: Record<string, number> = {};
   pipeline.forEach(row => {
-    if (row.location === 'Utah') utahCounts[row.status] = (utahCounts[row.status] ?? 0) + row.count;
+    if (location === 'All' || row.location === location) {
+      counts[row.status] = (counts[row.status] ?? 0) + row.count;
+    }
   });
 
-  const inQueue = utahCounts['orderReceived'] ?? 0;
+  const inQueue = counts['orderReceived'] ?? 0;
 
   function handleSort(col: SortCol) {
     if (sortCol === col) {
@@ -89,11 +115,11 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
     setSortDir('asc');
     setFetchError(null);
 
-    if (orders[status]) return; // already loaded
+    if (orders[status]) return;
 
     setLoading(status);
     try {
-      const res  = await fetch(`/api/pipeline-orders?status=${status}&location=Utah`);
+      const res  = await fetch(`/api/pipeline-orders?status=${status}&location=${encodeURIComponent(location)}`);
       const json = await res.json();
       if (json.error) {
         setFetchError(json.error);
@@ -127,7 +153,7 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
     <section>
       <div className="flex items-baseline gap-4 mb-3">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Pipeline — Utah
+          Pipeline — {location}
         </h2>
         <span className="text-xs text-slate-400">
           {inQueue.toLocaleString()} orders in queue (awaiting bouquet)
@@ -135,16 +161,48 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {Object.entries(DEPT_STATUSES).map(([dept, statuses]) => {
-          const total = statuses.reduce((s, st) => s + (utahCounts[st] ?? 0), 0);
+          const total = statuses.reduce((s, st) => s + (counts[st] ?? 0), 0);
           return (
             <Card key={dept} className={`border ${DEPT_COLORS[dept]}`}>
               <CardHeader className="pb-2">
                 <CardTitle className={`text-base font-semibold ${DEPT_TEXT[dept]}`}>{dept}</CardTitle>
                 <p className="text-2xl font-bold text-slate-900">{total.toLocaleString()}</p>
+                {dept === 'Fulfillment' && holdCount !== null && holdCount > 0 && (
+                  <div className="mt-0.5">
+                    <button
+                      onClick={() => setHoldExpanded(e => !e)}
+                      className="text-xs font-medium text-rose-600 hover:text-rose-800 transition-colors"
+                    >
+                      {holdCount.toLocaleString()} on hold (Shopify) {holdExpanded ? '▲' : '▼'}
+                    </button>
+                    {holdExpanded && (
+                      <div className="mt-1 rounded border border-rose-100 bg-white overflow-auto max-h-48">
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="bg-rose-50 border-b border-rose-100 text-left">
+                              <th className="px-3 py-1.5 font-medium text-rose-700 whitespace-nowrap">Order</th>
+                              <th className="px-3 py-1.5 font-medium text-rose-700 whitespace-nowrap">Customer</th>
+                              <th className="px-3 py-1.5 font-medium text-rose-700 whitespace-nowrap">Tags</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {holdOrders.map(o => (
+                              <tr key={o.name} className="border-b border-rose-50 last:border-0 hover:bg-rose-50">
+                                <td className="px-3 py-1.5 font-mono text-rose-700 whitespace-nowrap">{o.name}</td>
+                                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{o.customer || '—'}</td>
+                                <td className="px-3 py-1.5 text-slate-400">{o.tags}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="space-y-1">
                 {statuses.map(st => {
-                  const count = utahCounts[st] ?? 0;
+                  const count = counts[st] ?? 0;
                   const isExpanded = expanded === st;
                   const isLoading  = loading === st;
                   const rawRows    = orders[st] ?? [];
@@ -160,8 +218,8 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
                     : rawRows;
 
                   const sorted = [...filtered].sort((a, b) => {
-                    let va = a[sortCol] ?? '';
-                    let vb = b[sortCol] ?? '';
+                    const va = a[sortCol] ?? '';
+                    const vb = b[sortCol] ?? '';
                     if (sortCol === 'num') {
                       const diff = Number(va) - Number(vb);
                       return sortDir === 'asc' ? diff : -diff;
@@ -193,7 +251,7 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
                           ) : fetchError ? (
                             <p className="p-3 text-red-500">{fetchError}</p>
                           ) : rawRows.length === 0 ? (
-                            <p className="p-3 italic text-slate-400">No orders found in last 30 months</p>
+                            <p className="p-3 italic text-slate-400">No orders found in last 48 months</p>
                           ) : (
                             <>
                               <div className="px-3 pt-2 pb-1 border-b border-slate-100 flex items-center gap-2">
@@ -218,6 +276,7 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
                                       <ThBtn col="name"      label="Customer" />
                                       <ThBtn col="variant"   label="Frame" />
                                       <ThBtn col="staff"     label="Staff" />
+                                      <ThBtn col="enteredAt" label="In Status Since" />
                                       <ThBtn col="eventDate" label="Event Date" />
                                       <ThBtn col="orderDate" label="Ordered" />
                                     </tr>
@@ -225,7 +284,7 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
                                   <tbody>
                                     {sorted.length === 0 ? (
                                       <tr>
-                                        <td colSpan={6} className="px-3 py-3 text-center text-slate-400 italic">No results</td>
+                                        <td colSpan={7} className="px-3 py-3 text-center text-slate-400 italic">No results</td>
                                       </tr>
                                     ) : sorted.map(o => (
                                       <tr key={o.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
@@ -233,6 +292,7 @@ export function PipelineSection({ pipeline }: { pipeline: PipelineCount[] | null
                                         <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">{o.name}</td>
                                         <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.variant}</td>
                                         <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{o.staff || <span className="text-slate-300 italic">unassigned</span>}</td>
+                                        <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.enteredAt || '—'}</td>
                                         <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.eventDate || '—'}</td>
                                         <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.orderDate}</td>
                                       </tr>
