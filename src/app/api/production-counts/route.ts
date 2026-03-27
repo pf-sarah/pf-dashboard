@@ -89,19 +89,34 @@ export async function GET(req: NextRequest) {
 
   const startISO = new Date(`${start}T00:00:00-06:00`).toISOString();
   const endISO   = new Date(`${end}T23:59:59-06:00`).toISOString();
+  const today    = new Date();
 
   try {
     if (req.nextUrl.searchParams.get('debug') === '1') {
-      const { data: sample } = await supabase
-        .from('order_status_history')
-        .select('status, location, first_seen_at, entered_at')
-        .in('status', [PRES_STATUS, FULL_STATUS])
-        .order('first_seen_at', { ascending: false })
-        .limit(10);
-      const { count } = await supabase
-        .from('order_status_history')
-        .select('*', { count: 'exact', head: true });
-      return NextResponse.json({ debug: true, totalRows: count, startISO, endISO, recentSample: sample });
+      // Scan just this month and last month from PF API, show raw design results
+      const debugPaths = [0, 1].map(m => {
+        const y = today.getFullYear();
+        const mo = today.getMonth() - m;
+        const first = new Date(y, mo, 1);
+        const last  = m === 0 ? today : new Date(y, mo + 1, 0);
+        return `/OrderProducts/WeeklyReport?startDate=${fmtDate(first)}&endDate=${fmtDate(last)}`;
+      });
+      const debugResults = await pfGetAll<WeeklyReportItem[]>(debugPaths);
+      const designHits: unknown[] = [];
+      debugResults.forEach(items => {
+        if (!items) return;
+        items.forEach(item => {
+          if (!item.status || !DESIGN_PF_STATUSES.has(item.status)) return;
+          designHits.push({
+            orderNumber: item.orderNumber,
+            status: item.status,
+            location: item.location,
+            orderDateUpdated: item.orderDateUpdated,
+            variantTitle: item.variantTitle,
+          });
+        });
+      });
+      return NextResponse.json({ start, end, location, designHitsCount: designHits.length, designHits: designHits.slice(0, 20) });
     }
 
     // ── Preservation + Fulfillment via Supabase ──────────────────────────────
@@ -136,7 +151,6 @@ export async function GET(req: NextRequest) {
     // This catches orders that transitioned through frameCompleted so fast the daily
     // snapshot missed them (e.g., framed and approved the same day).
     const paths: string[] = [];
-    const today = new Date();
     for (let m = 0; m < 18; m++) {
       const y  = today.getFullYear();
       const mo = today.getMonth() - m;
