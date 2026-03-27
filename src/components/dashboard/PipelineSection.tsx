@@ -48,6 +48,16 @@ const DEPT_TEXT: Record<string, string> = {
 type SortCol = 'num' | 'name' | 'variant' | 'staff' | 'eventDate' | 'orderDate' | 'enteredAt';
 type SortDir = 'asc' | 'desc';
 
+type ShopifyFlagRow = {
+  num: string;
+  name: string;
+  variant: string;
+  pfStatus: string;
+  location: string;
+  eventDate: string;
+  flags: string[];
+};
+
 export function PipelineSection({ pipeline, location }: { pipeline: PipelineCount[] | null; location: string }) {
   type OrderRow = { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string };
 
@@ -61,6 +71,9 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
   const [holdCount, setHoldCount]   = useState<number | null>(null);
   const [holdOrders, setHoldOrders] = useState<{ name: string; customer: string | null; tags: string }[]>([]);
   const [holdExpanded, setHoldExpanded] = useState(false);
+  const [shopifyChecking, setShopifyChecking] = useState(false);
+  const [shopifyResults, setShopifyResults]   = useState<{ flagged: ShopifyFlagRow[]; total: number; flaggedCount: number } | null>(null);
+  const [shopifyError, setShopifyError]       = useState<string | null>(null);
 
   // Reset expanded orders when location changes
   useEffect(() => {
@@ -169,23 +182,110 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
     setExporting(false);
   }
 
+  async function handleShopifyCheck() {
+    if (shopifyResults) {
+      setShopifyResults(null);
+      return;
+    }
+    setShopifyChecking(true);
+    setShopifyError(null);
+    try {
+      const res = await fetch('/api/shopify-status-check');
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setShopifyResults(json);
+    } catch (e) {
+      setShopifyError(e instanceof Error ? e.message : 'Check failed');
+    }
+    setShopifyChecking(false);
+  }
+
+  const FLAG_COLORS: Record<string, string> = {
+    Cancelled: 'bg-red-100 text-red-700',
+    Refunded:  'bg-orange-100 text-orange-700',
+    Fulfilled: 'bg-blue-100 text-blue-700',
+  };
+
   return (
     <section>
-      <div className="flex items-baseline gap-4 mb-3">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Pipeline — {location}
         </h2>
         <span className="text-xs text-slate-400">
           {inQueue.toLocaleString()} orders in queue (awaiting bouquet)
         </span>
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="ml-auto text-xs font-medium px-3 py-1 rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          {exporting ? 'Exporting…' : 'Export Ready to Frame + Seal'}
-        </button>
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={handleShopifyCheck}
+            disabled={shopifyChecking}
+            className="text-xs font-medium px-3 py-1 rounded border border-violet-300 bg-white text-violet-600 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {shopifyChecking ? 'Checking Shopify…' : shopifyResults ? 'Hide Shopify Check' : 'Check Shopify Status'}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="text-xs font-medium px-3 py-1 rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {exporting ? 'Exporting…' : 'Export Ready to Frame + Seal'}
+          </button>
+        </div>
       </div>
+
+      {shopifyError && (
+        <p className="mb-3 text-sm text-red-500">{shopifyError}</p>
+      )}
+
+      {shopifyResults && (
+        <div className="mb-4 rounded border border-violet-200 bg-violet-50">
+          <div className="px-4 py-2 border-b border-violet-200 flex items-center gap-3">
+            <span className="text-sm font-semibold text-violet-800">Shopify Status Check</span>
+            <span className="text-xs text-violet-500">
+              {shopifyResults.flaggedCount} of {shopifyResults.total} Ready to Frame/Seal orders have a mismatch in Shopify
+            </span>
+          </div>
+          {shopifyResults.flaggedCount === 0 ? (
+            <p className="px-4 py-3 text-sm text-violet-600 italic">No mismatches found — all orders look clean.</p>
+          ) : (
+            <div className="overflow-auto max-h-80">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="bg-violet-100 border-b border-violet-200 text-left">
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Order #</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Customer</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Frame</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">PF Status</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Location</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Event Date</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Shopify</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shopifyResults.flagged.map(o => (
+                    <tr key={`${o.num}|${o.variant}`} className="border-b border-violet-100 last:border-0 hover:bg-violet-100/50">
+                      <td className="px-3 py-1.5 font-mono text-violet-700 whitespace-nowrap">#{o.num}</td>
+                      <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">{o.name || '—'}</td>
+                      <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.variant || '—'}</td>
+                      <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{o.pfStatus}</td>
+                      <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.location || '—'}</td>
+                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.eventDate || '—'}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap flex gap-1">
+                        {o.flags.map(f => (
+                          <span key={f} className={`px-1.5 py-0.5 rounded text-xs font-medium ${FLAG_COLORS[f] ?? 'bg-slate-100 text-slate-600'}`}>
+                            {f}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {Object.entries(DEPT_STATUSES).map(([dept, statuses]) => {
           const total = statuses.reduce((s, st) => s + (counts[st] ?? 0), 0);
