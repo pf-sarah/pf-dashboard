@@ -4,10 +4,21 @@ import { pfGetAll, fmtDate } from '@/lib/pf-api';
 
 export const maxDuration = 120;
 
-const EXPORT_STATUSES = new Set(['readyToFrame', 'readyToSeal']);
 const STATUS_LABELS: Record<string, string> = {
-  readyToFrame: 'Ready to Frame',
-  readyToSeal:  'Ready to Seal',
+  orderReceived:        'Order Received',
+  bouquetReceived:      'Bouquet Received',
+  checkedOn:            'Checked On',
+  progress:             'In Progress',
+  almostReadyToFrame:   'Almost Ready to Frame',
+  readyToFrame:         'Ready to Frame',
+  frameCompleted:       'No Response',
+  approved:             'Approved',
+  disapproved:          'Disapproved',
+  readyToSeal:          'Ready to Seal',
+  glued:                'Glued',
+  readyToPackage:       'Ready to Package',
+  readyToFulfill:       'Ready to Fulfill',
+  preparingToBeShipped: 'Preparing to Ship',
 };
 
 interface WeeklyReportItem {
@@ -106,7 +117,7 @@ export async function GET(req: Request) {
       results.forEach(items => {
         if (!items) return;
         items.forEach(item => {
-          if (!item.status || !EXPORT_STATUSES.has(item.status)) return;
+          if (!item.status) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
           if (!num) return;
           const id = `${num}|${item.variantTitle ?? ''}`;
