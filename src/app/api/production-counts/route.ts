@@ -1,20 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { pfPost } from '@/lib/pf-api';
+import { pfPost, pfGetAll, fmtDate } from '@/lib/pf-api';
 import { supabase } from '@/lib/supabase';
 
 export const maxDuration = 120;
 
-const PRES_STATUS   = 'bouquetReceived';
-const DESIGN_STATUS = 'frameCompleted'; // designer moves order OUT of readyToFrame
-const FULL_STATUS   = 'readyToPackage';
+const PRES_STATUS = 'bouquetReceived';
+const FULL_STATUS = 'readyToPackage';
 
-const PRESERVATION_STATUSES = new Set([
-  'bouquetReceived', 'checkedOn', 'progress', 'almostReadyToFrame',
-]);
+// Design: scan PF API directly for these statuses so we catch same-day transitions.
+// frameCompleted = designer sent frame to client (still awaiting response)
+// approved / disapproved = client responded (designer already did their work)
+const DESIGN_PF_STATUSES = new Set(['frameCompleted', 'approved', 'disapproved']);
+
 const DESIGN_STATUSES = new Set([
   'readyToFrame', 'frameCompleted', 'disapproved', 'approved',
 ]);
+
+interface WeeklyReportItem {
+  orderNumber?: string | number;
+  shopifyOrderNumber?: string | number;
+  variantTitle?: string;
+  status?: string;
+  location?: string;
+  orderDateUpdated?: string | null;
+}
 
 interface SearchItem {
   assignedToUserFirstName?: string;
@@ -31,12 +41,12 @@ interface SearchResponse {
   items: SearchItem[];
 }
 
-function staffForStatus(item: SearchItem, status: string): string {
+function staffForStatus(item: SearchItem, isDesign: boolean, isPreservation: boolean): string {
   let fn = '', ln = '';
-  if (PRESERVATION_STATUSES.has(status)) {
+  if (isPreservation) {
     fn = item.preservationUserFirstName ?? '';
     ln = item.preservationUserLastName  ?? '';
-  } else if (DESIGN_STATUSES.has(status)) {
+  } else if (isDesign) {
     fn = item.assignedToUserFirstName ?? '';
     ln = item.assignedToUserLastName  ?? '';
   } else {
@@ -85,7 +95,7 @@ export async function GET(req: NextRequest) {
       const { data: sample } = await supabase
         .from('order_status_history')
         .select('status, location, first_seen_at, entered_at')
-        .in('status', [PRES_STATUS, DESIGN_STATUS, FULL_STATUS])
+        .in('status', [PRES_STATUS, FULL_STATUS])
         .order('first_seen_at', { ascending: false })
         .limit(10);
       const { count } = await supabase
@@ -94,7 +104,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ debug: true, totalRows: count, startISO, endISO, recentSample: sample });
     }
 
-    // ── Preservation + Fulfillment (filter by first_seen_at) ────────────────
+    // ── Preservation + Fulfillment via Supabase ──────────────────────────────
     const pfQuery = supabase
       .from('order_status_history')
       .select('order_product_key, order_num, status, first_seen_at')
@@ -106,49 +116,6 @@ export async function GET(req: NextRequest) {
     const { data: pfRows, error: pfError } = await pfQuery;
     if (pfError) return NextResponse.json({ error: pfError.message }, { status: 500 });
 
-    // ── Design: frameCompleted filtered by entered_at (actual PF status date) ─
-    // Primary: rows where entered_at is in range
-    const dQuery1 = supabase
-      .from('order_status_history')
-      .select('order_product_key, order_num, entered_at, first_seen_at')
-      .eq('status', DESIGN_STATUS)
-      .not('entered_at', 'is', null)
-      .gte('entered_at', startISO)
-      .lte('entered_at', endISO);
-
-    if (location !== 'All') dQuery1.eq('location', location);
-
-    // Fallback: rows where entered_at is null, use first_seen_at
-    const dQuery2 = supabase
-      .from('order_status_history')
-      .select('order_product_key, order_num, entered_at, first_seen_at')
-      .eq('status', DESIGN_STATUS)
-      .is('entered_at', null)
-      .gte('first_seen_at', startISO)
-      .lte('first_seen_at', endISO);
-
-    if (location !== 'All') dQuery2.eq('location', location);
-
-    const [{ data: dRows1, error: dError1 }, { data: dRows2, error: dError2 }] = await Promise.all([dQuery1, dQuery2]);
-    if (dError1) return NextResponse.json({ error: dError1.message }, { status: 500 });
-    if (dError2) return NextResponse.json({ error: dError2.message }, { status: 500 });
-
-    // Merge and dedupe by order_product_key (prefer rows with entered_at)
-    const designSeen = new Set<string>();
-    const designRows: DeptRow[] = [];
-    for (const r of [...(dRows1 ?? []), ...(dRows2 ?? [])]) {
-      if (designSeen.has(r.order_product_key)) continue;
-      designSeen.add(r.order_product_key);
-      const variant = r.order_product_key.split('|').slice(1).join('|');
-      designRows.push({
-        orderProductKey: r.order_product_key,
-        orderNum:  r.order_num,
-        variant,
-        enteredAt: (r.entered_at ?? r.first_seen_at ?? '').split('T')[0],
-      });
-    }
-
-    // ── Preservation + Fulfillment rows ────────────────────────────────────
     const byStatus: Record<string, DeptRow[]> = {
       [PRES_STATUS]: [],
       [FULL_STATUS]: [],
@@ -164,19 +131,62 @@ export async function GET(req: NextRequest) {
       });
     });
 
+    // ── Design via PF API directly ───────────────────────────────────────────
+    // Scan 18 months of WeeklyReport, filter client-side by orderDateUpdated in range.
+    // This catches orders that transitioned through frameCompleted so fast the daily
+    // snapshot missed them (e.g., framed and approved the same day).
+    const paths: string[] = [];
+    const today = new Date();
+    for (let m = 0; m < 18; m++) {
+      const y  = today.getFullYear();
+      const mo = today.getMonth() - m;
+      const firstOfMonth = new Date(y, mo, 1);
+      const lastOfMonth  = m === 0 ? today : new Date(y, mo + 1, 0);
+      paths.push(
+        `/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`
+      );
+    }
+
+    const designSeen = new Set<string>();
+    const designRows: DeptRow[] = [];
+
+    for (let i = 0; i < paths.length; i += 9) {
+      const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 9));
+      results.forEach(items => {
+        if (!items) return;
+        items.forEach(item => {
+          if (!item.status || !DESIGN_PF_STATUSES.has(item.status)) return;
+          if (!item.orderDateUpdated) return;
+          if (location !== 'All' && item.location !== location) return;
+
+          // Filter by orderDateUpdated within the requested date range
+          const updateDate = item.orderDateUpdated.split('T')[0];
+          if (updateDate < start || updateDate > end) return;
+
+          const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
+          if (!num) return;
+          const key = `${num}|${item.variantTitle ?? ''}`;
+          if (designSeen.has(key)) return;
+          designSeen.add(key);
+
+          designRows.push({
+            orderProductKey: key,
+            orderNum:  num,
+            variant:   item.variantTitle ?? '',
+            enteredAt: updateDate,
+          });
+        });
+      });
+    }
+
     const empty = { Preservation: [], Design: [], Fulfillment: [] };
     if (!pfRows?.length && !designRows.length) return NextResponse.json(empty);
 
-    // ── Look up staff + event date per dept ─────────────────────────────────
+    // ── Look up staff + event date per dept via PF Search API ───────────────
     const DEPT_ROWS: Record<string, DeptRow[]> = {
       Preservation: byStatus[PRES_STATUS],
       Design:       designRows,
       Fulfillment:  byStatus[FULL_STATUS],
-    };
-    const DEPT_STATUS_KEY: Record<string, string> = {
-      Preservation: PRES_STATUS,
-      Design:       DESIGN_STATUS,
-      Fulfillment:  FULL_STATUS,
     };
 
     const result: Record<string, StaffRow[]> = {
@@ -187,7 +197,10 @@ export async function GET(req: NextRequest) {
 
     for (const [dept, deptRows] of Object.entries(DEPT_ROWS)) {
       if (!deptRows.length) continue;
-      const status = DEPT_STATUS_KEY[dept];
+
+      const isDesign       = dept === 'Design';
+      const isPreservation = dept === 'Preservation';
+      const statusKey      = dept === 'Preservation' ? PRES_STATUS : FULL_STATUS;
 
       const uniqueOrderNums = [...new Set(deptRows.map(r => r.orderNum))];
       const infoByOrderNum: Record<string, { staff: string; eventDate: string }> = {};
@@ -195,7 +208,7 @@ export async function GET(req: NextRequest) {
 
       for (let i = 0; i < uniqueOrderNums.length; i += BATCH) {
         const batch = uniqueOrderNums.slice(i, i + BATCH);
-        const results = await Promise.all(
+        const searchResults = await Promise.all(
           batch.map(num =>
             pfPost<SearchResponse>('/OrderProducts/Search', {
               searchTerm: num,
@@ -204,13 +217,13 @@ export async function GET(req: NextRequest) {
             }).catch(() => null)
           )
         );
-        results.forEach((data, j) => {
-          // For Design: pick the item matching the target status, then fall back to first item
-          const item = dept === 'Design'
-            ? (data?.items?.find(i => i.status === DESIGN_STATUS) ?? data?.items?.[0])
-            : (data?.items?.find(i => i.status === status) ?? data?.items?.[0]);
+        searchResults.forEach((data, j) => {
+          const item = isDesign
+            // For design: prefer any design-status item, fall back to first
+            ? (data?.items?.find(i => DESIGN_STATUSES.has(i.status ?? '')) ?? data?.items?.[0])
+            : (data?.items?.find(i => i.status === statusKey) ?? data?.items?.[0]);
           infoByOrderNum[batch[j]] = {
-            staff:     item ? staffForStatus(item, status) : '',
+            staff:     item ? staffForStatus(item, isDesign, isPreservation) : '',
             eventDate: item?.eventDate?.split('T')[0] ?? '',
           };
         });
