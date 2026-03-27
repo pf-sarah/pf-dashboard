@@ -149,6 +149,26 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
     );
   }
 
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const res = await fetch('/api/export-orders');
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pf-export-ready-orders-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Export failed — please try again.');
+    }
+    setExporting(false);
+  }
+
   return (
     <section>
       <div className="flex items-baseline gap-4 mb-3">
@@ -158,6 +178,13 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
         <span className="text-xs text-slate-400">
           {inQueue.toLocaleString()} orders in queue (awaiting bouquet)
         </span>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="ml-auto text-xs font-medium px-3 py-1 rounded border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {exporting ? 'Exporting…' : 'Export Ready to Frame + Seal'}
+        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {Object.entries(DEPT_STATUSES).map(([dept, statuses]) => {
