@@ -54,7 +54,7 @@ async function fetchAllShopifyOrders(
   return all;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -62,6 +62,20 @@ export async function GET() {
   const token  = process.env.SHOPIFY_ADMIN_TOKEN?.trim();
   if (!domain || !token) {
     return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
+  }
+
+  // Debug mode: ?debug=28828 — look up one order directly in Shopify
+  const debugOrder = new URL(req.url).searchParams.get('debug');
+  if (debugOrder) {
+    const [byName, byNum] = await Promise.all([
+      fetch(`https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
+        headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
+      }).then(r => r.json()),
+      fetch(`https://${domain}/admin/api/2024-10/orders.json?name=${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
+        headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
+      }).then(r => r.json()),
+    ]);
+    return NextResponse.json({ searchedFor: `#${debugOrder}`, byName, byNum });
   }
 
   try {
