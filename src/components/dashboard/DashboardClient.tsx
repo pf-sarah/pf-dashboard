@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { PipelineSection } from './PipelineSection';
 import { ProductionSection } from './ProductionSection';
 import { ResponseTimeSection } from './ResponseTimeSection';
+import { EventDateSection } from './EventDateSection';
 
 interface PipelineCount {
   status: string;
@@ -41,6 +42,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
       </div>
 
       <PipelineSection pipeline={pipeline} location={location} />
+      <EventDateSection />
       <ProductionSection location={location} />
       <ResponseTimeSection location={location} />
     </div>
