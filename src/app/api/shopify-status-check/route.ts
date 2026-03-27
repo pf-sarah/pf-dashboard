@@ -22,36 +22,25 @@ interface WeeklyReportItem {
 }
 
 interface ShopifyOrder {
-  name: string; // e.g. "#1234"
+  name: string;
   fulfillment_status: string | null;
   financial_status: string;
   cancelled_at: string | null;
 }
 
-async function fetchAllShopifyOrders(
+async function shopifyLookup(
   domain: string,
   token: string,
-  extraParams: string
-): Promise<ShopifyOrder[]> {
-  const all: ShopifyOrder[] = [];
-  let url: string | null =
-    `https://${domain}/admin/api/2024-10/orders.json?${extraParams}&limit=250` +
-    `&fields=id,name,fulfillment_status,financial_status,cancelled_at`;
-
-  while (url) {
-    const response: Response = await fetch(url, {
-      headers: { 'X-Shopify-Access-Token': token },
-      cache: 'no-store',
-    });
-    if (!response.ok) break;
-    const data = (await response.json()) as { orders: ShopifyOrder[] };
-    all.push(...(data.orders ?? []));
-
-    const link: string | null = response.headers.get('link');
-    const next: RegExpMatchArray | null = link?.match(/<([^>]+)>;\s*rel="next"/) ?? null;
-    url = next ? next[1] : null;
-  }
-  return all;
+  orderName: string // e.g. "#28828"
+): Promise<ShopifyOrder | null> {
+  const encoded = encodeURIComponent(orderName);
+  const res = await fetch(
+    `https://${domain}/admin/api/2024-10/orders.json?name=${encoded}&status=any&fields=id,name,fulfillment_status,financial_status,cancelled_at`,
+    { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' }
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as { orders: ShopifyOrder[] };
+  return data.orders?.[0] ?? null;
 }
 
 export async function GET(req: Request) {
@@ -64,7 +53,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
   }
 
-  // Debug mode: ?debug=28828 — look up one order directly in Shopify
+  // Debug mode: ?debug=28828
   const debugOrder = new URL(req.url).searchParams.get('debug');
   if (debugOrder) {
     const safeJson = async (r: Response) => {
@@ -72,15 +61,11 @@ export async function GET(req: Request) {
       try { return { status: r.status, body: JSON.parse(text) }; }
       catch { return { status: r.status, body: text }; }
     };
-    const [byName, byNum] = await Promise.all([
-      fetch(`https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
-        headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
-      }).then(safeJson),
-      fetch(`https://${domain}/admin/api/2024-10/orders.json?name=${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
-        headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
-      }).then(safeJson),
-    ]);
-    return NextResponse.json({ searchedFor: `#${debugOrder}`, domain, byName, byNum });
+    const result = await fetch(
+      `https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`,
+      { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' }
+    ).then(safeJson);
+    return NextResponse.json({ searchedFor: `#${debugOrder}`, domain, result });
   }
 
   try {
@@ -133,37 +118,10 @@ export async function GET(req: Request) {
     }
 
     if (!pfOrders.length) {
-      return NextResponse.json({ flagged: [], total: 0 });
+      return NextResponse.json({ flagged: [], total: 0, flaggedCount: 0 });
     }
 
-    // --- 2. Fetch Shopify fulfilled + refunded + cancelled orders in parallel ---
-    const twoYearsAgo = new Date(today);
-    twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
-    const minDate = fmtDate(twoYearsAgo);
-
-    const [fulfilled, refunded, cancelled] = await Promise.all([
-      fetchAllShopifyOrders(domain, token, `status=any&fulfillment_status=fulfilled&created_at_min=${minDate}`),
-      fetchAllShopifyOrders(domain, token, `status=any&financial_status=refunded&created_at_min=${minDate}`),
-      fetchAllShopifyOrders(domain, token, `status=cancelled&created_at_min=${minDate}`),
-    ]);
-
-    // Build a map: shopify order name → shopify status info
-    const shopifyMap = new Map<string, { fulfillment: string | null; financial: string; cancelled: boolean }>();
-    const addToMap = (orders: ShopifyOrder[]) => {
-      orders.forEach(o => {
-        const existing = shopifyMap.get(o.name);
-        shopifyMap.set(o.name, {
-          fulfillment: o.fulfillment_status ?? existing?.fulfillment ?? null,
-          financial:   o.financial_status   ?? existing?.financial   ?? '',
-          cancelled:   !!o.cancelled_at     || existing?.cancelled   || false,
-        });
-      });
-    };
-    addToMap(fulfilled);
-    addToMap(refunded);
-    addToMap(cancelled);
-
-    // --- 3. Cross-reference ---
+    // --- 2. Look up each PF order in Shopify by name, in batches of 20 ---
     const flagged: {
       num: string;
       name: string;
@@ -171,34 +129,34 @@ export async function GET(req: Request) {
       pfStatus: string;
       location: string;
       eventDate: string;
-      shopifyFulfillment: string | null;
-      shopifyFinancial: string;
-      shopifyCancelled: boolean;
       flags: string[];
     }[] = [];
 
-    for (const o of pfOrders) {
-      const shopify = shopifyMap.get(o.shopifyName);
-      if (!shopify) continue;
+    const BATCH = 20;
+    for (let i = 0; i < pfOrders.length; i += BATCH) {
+      const batch = pfOrders.slice(i, i + BATCH);
+      const shopifyResults = await Promise.all(
+        batch.map(o => shopifyLookup(domain, token, o.shopifyName))
+      );
 
-      const flags: string[] = [];
-      if (shopify.cancelled)                           flags.push('Cancelled');
-      if (shopify.financial === 'refunded')            flags.push('Refunded');
-      if (shopify.fulfillment === 'fulfilled')         flags.push('Fulfilled');
+      shopifyResults.forEach((shopify, j) => {
+        if (!shopify) return;
+        const o = batch[j];
+        const flags: string[] = [];
+        if (shopify.cancelled_at)                        flags.push('Cancelled');
+        if (shopify.financial_status === 'refunded')     flags.push('Refunded');
+        if (shopify.fulfillment_status === 'fulfilled')  flags.push('Fulfilled');
+        if (flags.length === 0) return;
 
-      if (flags.length === 0) continue;
-
-      flagged.push({
-        num:               o.num,
-        name:              o.name,
-        variant:           o.variant,
-        pfStatus:          STATUS_LABELS[o.pfStatus] ?? o.pfStatus,
-        location:          o.location,
-        eventDate:         o.eventDate,
-        shopifyFulfillment: shopify.fulfillment,
-        shopifyFinancial:   shopify.financial,
-        shopifyCancelled:   shopify.cancelled,
-        flags,
+        flagged.push({
+          num:      o.num,
+          name:     o.name,
+          variant:  o.variant,
+          pfStatus: STATUS_LABELS[o.pfStatus] ?? o.pfStatus,
+          location: o.location,
+          eventDate: o.eventDate,
+          flags,
+        });
       });
     }
 
