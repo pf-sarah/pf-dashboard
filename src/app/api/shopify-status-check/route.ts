@@ -164,12 +164,14 @@ export async function GET(req: Request) {
           if (shopify.financial_status === 'refunded')    flags.push('Refunded');
           if (shopify.fulfillment_status === 'fulfilled') flags.push('Fulfilled');
 
-          // Pickup in store + $0 order total
+          // Pickup in store
           const isPickup =
             shopify.shipping_lines.length === 0 ||
             shopify.shipping_lines.some(l => l.title?.toLowerCase().includes('pickup'));
-          const isZero = parseFloat(shopify.total_price ?? '1') === 0;
-          if (isPickup && isZero) flags.push('Pickup + $0');
+          if (isPickup) flags.push('Pickup in Store');
+
+          // $0 order total
+          if (parseFloat(shopify.total_price ?? '1') === 0) flags.push('$0 Order');
         }
 
         if (flags.length === 0) return;
@@ -188,7 +190,7 @@ export async function GET(req: Request) {
     }
 
     // Sort priority: Cancelled → Refunded → Pickup+$0 → Old order → Fulfilled
-    const flagOrder = ['Cancelled', 'Refunded', 'Pickup + $0', 'Order > 12 mo', 'Fulfilled'];
+    const flagOrder = ['Cancelled', 'Refunded', '$0 Order', 'Pickup in Store', 'Order > 12 mo', 'Fulfilled'];
     flagged.sort((a, b) => {
       const ai = Math.min(...a.flags.map(f => flagOrder.indexOf(f)));
       const bi = Math.min(...b.flags.map(f => flagOrder.indexOf(f)));

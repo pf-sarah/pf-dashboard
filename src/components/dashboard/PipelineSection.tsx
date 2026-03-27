@@ -205,7 +205,8 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
     'Cancelled':      'bg-red-100 text-red-700',
     'Refunded':       'bg-orange-100 text-orange-700',
     'Fulfilled':      'bg-blue-100 text-blue-700',
-    'Pickup + $0':    'bg-teal-100 text-teal-700',
+    'Pickup in Store': 'bg-teal-100 text-teal-700',
+    '$0 Order':        'bg-cyan-100 text-cyan-700',
     'Order > 12 mo':  'bg-amber-100 text-amber-700',
   };
 
