@@ -30,18 +30,22 @@ export async function GET(req: NextRequest) {
   // Probe additional endpoints using the UUID to find status history
   const probes: Record<string, unknown> = {};
   if (uuid) {
-    const endpoints = [
-      `/OrderProducts/${uuid}`,
+    // These returned 405 (Method Not Allowed) on GET — try POST
+    const postEndpoints = [
       `/OrderProducts/${uuid}/StatusHistory`,
       `/OrderProducts/${uuid}/History`,
       `/OrderProducts/${uuid}/Audit`,
     ];
-    await Promise.all(endpoints.map(async path => {
-      probes[path] = await pfGet<unknown>(path).catch(e => ({ error: String(e) }));
+    await Promise.all(postEndpoints.map(async path => {
+      probes[`POST ${path}`] = await pfPost<unknown>(path, {}).catch(e => ({ error: String(e) }));
     }));
+    // Also try with orderProductUuid in body
+    probes[`POST /OrderProducts/StatusHistory (body)`] = await pfPost<unknown>('/OrderProducts/StatusHistory', { orderProductUuid: uuid }).catch(e => ({ error: String(e) }));
+    probes[`POST /OrderProducts/History (body)`] = await pfPost<unknown>('/OrderProducts/History', { orderProductUuid: uuid }).catch(e => ({ error: String(e) }));
   }
   if (orderUuid) {
-    probes[`/Orders/${orderUuid}`] = await pfGet<unknown>(`/Orders/${orderUuid}`).catch(e => ({ error: String(e) }));
+    probes[`GET /Orders/${orderUuid}`] = await pfGet<unknown>(`/Orders/${orderUuid}`).catch(e => ({ error: String(e) }));
+    probes[`POST /Orders/${orderUuid}/StatusHistory`] = await pfPost<unknown>(`/Orders/${orderUuid}/StatusHistory`, {}).catch(e => ({ error: String(e) }));
   }
 
   return NextResponse.json({ order: num, pfData, supabaseRows, probes });
