@@ -48,5 +48,17 @@ export async function GET(req: NextRequest) {
     probes[`POST /Orders/${orderUuid}/StatusHistory`] = await pfPost<unknown>(`/Orders/${orderUuid}/StatusHistory`, {}).catch(e => ({ error: String(e) }));
   }
 
-  return NextResponse.json({ order: num, pfData, supabaseRows, probes });
+  // Test: does WeeklyReport filter by status-change date or order date?
+  // If #43515 appears here, WeeklyReport uses status-change date (what we want!)
+  const today = new Date().toISOString().split('T')[0];
+  const weeklyToday = await pfGet<unknown>(
+    `/OrderProducts/WeeklyReport?startDate=${today}&endDate=${today}`
+  ).catch(e => ({ error: String(e) }));
+  const weeklyTodayHits = Array.isArray(weeklyToday)
+    ? weeklyToday.filter((i: { shopifyOrderNumber?: unknown; orderNumber?: unknown }) =>
+        String(i.shopifyOrderNumber ?? i.orderNumber ?? '') === num
+      )
+    : weeklyToday;
+
+  return NextResponse.json({ order: num, pfData, supabaseRows, probes, weeklyToday: weeklyTodayHits });
 }
