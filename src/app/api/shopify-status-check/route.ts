@@ -26,16 +26,19 @@ interface ShopifyOrder {
   fulfillment_status: string | null;
   financial_status: string;
   cancelled_at: string | null;
+  total_price: string;
+  shipping_lines: { title: string }[];
 }
 
 async function shopifyLookup(
   domain: string,
   token: string,
-  orderName: string // e.g. "#28828"
+  orderName: string
 ): Promise<ShopifyOrder | null> {
   const encoded = encodeURIComponent(orderName);
   const res = await fetch(
-    `https://${domain}/admin/api/2024-10/orders.json?name=${encoded}&status=any&fields=id,name,fulfillment_status,financial_status,cancelled_at`,
+    `https://${domain}/admin/api/2024-10/orders.json?name=${encoded}&status=any` +
+    `&fields=id,name,fulfillment_status,financial_status,cancelled_at,total_price,shipping_lines`,
     { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' }
   );
   if (!res.ok) return null;
@@ -62,7 +65,8 @@ export async function GET(req: Request) {
       catch { return { status: r.status, body: text }; }
     };
     const result = await fetch(
-      `https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`,
+      `https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any` +
+      `&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at,total_price,shipping_lines`,
       { headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store' }
     ).then(safeJson);
     return NextResponse.json({ searchedFor: `#${debugOrder}`, domain, result });
@@ -91,7 +95,11 @@ export async function GET(req: Request) {
       pfStatus: string;
       location: string;
       eventDate: string;
+      orderDate: string;
     }[] = [];
+
+    const twelveMonthsAgo = new Date(today);
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
     for (let i = 0; i < paths.length; i += 9) {
       const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 9));
@@ -112,6 +120,7 @@ export async function GET(req: Request) {
             pfStatus:  item.status,
             location:  item.location ?? '',
             eventDate: item.eventDate?.split('T')[0] ?? '',
+            orderDate: item.originalOrderDate?.split('T')[0] ?? '',
           });
         });
       });
@@ -129,6 +138,7 @@ export async function GET(req: Request) {
       pfStatus: string;
       location: string;
       eventDate: string;
+      orderDate: string;
       flags: string[];
     }[] = [];
 
@@ -140,28 +150,45 @@ export async function GET(req: Request) {
       );
 
       shopifyResults.forEach((shopify, j) => {
-        if (!shopify) return;
         const o = batch[j];
         const flags: string[] = [];
-        if (shopify.cancelled_at)                        flags.push('Cancelled');
-        if (shopify.financial_status === 'refunded')     flags.push('Refunded');
-        if (shopify.fulfillment_status === 'fulfilled')  flags.push('Fulfilled');
+
+        // PF-side check: order placed more than 12 months ago
+        if (o.orderDate && new Date(o.orderDate) < twelveMonthsAgo) {
+          flags.push('Order > 12 mo');
+        }
+
+        // Shopify-side checks
+        if (shopify) {
+          if (shopify.cancelled_at)                       flags.push('Cancelled');
+          if (shopify.financial_status === 'refunded')    flags.push('Refunded');
+          if (shopify.fulfillment_status === 'fulfilled') flags.push('Fulfilled');
+
+          // Pickup in store + $0 order total
+          const isPickup =
+            shopify.shipping_lines.length === 0 ||
+            shopify.shipping_lines.some(l => l.title?.toLowerCase().includes('pickup'));
+          const isZero = parseFloat(shopify.total_price ?? '1') === 0;
+          if (isPickup && isZero) flags.push('Pickup + $0');
+        }
+
         if (flags.length === 0) return;
 
         flagged.push({
-          num:      o.num,
-          name:     o.name,
-          variant:  o.variant,
-          pfStatus: STATUS_LABELS[o.pfStatus] ?? o.pfStatus,
-          location: o.location,
+          num:       o.num,
+          name:      o.name,
+          variant:   o.variant,
+          pfStatus:  STATUS_LABELS[o.pfStatus] ?? o.pfStatus,
+          location:  o.location,
           eventDate: o.eventDate,
+          orderDate: o.orderDate,
           flags,
         });
       });
     }
 
-    // Sort: cancelled first, then refunded, then fulfilled
-    const flagOrder = ['Cancelled', 'Refunded', 'Fulfilled'];
+    // Sort priority: Cancelled → Refunded → Pickup+$0 → Old order → Fulfilled
+    const flagOrder = ['Cancelled', 'Refunded', 'Pickup + $0', 'Order > 12 mo', 'Fulfilled'];
     flagged.sort((a, b) => {
       const ai = Math.min(...a.flags.map(f => flagOrder.indexOf(f)));
       const bi = Math.min(...b.flags.map(f => flagOrder.indexOf(f)));

@@ -55,6 +55,7 @@ type ShopifyFlagRow = {
   pfStatus: string;
   location: string;
   eventDate: string;
+  orderDate: string;
   flags: string[];
 };
 
@@ -201,9 +202,11 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
   }
 
   const FLAG_COLORS: Record<string, string> = {
-    Cancelled: 'bg-red-100 text-red-700',
-    Refunded:  'bg-orange-100 text-orange-700',
-    Fulfilled: 'bg-blue-100 text-blue-700',
+    'Cancelled':      'bg-red-100 text-red-700',
+    'Refunded':       'bg-orange-100 text-orange-700',
+    'Fulfilled':      'bg-blue-100 text-blue-700',
+    'Pickup + $0':    'bg-teal-100 text-teal-700',
+    'Order > 12 mo':  'bg-amber-100 text-amber-700',
   };
 
   return (
@@ -257,6 +260,7 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
                     <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Frame</th>
                     <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">PF Status</th>
                     <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Location</th>
+                    <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Order Date</th>
                     <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Event Date</th>
                     <th className="px-3 py-2 font-medium text-violet-700 whitespace-nowrap">Shopify</th>
                   </tr>
@@ -269,6 +273,7 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
                       <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.variant || '—'}</td>
                       <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">{o.pfStatus}</td>
                       <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.location || '—'}</td>
+                      <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.orderDate || '—'}</td>
                       <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.eventDate || '—'}</td>
                       <td className="px-3 py-1.5 whitespace-nowrap flex gap-1">
                         {o.flags.map(f => (
