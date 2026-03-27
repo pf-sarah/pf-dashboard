@@ -15,7 +15,7 @@ export async function runStatusSnapshot(): Promise<{ scanned: number; inserted: 
   const paths: string[] = [];
   const today = new Date();
 
-  for (let m = 0; m < 4; m++) {
+  for (let m = 0; m < 18; m++) {
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
     const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
     paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
