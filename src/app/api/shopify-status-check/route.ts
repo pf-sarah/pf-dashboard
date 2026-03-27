@@ -67,15 +67,20 @@ export async function GET(req: Request) {
   // Debug mode: ?debug=28828 — look up one order directly in Shopify
   const debugOrder = new URL(req.url).searchParams.get('debug');
   if (debugOrder) {
+    const safeJson = async (r: Response) => {
+      const text = await r.text();
+      try { return { status: r.status, body: JSON.parse(text) }; }
+      catch { return { status: r.status, body: text }; }
+    };
     const [byName, byNum] = await Promise.all([
       fetch(`https://${domain}/admin/api/2024-10/orders.json?name=%23${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
         headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
-      }).then(r => r.json()),
+      }).then(safeJson),
       fetch(`https://${domain}/admin/api/2024-10/orders.json?name=${debugOrder}&status=any&fields=id,name,order_number,fulfillment_status,financial_status,cancelled_at`, {
         headers: { 'X-Shopify-Access-Token': token }, cache: 'no-store',
-      }).then(r => r.json()),
+      }).then(safeJson),
     ]);
-    return NextResponse.json({ searchedFor: `#${debugOrder}`, byName, byNum });
+    return NextResponse.json({ searchedFor: `#${debugOrder}`, domain, byName, byNum });
   }
 
   try {
