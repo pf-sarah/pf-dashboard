@@ -35,9 +35,9 @@ const DEPT_TEXT: Record<string, string> = {
 };
 
 const DEPT_SUBTITLE: Record<string, string> = {
-  Preservation: 'Bouquet Received',
-  Design:       'No Response',
-  Fulfillment:  'Ready to Package',
+  Preservation: 'Entered Bouquet Received',
+  Design:       'Moved out of Ready to Frame',
+  Fulfillment:  'Entered Ready to Package',
 };
 
 function todayStr(): string {
