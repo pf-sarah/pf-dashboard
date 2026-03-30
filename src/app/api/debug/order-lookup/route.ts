@@ -48,6 +48,14 @@ export async function GET(req: NextRequest) {
     probes[`POST /Orders/${orderUuid}/StatusHistory`] = await pfPost<unknown>(`/Orders/${orderUuid}/StatusHistory`, {}).catch(e => ({ error: String(e) }));
   }
 
+  // Also find a preservation-status order to debug staff assignment
+  const presDebug = await pfPost<{items: unknown[]}>('/OrderProducts/Search', {
+    searchTerm: '',
+    status: 'bouquetReceived',
+    pageNumber: 1,
+    pageSize: 3,
+  }).catch(() => null);
+
   // Test: does WeeklyReport filter by status-change date or order date?
   // If #43515 appears here, WeeklyReport uses status-change date (what we want!)
   const today = new Date().toISOString().split('T')[0];
@@ -60,5 +68,5 @@ export async function GET(req: NextRequest) {
       )
     : weeklyToday;
 
-  return NextResponse.json({ order: num, pfData, supabaseRows, probes, weeklyToday: weeklyTodayHits });
+  return NextResponse.json({ order: num, pfData, supabaseRows, probes, weeklyToday: weeklyTodayHits, presDebug: presDebug?.items?.slice(0, 3) });
 }
