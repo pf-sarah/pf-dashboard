@@ -13,10 +13,6 @@ const FULL_STATUS = 'readyToPackage';
 // approved / disapproved = client responded (designer work already done)
 const DESIGN_STATUSES_DB = ['frameCompleted', 'approved', 'disapproved'];
 
-// For PF Search API lookup — find the right item per order
-const DESIGN_STATUSES = new Set([
-  'readyToFrame', 'frameCompleted', 'disapproved', 'approved',
-]);
 
 interface SearchItem {
   assignedToUserFirstName?: string;
@@ -98,44 +94,59 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ start, end, location, count: data?.length ?? 0, rows: data, error });
     }
 
-    // ── Query Supabase for all departments ────────────────────────────────────
-    const allStatuses = [PRES_STATUS, FULL_STATUS, ...DESIGN_STATUSES_DB];
-    const q = supabase
+    // ── Preservation + Fulfillment via order_status_history ──────────────────
+    const pfQ = supabase
       .from('order_status_history')
       .select('order_product_key, order_num, status, first_seen_at')
-      .in('status', allStatuses)
+      .in('status', [PRES_STATUS, FULL_STATUS])
       .gte('first_seen_at', startISO)
       .lte('first_seen_at', endISO);
 
-    if (location !== 'All') q.eq('location', location);
-    const { data: rows, error: dbError } = await q;
-    if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
+    if (location !== 'All') pfQ.eq('location', location);
+    const { data: pfRows, error: pfError } = await pfQ;
+    if (pfError) return NextResponse.json({ error: pfError.message }, { status: 500 });
 
     const byStatus: Record<string, DeptRow[]> = {
       [PRES_STATUS]: [],
       [FULL_STATUS]: [],
     };
 
-    // For Design: deduplicate by order_product_key — keep earliest first_seen_at
-    const designByKey: Record<string, DeptRow> = {};
-
-    rows?.forEach(r => {
+    pfRows?.forEach(r => {
       const variant   = r.order_product_key.split('|').slice(1).join('|');
       const enteredAt = (r.first_seen_at ?? '').split('T')[0];
-      const deptRow: DeptRow = {
+      byStatus[r.status]?.push({
         orderProductKey: r.order_product_key,
         orderNum:  r.order_num,
         variant,
         enteredAt,
-      };
+      });
+    });
 
-      if (r.status === PRES_STATUS || r.status === FULL_STATUS) {
-        byStatus[r.status].push(deptRow);
-      } else if (DESIGN_STATUSES_DB.includes(r.status)) {
-        const existing = designByKey[r.order_product_key];
-        if (!existing || enteredAt < existing.enteredAt) {
-          designByKey[r.order_product_key] = deptRow;
-        }
+    // ── Design via design_completions (exact status-change timestamps) ────────
+    const dcQ = supabase
+      .from('design_completions')
+      .select('order_num, order_product_key, variant_title, designer_name, changed_at')
+      .gte('changed_at', startISO)
+      .lte('changed_at', endISO);
+
+    if (location !== 'All') dcQ.eq('location', location);
+    const { data: dcRows, error: dcError } = await dcQ;
+    if (dcError) return NextResponse.json({ error: dcError.message }, { status: 500 });
+
+    // Deduplicate by order_product_key — keep earliest changed_at
+    const designByKey: Record<string, DeptRow & { designerName?: string }> = {};
+    dcRows?.forEach(r => {
+      const key = r.order_product_key ?? r.order_num;
+      const enteredAt = (r.changed_at ?? '').split('T')[0];
+      const existing = designByKey[key];
+      if (!existing || enteredAt < existing.enteredAt) {
+        designByKey[key] = {
+          orderProductKey: key,
+          orderNum:    r.order_num,
+          variant:     r.variant_title ?? '',
+          enteredAt,
+          designerName: r.designer_name ?? undefined,
+        };
       }
     });
 
@@ -148,7 +159,7 @@ export async function GET(req: NextRequest) {
     };
 
     const empty = { Preservation: [], Design: [], Fulfillment: [] };
-    if (!rows?.length) return NextResponse.json(empty);
+    if (!pfRows?.length && !dcRows?.length) return NextResponse.json(empty);
 
     // ── Look up staff + event date per dept via PF Search API ────────────────
     const result: Record<string, StaffRow[]> = {
@@ -163,6 +174,24 @@ export async function GET(req: NextRequest) {
       const isDesign       = dept === 'Design';
       const isPreservation = dept === 'Preservation';
       const statusKey      = dept === 'Preservation' ? PRES_STATUS : FULL_STATUS;
+
+      // Design: designer_name comes directly from design_completions — no Search API needed
+      if (isDesign) {
+        const staffMap: Record<string, OrderDetail[]> = {};
+        (deptRows as (DeptRow & { designerName?: string })[]).forEach(({ orderNum, variant, enteredAt, designerName }) => {
+          const staff = designerName || 'Unassigned';
+          if (!staffMap[staff]) staffMap[staff] = [];
+          staffMap[staff].push({ orderNum, variant, enteredAt, eventDate: '' });
+        });
+        result[dept] = Object.entries(staffMap)
+          .map(([staff, orders]) => ({
+            staff,
+            count:  orders.length,
+            orders: orders.sort((a, b) => a.enteredAt.localeCompare(b.enteredAt)),
+          }))
+          .sort((a, b) => b.count - a.count);
+        continue;
+      }
 
       const uniqueOrderNums = [...new Set(deptRows.map(r => r.orderNum))];
       const infoByOrderNum: Record<string, { staff: string; eventDate: string }> = {};
@@ -180,11 +209,9 @@ export async function GET(req: NextRequest) {
           )
         );
         searchResults.forEach((data, j) => {
-          const item = isDesign
-            ? (data?.items?.find(i => DESIGN_STATUSES.has(i.status ?? '')) ?? data?.items?.[0])
-            : (data?.items?.find(i => i.status === statusKey) ?? data?.items?.[0]);
+          const item = data?.items?.find(i => i.status === statusKey) ?? data?.items?.[0];
           infoByOrderNum[batch[j]] = {
-            staff:     item ? staffForStatus(item, isDesign, isPreservation) : '',
+            staff:     item ? staffForStatus(item, false, isPreservation) : '',
             eventDate: item?.eventDate?.split('T')[0] ?? '',
           };
         });
