@@ -91,7 +91,8 @@ export async function GET(req: NextRequest) {
       .eq('status', status)
       .gte('first_seen_at', startISO)
       .lte('first_seen_at', endISO);
-    if (location !== 'All') q.eq('location', location);
+    // Don't filter by location here — some orders have blank location in snapshot.
+    // Location filtering happens via the PF Details endpoint which has accurate location.
     return q.then(r => [...new Set((r.data ?? []).map(x => x.order_num))]);
   };
 
