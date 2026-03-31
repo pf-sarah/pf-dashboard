@@ -36,7 +36,6 @@ export async function runStatusSnapshot(): Promise<{ scanned: number; inserted: 
     results.forEach(items => {
       if (!items) return;
       items.forEach(item => {
-        if (!item.location) return;
         if (!item.status) return;
         const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
         if (!num) return;

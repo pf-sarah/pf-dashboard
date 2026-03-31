@@ -61,9 +61,6 @@ function historyEntry(details: Details, status: string): DetailsHistoryWithUser 
   return (details.history as DetailsHistoryWithUser[] | undefined)?.find(h => h.status === status) ?? null;
 }
 
-function historyDate(details: Details, status: string): string | null {
-  return historyEntry(details, status)?.dateCreated?.split('T')[0] ?? null;
-}
 
 function historyUser(details: Details, status: string): string {
   const entry = historyEntry(details, status);
@@ -80,10 +77,10 @@ export async function GET(req: NextRequest) {
   const location = req.nextUrl.searchParams.get('location') ?? 'Utah';
   if (!start || !end) return NextResponse.json({ error: 'start and end required' }, { status: 400 });
 
-  // Buffer the Supabase query window by 3 days on each side to account for
-  // first_seen_at being our snapshot time rather than the real status-change time.
-  // We then verify exact dates using the history array from the Details endpoint.
-  const BUFFER_MS = 3 * 24 * 60 * 60 * 1000;
+  // Supabase first_seen_at is when our snapshot ran (UTC), not when the status changed.
+  // We buffer by 7 days on each side so we catch orders regardless of when the snapshot ran.
+  // The exact frameCompleted date is then verified from the PF history array (Mountain Time).
+  const BUFFER_MS = 7 * 24 * 60 * 60 * 1000;
   const startISO = new Date(new Date(`${start}T00:00:00-06:00`).getTime() - BUFFER_MS).toISOString();
   const endISO   = new Date(new Date(`${end}T23:59:59-06:00`).getTime() + BUFFER_MS).toISOString();
 
@@ -103,16 +100,21 @@ export async function GET(req: NextRequest) {
     // orders often move readyToFrame→frameCompleted→approved same day,
     // so the cron never captures frameCompleted. We use the history array
     // to find the real frameCompleted date regardless of current status.
-    const [presNums, designFramed, designApproved, designDisapproved, designNoResponse, fullNums] = await Promise.all([
+    // Cast a wide net for design candidates — an order can move through
+    // frameCompleted → approved → glued → readyToSeal all in one day.
+    // We verify the actual frameCompleted date from PF history for each one.
+    const DESIGN_CANDIDATE_STATUSES = [
+      'frameCompleted', 'approved', 'disapproved', 'noResponse',
+      'glued', 'readyToSeal', 'readyToPackage',
+    ];
+
+    const [presNums, fullNums, ...designBuckets] = await Promise.all([
       queryStatus('bouquetReceived'),
-      queryStatus('frameCompleted'),
-      queryStatus('approved'),
-      queryStatus('disapproved'),
-      queryStatus('noResponse'),
       queryStatus('readyToPackage'),
+      ...DESIGN_CANDIDATE_STATUSES.map(queryStatus),
     ]);
 
-    const designNums = [...new Set([...designFramed, ...designApproved, ...designDisapproved, ...designNoResponse])];
+    const designNums = [...new Set(designBuckets.flat())];
 
     const allNums = [...new Set([...presNums, ...designNums, ...fullNums])];
     if (!allNums.length) {
@@ -160,8 +162,11 @@ export async function GET(req: NextRequest) {
         const details = detailsByNum[num];
         if (!details) return;
 
-        const exactDate = historyDate(details, historyStatus);
-        if (!exactDate || exactDate < start! || exactDate > end!) return;
+        const rawDate = historyEntry(details, historyStatus)?.dateCreated;
+        if (!rawDate) return;
+        // Convert UTC timestamp to Mountain Time date string for comparison
+        const exactDate = new Date(rawDate).toLocaleDateString('en-CA', { timeZone: 'America/Denver' });
+        if (exactDate < start! || exactDate > end!) return;
 
         const staff     = getStaff(details) || 'Unassigned';
         const variant   = details.variantTitle ?? '';
