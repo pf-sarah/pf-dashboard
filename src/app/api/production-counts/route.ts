@@ -1,48 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { pfPost } from '@/lib/pf-api';
+import { pfPost, pfGet } from '@/lib/pf-api';
 import { supabase } from '@/lib/supabase';
 
 export const maxDuration = 120;
 
 const PRES_STATUS = 'bouquetReceived';
 const FULL_STATUS = 'readyToPackage';
-
-// Design: track when designer completes work (moved out of readyToFrame)
-// frameCompleted = designer sent frame to client
-// approved / disapproved = client responded (designer work already done)
 const DESIGN_STATUSES_DB = ['frameCompleted', 'approved', 'disapproved'];
 
-
 interface SearchItem {
-  assignedToUserFirstName?: string;
-  assignedToUserLastName?: string;
-  preservationUserFirstName?: string;
-  preservationUserLastName?: string;
-  fulfillmentUserFirstName?: string;
-  fulfillmentUserLastName?: string;
-  eventDate?: string;
-  status?: string;
+  uuid?: string;
 }
 
 interface SearchResponse {
   items: SearchItem[];
 }
 
-function staffForStatus(item: SearchItem, isDesign: boolean, isPreservation: boolean): string {
-  let fn = '', ln = '';
-  if (isPreservation) {
-    // preservationUserFirstName is always null in PF API — assigned staff is tracked via assignedToUser
-    fn = item.assignedToUserFirstName ?? '';
-    ln = item.assignedToUserLastName  ?? '';
-  } else if (isDesign) {
-    fn = item.assignedToUserFirstName ?? '';
-    ln = item.assignedToUserLastName  ?? '';
-  } else {
-    fn = item.fulfillmentUserFirstName ?? '';
-    ln = item.fulfillmentUserLastName  ?? '';
-  }
-  return `${fn} ${ln}`.trim();
+interface DetailsUpload {
+  uploadType: string;
+  uploadedByUserFirstName?: string;
+  uploadedByUserLastName?: string;
+}
+
+interface DetailsHistory {
+  status: string;
+  dateCreated: string;
+  userFirstName?: string;
+  userLastName?: string;
+}
+
+interface DetailsResponse {
+  assignedToUserFirstName?: string;
+  assignedToUserLastName?: string;
+  fulfillmentUserFirstName?: string;
+  fulfillmentUserLastName?: string;
+  preservationUserFirstName?: string;
+  preservationUserLastName?: string;
+  eventDate?: string;
+  orderProductUploads?: DetailsUpload[];
+  history?: DetailsHistory[];
 }
 
 export interface OrderDetail {
@@ -80,21 +77,6 @@ export async function GET(req: NextRequest) {
   const endISO   = new Date(`${end}T23:59:59-06:00`).toISOString();
 
   try {
-    if (req.nextUrl.searchParams.get('debug') === '1') {
-      // Show raw Supabase design rows for diagnosis
-      const q = supabase
-        .from('order_status_history')
-        .select('order_product_key, order_num, status, location, first_seen_at')
-        .in('status', DESIGN_STATUSES_DB)
-        .gte('first_seen_at', startISO)
-        .lte('first_seen_at', endISO)
-        .order('first_seen_at', { ascending: false })
-        .limit(50);
-      if (location !== 'All') q.eq('location', location);
-      const { data, error } = await q;
-      return NextResponse.json({ start, end, location, count: data?.length ?? 0, rows: data, error });
-    }
-
     // ── Preservation + Fulfillment via order_status_history ──────────────────
     const pfQ = supabase
       .from('order_status_history')
@@ -123,7 +105,7 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // ── Design via design_completions (exact status-change timestamps) ────────
+    // ── Design via design_completions (exact timestamps from webhook) ─────────
     const dcQ = supabase
       .from('design_completions')
       .select('order_num, order_product_key, variant_title, designer_name, changed_at')
@@ -135,7 +117,7 @@ export async function GET(req: NextRequest) {
     if (dcError) return NextResponse.json({ error: dcError.message }, { status: 500 });
 
     // Deduplicate by order_product_key — keep earliest changed_at
-    const designByKey: Record<string, DeptRow & { designerName?: string }> = {};
+    const designByKey: Record<string, DeptRow & { webhookDesigner?: string }> = {};
     dcRows?.forEach(r => {
       const key = r.order_product_key ?? r.order_num;
       const enteredAt = (r.changed_at ?? '').split('T')[0];
@@ -146,23 +128,49 @@ export async function GET(req: NextRequest) {
           orderNum:    r.order_num,
           variant:     r.variant_title ?? '',
           enteredAt,
-          designerName: r.designer_name ?? undefined,
+          webhookDesigner: r.designer_name ?? undefined,
         };
       }
     });
 
+    // If no webhook data yet, fall back to Supabase snapshot for Design
+    if (!dcRows?.length) {
+      const dsQ = supabase
+        .from('order_status_history')
+        .select('order_product_key, order_num, status, first_seen_at')
+        .in('status', DESIGN_STATUSES_DB)
+        .gte('first_seen_at', startISO)
+        .lte('first_seen_at', endISO);
+      if (location !== 'All') dsQ.eq('location', location);
+      const { data: dsRows } = await dsQ;
+      dsRows?.forEach(r => {
+        const key = r.order_product_key;
+        const enteredAt = (r.first_seen_at ?? '').split('T')[0];
+        const existing = designByKey[key];
+        if (!existing || enteredAt < existing.enteredAt) {
+          designByKey[key] = {
+            orderProductKey: key,
+            orderNum: r.order_num,
+            variant: r.order_product_key.split('|').slice(1).join('|'),
+            enteredAt,
+          };
+        }
+      });
+    }
+
     const designRows = Object.values(designByKey);
 
-    const DEPT_ROWS: Record<string, DeptRow[]> = {
+    const DEPT_ROWS: Record<string, (DeptRow & { webhookDesigner?: string })[]> = {
       Preservation: byStatus[PRES_STATUS],
       Design:       designRows,
       Fulfillment:  byStatus[FULL_STATUS],
     };
 
-    const empty = { Preservation: [], Design: [], Fulfillment: [] };
-    if (!pfRows?.length && !dcRows?.length) return NextResponse.json(empty);
+    if (!pfRows?.length && !designRows.length) {
+      return NextResponse.json({ Preservation: [], Design: [], Fulfillment: [] });
+    }
 
-    // ── Look up staff + event date per dept via PF Search API ────────────────
+    // ── Look up staff via Search (UUID) + Details (upload staff) ─────────────
     const result: Record<string, StaffRow[]> = {
       Preservation: [],
       Design:       [],
@@ -174,32 +182,20 @@ export async function GET(req: NextRequest) {
 
       const isDesign       = dept === 'Design';
       const isPreservation = dept === 'Preservation';
-      const statusKey      = dept === 'Preservation' ? PRES_STATUS : FULL_STATUS;
-
-      // Design: designer_name comes directly from design_completions — no Search API needed
-      if (isDesign) {
-        const staffMap: Record<string, OrderDetail[]> = {};
-        (deptRows as (DeptRow & { designerName?: string })[]).forEach(({ orderNum, variant, enteredAt, designerName }) => {
-          const staff = designerName || 'Unassigned';
-          if (!staffMap[staff]) staffMap[staff] = [];
-          staffMap[staff].push({ orderNum, variant, enteredAt, eventDate: '' });
-        });
-        result[dept] = Object.entries(staffMap)
-          .map(([staff, orders]) => ({
-            staff,
-            count:  orders.length,
-            orders: orders.sort((a, b) => a.enteredAt.localeCompare(b.enteredAt)),
-          }))
-          .sort((a, b) => b.count - a.count);
-        continue;
-      }
 
       const uniqueOrderNums = [...new Set(deptRows.map(r => r.orderNum))];
-      const infoByOrderNum: Record<string, { staff: string; eventDate: string }> = {};
-      const BATCH = 50;
+      const infoByOrderNum: Record<string, {
+        staff: string;
+        eventDate: string;
+        enteredAtOverride?: string;
+      }> = {};
+
+      const BATCH = 30;
 
       for (let i = 0; i < uniqueOrderNums.length; i += BATCH) {
         const batch = uniqueOrderNums.slice(i, i + BATCH);
+
+        // Step 1: Search to get UUIDs
         const searchResults = await Promise.all(
           batch.map(num =>
             pfPost<SearchResponse>('/OrderProducts/Search', {
@@ -209,21 +205,74 @@ export async function GET(req: NextRequest) {
             }).catch(() => null)
           )
         );
-        searchResults.forEach((data, j) => {
-          const item = data?.items?.find(i => i.status === statusKey) ?? data?.items?.[0];
-          infoByOrderNum[batch[j]] = {
-            staff:     item ? staffForStatus(item, false, isPreservation) : '',
-            eventDate: item?.eventDate?.split('T')[0] ?? '',
+
+        const uuids = searchResults.map(data => data?.items?.[0]?.uuid ?? null);
+
+        // Step 2: Details for each UUID
+        const detailsResults = await Promise.all(
+          uuids.map(uuid =>
+            uuid
+              ? pfGet<DetailsResponse>(`/OrderProducts/Details/${uuid}`).catch(() => null)
+              : null
+          )
+        );
+
+        // Step 3: Extract staff from uploads + history
+        detailsResults.forEach((details, j) => {
+          const num     = batch[j];
+          const uploads = details?.orderProductUploads ?? [];
+          const history = details?.history ?? [];
+
+          let staff = '';
+          let enteredAtOverride: string | undefined;
+
+          if (isPreservation) {
+            // Primary: staff who uploaded bouquet photo
+            const bouquet = uploads.find(u => u.uploadType === 'bouquet');
+            if (bouquet) {
+              staff = `${bouquet.uploadedByUserFirstName ?? ''} ${bouquet.uploadedByUserLastName ?? ''}`.trim();
+            }
+            // Fallback: preservationUser field, then assignedToUser
+            if (!staff) staff = `${details?.preservationUserFirstName ?? ''} ${details?.preservationUserLastName ?? ''}`.trim();
+            if (!staff) staff = `${details?.assignedToUserFirstName ?? ''} ${details?.assignedToUserLastName ?? ''}`.trim();
+
+          } else if (isDesign) {
+            // Primary: staff who uploaded frame photo
+            const frame = uploads.find(u => u.uploadType === 'frame');
+            if (frame) {
+              staff = `${frame.uploadedByUserFirstName ?? ''} ${frame.uploadedByUserLastName ?? ''}`.trim();
+            }
+            // Fallback: assignedToUser
+            if (!staff) staff = `${details?.assignedToUserFirstName ?? ''} ${details?.assignedToUserLastName ?? ''}`.trim();
+
+            // Use exact frameCompleted date from history as display date
+            const fcEntry = history.find(h => h.status === 'frameCompleted');
+            if (fcEntry?.dateCreated) {
+              enteredAtOverride = fcEntry.dateCreated.split('T')[0];
+            }
+
+          } else {
+            // Fulfillment
+            staff = `${details?.fulfillmentUserFirstName ?? ''} ${details?.fulfillmentUserLastName ?? ''}`.trim();
+            if (!staff) staff = `${details?.assignedToUserFirstName ?? ''} ${details?.assignedToUserLastName ?? ''}`.trim();
+          }
+
+          infoByOrderNum[num] = {
+            staff,
+            eventDate: details?.eventDate?.split('T')[0] ?? '',
+            enteredAtOverride,
           };
         });
       }
 
       const staffMap: Record<string, OrderDetail[]> = {};
-      deptRows.forEach(({ orderNum, variant, enteredAt }) => {
+      deptRows.forEach(({ orderNum, variant, enteredAt, webhookDesigner }) => {
         const info  = infoByOrderNum[orderNum];
-        const staff = info?.staff || 'Unassigned';
+        // For design, webhook designer name takes priority over Details lookup
+        const staff = (isDesign && webhookDesigner) ? webhookDesigner : (info?.staff || 'Unassigned');
+        const displayDate = info?.enteredAtOverride ?? enteredAt;
         if (!staffMap[staff]) staffMap[staff] = [];
-        staffMap[staff].push({ orderNum, variant, enteredAt, eventDate: info?.eventDate ?? '' });
+        staffMap[staff].push({ orderNum, variant, enteredAt: displayDate, eventDate: info?.eventDate ?? '' });
       });
 
       result[dept] = Object.entries(staffMap)
