@@ -99,11 +99,19 @@ export async function GET(req: NextRequest) {
   };
 
   try {
-    const [presNums, designNums, fullNums] = await Promise.all([
+    // For design: also include approved/disapproved as candidates —
+    // orders often move readyToFrame→frameCompleted→approved same day,
+    // so the cron never captures frameCompleted. We use the history array
+    // to find the real frameCompleted date regardless of current status.
+    const [presNums, designFramed, designApproved, designDisapproved, fullNums] = await Promise.all([
       queryStatus('bouquetReceived'),
       queryStatus('frameCompleted'),
+      queryStatus('approved'),
+      queryStatus('disapproved'),
       queryStatus('readyToPackage'),
     ]);
+
+    const designNums = [...new Set([...designFramed, ...designApproved, ...designDisapproved])];
 
     const allNums = [...new Set([...presNums, ...designNums, ...fullNums])];
     if (!allNums.length) {
