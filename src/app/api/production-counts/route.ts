@@ -52,9 +52,23 @@ function uploadStaff(details: Details, type: 'bouquet' | 'frame'): string {
   return `${upload.uploadedByUserFirstName ?? ''} ${upload.uploadedByUserLastName ?? ''}`.trim();
 }
 
+interface DetailsHistoryWithUser extends DetailsHistory {
+  userFirstName?: string;
+  userLastName?: string;
+}
+
+function historyEntry(details: Details, status: string): DetailsHistoryWithUser | null {
+  return (details.history as DetailsHistoryWithUser[] | undefined)?.find(h => h.status === status) ?? null;
+}
+
 function historyDate(details: Details, status: string): string | null {
-  const entry = details.history?.find(h => h.status === status);
-  return entry?.dateCreated?.split('T')[0] ?? null;
+  return historyEntry(details, status)?.dateCreated?.split('T')[0] ?? null;
+}
+
+function historyUser(details: Details, status: string): string {
+  const entry = historyEntry(details, status);
+  if (!entry?.userFirstName) return '';
+  return `${entry.userFirstName} ${entry.userLastName ?? ''}`.trim();
 }
 
 export async function GET(req: NextRequest) {
@@ -170,6 +184,7 @@ export async function GET(req: NextRequest) {
         designNums,
         'frameCompleted',
         d =>
+          historyUser(d, 'frameCompleted') ||
           uploadStaff(d, 'frame') ||
           `${d.assignedToUserFirstName ?? ''} ${d.assignedToUserLastName ?? ''}`.trim(),
       ),
