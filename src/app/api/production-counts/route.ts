@@ -74,7 +74,8 @@ export async function GET(req: NextRequest) {
 
   const start    = req.nextUrl.searchParams.get('start');
   const end      = req.nextUrl.searchParams.get('end');
-  const location = req.nextUrl.searchParams.get('location') ?? 'Utah';
+  // location param reserved for future use
+  void req.nextUrl.searchParams.get('location');
   if (!start || !end) return NextResponse.json({ error: 'start and end required' }, { status: 400 });
 
   // Supabase first_seen_at is when our snapshot ran (UTC), not when the status changed.
