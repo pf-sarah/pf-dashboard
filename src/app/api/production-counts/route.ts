@@ -103,15 +103,16 @@ export async function GET(req: NextRequest) {
     // orders often move readyToFrame→frameCompleted→approved same day,
     // so the cron never captures frameCompleted. We use the history array
     // to find the real frameCompleted date regardless of current status.
-    const [presNums, designFramed, designApproved, designDisapproved, fullNums] = await Promise.all([
+    const [presNums, designFramed, designApproved, designDisapproved, designNoResponse, fullNums] = await Promise.all([
       queryStatus('bouquetReceived'),
       queryStatus('frameCompleted'),
       queryStatus('approved'),
       queryStatus('disapproved'),
+      queryStatus('noResponse'),
       queryStatus('readyToPackage'),
     ]);
 
-    const designNums = [...new Set([...designFramed, ...designApproved, ...designDisapproved])];
+    const designNums = [...new Set([...designFramed, ...designApproved, ...designDisapproved, ...designNoResponse])];
 
     const allNums = [...new Set([...presNums, ...designNums, ...fullNums])];
     if (!allNums.length) {
