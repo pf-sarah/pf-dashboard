@@ -32,8 +32,9 @@ interface SearchResponse {
 function staffForStatus(item: SearchItem, isDesign: boolean, isPreservation: boolean): string {
   let fn = '', ln = '';
   if (isPreservation) {
-    fn = item.preservationUserFirstName ?? '';
-    ln = item.preservationUserLastName  ?? '';
+    // preservationUserFirstName is always null in PF API — assigned staff is tracked via assignedToUser
+    fn = item.assignedToUserFirstName ?? '';
+    ln = item.assignedToUserLastName  ?? '';
   } else if (isDesign) {
     fn = item.assignedToUserFirstName ?? '';
     ln = item.assignedToUserLastName  ?? '';
