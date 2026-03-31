@@ -113,8 +113,7 @@ export async function GET(req: NextRequest) {
       .lte('changed_at', endISO);
 
     if (location !== 'All') dcQ.eq('location', location);
-    const { data: dcRows, error: dcError } = await dcQ;
-    if (dcError) return NextResponse.json({ error: dcError.message }, { status: 500 });
+    const { data: dcRows } = await dcQ;
 
     // Deduplicate by order_product_key — keep earliest changed_at
     const designByKey: Record<string, DeptRow & { webhookDesigner?: string }> = {};
