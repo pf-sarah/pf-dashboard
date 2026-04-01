@@ -12,6 +12,8 @@ interface WeeklyReportItem {
   status?:             string;
   location?:           string;
   uuid?:               string;
+  orderName?:          string;
+  originalOrderDate?:  string;
 }
 
 interface SearchResponse {
@@ -28,6 +30,8 @@ interface Details {
   orderProductUploads?: DetailsUpload[];
   originalOrderDate?:   string | null;
   orderStatus?:         string | null;
+  orderTags?:           string[] | null;
+  tags?:                string | null;
 }
 
 export async function GET() {
@@ -63,8 +67,8 @@ async function runResolve(previewOnly: boolean) {
       paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(first)}&endDate=${fmtDate(last)}`);
     }
 
-    // key → { orderNum, variantTitle, uuid (may be null) }
-    const toResolve = new Map<string, { orderNum: string; variantTitle: string; uuid: string | null }>();
+    // key → { orderNum, variantTitle, uuid (may be null), status, orderDate }
+    const toResolve = new Map<string, { orderNum: string; variantTitle: string; uuid: string | null; status: string; orderDate: string }>();
 
     for (let i = 0; i < paths.length; i += 6) {
       const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 6));
@@ -82,6 +86,8 @@ async function runResolve(previewOnly: boolean) {
               orderNum:     num,
               variantTitle: item.variantTitle ?? '',
               uuid:         item.uuid ?? null,
+              status:       item.status ?? '',
+              orderDate:    item.originalOrderDate?.split('T')[0] ?? '',
             });
           }
         });
@@ -115,7 +121,7 @@ async function runResolve(previewOnly: boolean) {
     }
 
     // ── Step 5: Fetch Details for each order to get bouquet uploader ──────────
-    const allEntries = [...toResolve.entries()].filter(([, v]) => !!v.uuid) as [string, { orderNum: string; variantTitle: string; uuid: string }][];
+    const allEntries = [...toResolve.entries()].filter(([, v]) => !!v.uuid) as [string, { orderNum: string; variantTitle: string; uuid: string; status: string; orderDate: string }][];
     const BATCH = 30;
     const rows: { order_product_key: string; order_num: string; location: string }[] = [];
     const unmatchedNames = new Map<string, number>(); // name → count of orders
@@ -123,6 +129,7 @@ async function runResolve(previewOnly: boolean) {
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
     let oldOrderCount = 0;
+    const unresolvedOrders: { orderNum: string; variantTitle: string; status: string; orderDate: string }[] = [];
 
     for (let i = 0; i < allEntries.length; i += BATCH) {
       const batch = allEntries.slice(i, i + BATCH);
@@ -133,7 +140,14 @@ async function runResolve(previewOnly: boolean) {
       );
       results.forEach((d, j) => {
         if (!d) return;
-        const [key, { orderNum }] = batch[j];
+        const [key, { orderNum, variantTitle, status, orderDate: itemOrderDate }] = batch[j];
+
+        // Check for GA tag → auto-assign Georgia
+        const tagStr = Array.isArray(d.orderTags) ? d.orderTags.join(',') : (d.tags ?? '');
+        if (tagStr.toUpperCase().includes('GA')) {
+          rows.push({ order_product_key: key, order_num: orderNum, location: 'Georgia' });
+          return;
+        }
 
         // Try bouquet uploader first, fall back to frame uploader
         const bouquetUpload = d.orderProductUploads?.find(u => u.uploadType === 'bouquet');
@@ -159,6 +173,7 @@ async function runResolve(previewOnly: boolean) {
             ? (usedFallback ? `[frame] ${uploaderName}` : uploaderName)
             : '(no photo)';
           unmatchedNames.set(label, (unmatchedNames.get(label) ?? 0) + 1);
+          unresolvedOrders.push({ orderNum, variantTitle, status, orderDate: itemOrderDate });
           return;
         }
 
@@ -179,6 +194,7 @@ async function runResolve(previewOnly: boolean) {
         noPhotoResolved,
         oldOrderCount,
         unmatched,
+        unresolvedOrders,
         total: toResolve.size,
       });
     }
@@ -190,6 +206,7 @@ async function runResolve(previewOnly: boolean) {
         noPhotoResolved,
         oldOrderCount,
         unmatched,
+        unresolvedOrders,
         message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location`,
       });
     }
@@ -201,7 +218,7 @@ async function runResolve(previewOnly: boolean) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    return NextResponse.json({ resolved: rows.length, noPhotoResolved, oldOrderCount, total: toResolve.size, unmatched });
+    return NextResponse.json({ resolved: rows.length, noPhotoResolved, oldOrderCount, total: toResolve.size, unmatched, unresolvedOrders });
 
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

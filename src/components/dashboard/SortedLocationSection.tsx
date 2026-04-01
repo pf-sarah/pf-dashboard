@@ -90,6 +90,8 @@ export function SortedLocationSection() {
   const [resolveMsg, setResolveMsg] = useState('');
   const [unmatched,  setUnmatched]  = useState<{ name: string; count: number }[]>([]);
   const [showUnmatched, setShowUnmatched] = useState(false);
+  const [unresolvedOrders, setUnresolvedOrders] = useState<{ orderNum: string; variantTitle: string; status: string; orderDate: string }[]>([]);
+  const [showUnresolvedOrders, setShowUnresolvedOrders] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -111,12 +113,13 @@ export function SortedLocationSection() {
     setResolveMsg('');
     try {
       const res  = await fetch('/api/admin/resolve-locations', { method: 'POST' });
-      const json = await res.json() as { resolved?: number; total?: number; message?: string; error?: string; unmatched?: { name: string; count: number }[] };
+      const json = await res.json() as { resolved?: number; total?: number; message?: string; error?: string; unmatched?: { name: string; count: number }[]; unresolvedOrders?: { orderNum: string; variantTitle: string; status: string; orderDate: string }[] };
       if (json.error) {
         setResolveMsg(`Failed: ${json.error}`);
       } else {
         setResolveMsg(json.message ?? `Resolved ${json.resolved ?? 0} of ${json.total ?? 0} unassigned orders`);
         if (json.unmatched) setUnmatched(json.unmatched);
+        if (json.unresolvedOrders) setUnresolvedOrders(json.unresolvedOrders);
         await load();
       }
     } catch {
@@ -176,6 +179,41 @@ export function SortedLocationSection() {
               <span className="text-slate-400">{u.count} order{u.count !== 1 ? 's' : ''}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {unresolvedOrders.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowUnresolvedOrders(v => !v)}
+            className="text-xs text-slate-500 hover:text-slate-700 transition-colors mb-2"
+          >
+            {unresolvedOrders.length} unresolved order details {showUnresolvedOrders ? '▲' : '▼'}
+          </button>
+          {showUnresolvedOrders && (
+            <div className="rounded border border-slate-200 bg-slate-50 overflow-auto max-h-64">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-100 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Order #</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Variant</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Status</th>
+                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Order Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unresolvedOrders.map((o, i) => (
+                    <tr key={i} className="border-t border-slate-200">
+                      <td className="px-3 py-1.5 text-slate-700">{o.orderNum}</td>
+                      <td className="px-3 py-1.5 text-slate-500">{o.variantTitle}</td>
+                      <td className="px-3 py-1.5 text-slate-500">{o.status}</td>
+                      <td className="px-3 py-1.5 text-slate-400">{o.orderDate}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
