@@ -122,11 +122,15 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Fetch Details for all orders ─────────────────────────────────────────
+    // Deduplicate to unique order numbers for API calls — same call count as before.
+    // But store results under every matching num|variant key so multi-product
+    // orders (e.g. #46507 with 2 frames) each get their own entry counted.
+    const uniqueOrderNums = [...new Set(allNums)];
     const BATCH = 20;
     const detailsByNum: Record<string, Details> = {};
 
-    for (let i = 0; i < allNums.length; i += BATCH) {
-      const batch = allNums.slice(i, i + BATCH);
+    for (let i = 0; i < uniqueOrderNums.length; i += BATCH) {
+      const batch = uniqueOrderNums.slice(i, i + BATCH);
 
       const searches = await Promise.all(
         batch.map(num =>
@@ -137,16 +141,21 @@ export async function GET(req: NextRequest) {
       );
 
       const detailsList = await Promise.all(
-        searches.map(s => {
-          const uuid = s?.items?.[0]?.uuid;
-          return uuid
-            ? pfGet<Details>(`/OrderProducts/Details/${uuid}`).catch(() => null)
-            : null;
-        })
+        searches.map(s =>
+          Promise.all(
+            (s?.items ?? []).map(item =>
+              item.uuid
+                ? pfGet<Details>(`/OrderProducts/Details/${item.uuid}`).catch(() => null)
+                : Promise.resolve(null)
+            )
+          )
+        )
       );
 
       batch.forEach((num, j) => {
-        if (detailsList[j]) detailsByNum[num] = detailsList[j]!;
+        (detailsList[j] ?? []).forEach(d => {
+          if (d) detailsByNum[`${num}|${d.variantTitle ?? ''}`] = d;
+        });
       });
     }
 
@@ -158,8 +167,12 @@ export async function GET(req: NextRequest) {
     ): StaffRow[] {
       const staffMap: Record<string, OrderDetail[]> = {};
 
-      orderNums.forEach(num => {
-        const details = detailsByNum[num];
+      const allKeys = orderNums.flatMap(num =>
+        Object.keys(detailsByNum).filter(k => k === `${num}|` || k.startsWith(`${num}|`))
+      );
+      allKeys.forEach(key => {
+        const num = key.split('|')[0];
+        const details = detailsByNum[key];
         if (!details) return;
 
         const rawDate = historyEntry(details, historyStatus)?.dateCreated;
