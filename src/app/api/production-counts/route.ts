@@ -136,18 +136,17 @@ export async function GET(req: NextRequest) {
         )
       );
 
-      const detailsList = await Promise.all(
-        searches.map(s => {
-          const uuid = s?.items?.[0]?.uuid;
-          return uuid
-            ? pfGet<Details>(`/OrderProducts/Details/${uuid}`).catch(() => null)
-            : null;
+      await Promise.all(
+        searches.map(async (s, j) => {
+          const uuids = (s?.items ?? []).map(i => i.uuid).filter((u): u is string => !!u);
+          const detailsList = await Promise.all(
+            uuids.map(uuid => pfGet<Details>(`/OrderProducts/Details/${uuid}`).catch(() => null))
+          );
+          detailsList.forEach(d => {
+            if (d) detailsByNum[`${batch[j]}|${d.variantTitle ?? ''}`] = d;
+          });
         })
       );
-
-      batch.forEach((num, j) => {
-        if (detailsList[j]) detailsByNum[num] = detailsList[j]!;
-      });
     }
 
     // ── Build staff rows, verified against exact history dates ────────────────
@@ -158,22 +157,23 @@ export async function GET(req: NextRequest) {
     ): StaffRow[] {
       const staffMap: Record<string, OrderDetail[]> = {};
 
-      orderNums.forEach(num => {
-        const details = detailsByNum[num];
+      const allKeys = orderNums.flatMap(num =>
+        Object.keys(detailsByNum).filter(k => k.startsWith(`${num}|`))
+      );
+      allKeys.forEach(key => {
+        const details = detailsByNum[key];
         if (!details) return;
-
         const rawDate = historyEntry(details, historyStatus)?.dateCreated;
         if (!rawDate) return;
         // Convert UTC timestamp to Mountain Time date string for comparison
         const exactDate = new Date(rawDate).toLocaleDateString('en-CA', { timeZone: 'America/Denver' });
         if (exactDate < start! || exactDate > end!) return;
-
+        const orderNum  = key.split('|')[0];
         const staff     = getStaff(details) || 'Unassigned';
         const variant   = details.variantTitle ?? '';
         const eventDate = details.eventDate?.split('T')[0] ?? '';
-
         if (!staffMap[staff]) staffMap[staff] = [];
-        staffMap[staff].push({ orderNum: num, variant, enteredAt: exactDate, eventDate });
+        staffMap[staff].push({ orderNum, variant, enteredAt: exactDate, eventDate });
       });
 
       return Object.entries(staffMap)
