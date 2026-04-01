@@ -26,6 +26,8 @@ interface DetailsUpload {
 
 interface Details {
   orderProductUploads?: DetailsUpload[];
+  originalOrderDate?:   string | null;
+  orderStatus?:         string | null;
 }
 
 export async function GET() {
@@ -117,6 +119,10 @@ async function runResolve(previewOnly: boolean) {
     const BATCH = 30;
     const rows: { order_product_key: string; order_num: string; location: string }[] = [];
     const unmatchedNames = new Map<string, number>(); // name → count of orders
+    let noPhotoResolved = 0;
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
+    let oldOrderCount = 0;
 
     for (let i = 0; i < allEntries.length; i += BATCH) {
       const batch = allEntries.slice(i, i + BATCH);
@@ -129,17 +135,34 @@ async function runResolve(previewOnly: boolean) {
         if (!d) return;
         const [key, { orderNum }] = batch[j];
 
-        const upload = d.orderProductUploads?.find(u => u.uploadType === 'bouquet');
-        const uploaderName = upload
-          ? [upload.uploadedByUserFirstName, upload.uploadedByUserLastName].filter(Boolean).join(' ').trim()
-          : '';
+        // Try bouquet uploader first, fall back to frame uploader
+        const bouquetUpload = d.orderProductUploads?.find(u => u.uploadType === 'bouquet');
+        const frameUpload   = d.orderProductUploads?.find(u => u.uploadType === 'frame');
+
+        let uploaderName = '';
+        let usedFallback = false;
+        if (bouquetUpload) {
+          uploaderName = [bouquetUpload.uploadedByUserFirstName, bouquetUpload.uploadedByUserLastName].filter(Boolean).join(' ').trim();
+        } else if (frameUpload) {
+          uploaderName = [frameUpload.uploadedByUserFirstName, frameUpload.uploadedByUserLastName].filter(Boolean).join(' ').trim();
+          usedFallback = true;
+        }
 
         const location = staffLocationMap[uploaderName] ?? '';
         if (!location) {
-          unmatchedNames.set(uploaderName || '(no bouquet photo)', (unmatchedNames.get(uploaderName || '(no bouquet photo)') ?? 0) + 1);
+          // Track whether this is old (>12 months) for reporting
+          const orderDate = d.originalOrderDate ? new Date(d.originalOrderDate) : null;
+          const isOld = orderDate ? orderDate < twelveMonthsAgo : false;
+          if (isOld) oldOrderCount++;
+
+          const label = uploaderName
+            ? (usedFallback ? `[frame] ${uploaderName}` : uploaderName)
+            : '(no photo)';
+          unmatchedNames.set(label, (unmatchedNames.get(label) ?? 0) + 1);
           return;
         }
 
+        if (usedFallback) noPhotoResolved++;
         rows.push({ order_product_key: key, order_num: orderNum, location });
       });
     }
@@ -153,6 +176,8 @@ async function runResolve(previewOnly: boolean) {
       return NextResponse.json({
         previewOnly: true,
         wouldResolve: rows.length,
+        noPhotoResolved,
+        oldOrderCount,
         unmatched,
         total: toResolve.size,
       });
@@ -162,6 +187,8 @@ async function runResolve(previewOnly: boolean) {
       return NextResponse.json({
         resolved: 0,
         total: toResolve.size,
+        noPhotoResolved,
+        oldOrderCount,
         unmatched,
         message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location`,
       });
@@ -174,7 +201,7 @@ async function runResolve(previewOnly: boolean) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    return NextResponse.json({ resolved: rows.length, total: toResolve.size, unmatched });
+    return NextResponse.json({ resolved: rows.length, noPhotoResolved, oldOrderCount, total: toResolve.size, unmatched });
 
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
