@@ -69,6 +69,13 @@ export async function GET(req: NextRequest) {
   if (!status) return NextResponse.json({ error: 'status required' }, { status: 400 });
 
   try {
+    // Load staff → location map from Supabase (fast single query)
+    const { data: staffRows } = await supabase
+      .from('staff_locations')
+      .select('name, location');
+    const staffLocationMap: Record<string, string> = {};
+    staffRows?.forEach(r => { staffLocationMap[r.name] = r.location; });
+
     // Build monthly date-range paths going back 30 months
     const paths: string[] = [];
     const today = new Date();
@@ -85,7 +92,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch all months in parallel batches of 8
     const seen   = new Set<string>();
-    const orders: { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string }[] = [];
+    const orders: { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string; location: string }[] = [];
 
     for (let i = 0; i < paths.length; i += 8) {
       const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 8));
@@ -93,7 +100,8 @@ export async function GET(req: NextRequest) {
         if (!items) return;
         items.forEach(item => {
           if (item.status !== status) return;
-          if (location !== 'All' && item.location !== location) return;
+          // Allow blank-location orders through — we resolve them via staff_locations after Search
+          if (location !== 'All' && item.location && item.location !== location) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
           if (!num) return;
           const id = `${num}|${item.variantTitle ?? ''}`;
@@ -115,6 +123,7 @@ export async function GET(req: NextRequest) {
             eventDate: item.eventDate?.split('T')[0] ?? '',
             staff:     '',
             enteredAt: '',
+            location:  item.location ?? '',
             days,
             daysLabel,
           });
@@ -152,11 +161,20 @@ export async function GET(req: NextRequest) {
         const item = data?.items?.[0];
         if (!item) return;
         batch[j].staff = staffForStatus(item, status);
+        // If location is blank, infer it from the assigned staff member
+        if (!batch[j].location && batch[j].staff) {
+          batch[j].location = staffLocationMap[batch[j].staff] ?? '';
+        }
       });
     }
 
+    // Filter out orders whose resolved location doesn't match the requested location
+    const filteredOrders = location === 'All'
+      ? orders
+      : orders.filter(o => o.location === location);
+
     // Look up entered_at dates from Supabase status history
-    const keys = orders.map(o => o.id);
+    const keys = filteredOrders.map(o => o.id);
     const { data: historyRows } = await supabase
       .from('order_status_history')
       .select('order_product_key, entered_at')
@@ -166,10 +184,10 @@ export async function GET(req: NextRequest) {
     if (historyRows?.length) {
       const enteredMap: Record<string, string> = {};
       historyRows.forEach(r => { enteredMap[r.order_product_key] = r.entered_at?.split('T')[0] ?? ''; });
-      orders.forEach(o => { o.enteredAt = enteredMap[o.id] ?? ''; });
+      filteredOrders.forEach(o => { o.enteredAt = enteredMap[o.id] ?? ''; });
     }
 
-    return NextResponse.json({ orders, total: orders.length });
+    return NextResponse.json({ orders: filteredOrders, total: filteredOrders.length });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
