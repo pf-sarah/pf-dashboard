@@ -28,9 +28,19 @@ interface Details {
   orderProductUploads?: DetailsUpload[];
 }
 
+export async function GET() {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  return runResolve(true);
+}
+
 export async function POST() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  return runResolve(false);
+}
+
+async function runResolve(previewOnly: boolean) {
 
   try {
     // ── Step 1: Load staff → location map ─────────────────────────────────────
@@ -106,6 +116,7 @@ export async function POST() {
     const allEntries = [...toResolve.entries()].filter(([, v]) => !!v.uuid) as [string, { orderNum: string; variantTitle: string; uuid: string }][];
     const BATCH = 30;
     const rows: { order_product_key: string; order_num: string; location: string }[] = [];
+    const unmatchedNames = new Map<string, number>(); // name → count of orders
 
     for (let i = 0; i < allEntries.length; i += BATCH) {
       const batch = allEntries.slice(i, i + BATCH);
@@ -124,9 +135,26 @@ export async function POST() {
           : '';
 
         const location = staffLocationMap[uploaderName] ?? '';
-        if (!location) return;
+        if (!location) {
+          unmatchedNames.set(uploaderName || '(no bouquet photo)', (unmatchedNames.get(uploaderName || '(no bouquet photo)') ?? 0) + 1);
+          return;
+        }
 
         rows.push({ order_product_key: key, order_num: orderNum, location });
+      });
+    }
+
+    // Build sorted unmatched list for preview/debugging
+    const unmatched = [...unmatchedNames.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+
+    if (previewOnly) {
+      return NextResponse.json({
+        previewOnly: true,
+        wouldResolve: rows.length,
+        unmatched,
+        total: toResolve.size,
       });
     }
 
@@ -134,7 +162,8 @@ export async function POST() {
       return NextResponse.json({
         resolved: 0,
         total: toResolve.size,
-        message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location — bouquet photos may not be uploaded yet`,
+        unmatched,
+        message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location`,
       });
     }
 
@@ -145,7 +174,7 @@ export async function POST() {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    return NextResponse.json({ resolved: rows.length, total: toResolve.size });
+    return NextResponse.json({ resolved: rows.length, total: toResolve.size, unmatched });
 
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
