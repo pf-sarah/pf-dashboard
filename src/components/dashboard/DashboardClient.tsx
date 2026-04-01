@@ -5,6 +5,7 @@ import { PipelineSection } from './PipelineSection';
 import { ProductionSection } from './ProductionSection';
 import { ResponseTimeSection } from './ResponseTimeSection';
 import { EventDateSection } from './EventDateSection';
+import { SortedLocationSection } from './SortedLocationSection';
 
 interface PipelineCount {
   status: string;
@@ -42,6 +43,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
       </div>
 
       <PipelineSection pipeline={pipeline} location={location} />
+      <SortedLocationSection />
       <EventDateSection />
       <ProductionSection location={location} />
       <ResponseTimeSection location={location} />
