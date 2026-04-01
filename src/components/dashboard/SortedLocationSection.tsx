@@ -86,8 +86,10 @@ export function SortedLocationSection() {
   const [data,     setData]     = useState<LocationData | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState('');
-  const [resolving, setResolving] = useState(false);
+  const [resolving,  setResolving]  = useState(false);
   const [resolveMsg, setResolveMsg] = useState('');
+  const [unmatched,  setUnmatched]  = useState<{ name: string; count: number }[]>([]);
+  const [showUnmatched, setShowUnmatched] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -109,11 +111,12 @@ export function SortedLocationSection() {
     setResolveMsg('');
     try {
       const res  = await fetch('/api/admin/resolve-locations', { method: 'POST' });
-      const json = await res.json() as { resolved?: number; total?: number; message?: string; error?: string };
+      const json = await res.json() as { resolved?: number; total?: number; message?: string; error?: string; unmatched?: { name: string; count: number }[] };
       if (json.error) {
         setResolveMsg(`Failed: ${json.error}`);
       } else {
-        setResolveMsg(json.message ?? `Resolved ${json.resolved} of ${json.total} unassigned orders`);
+        setResolveMsg(json.message ?? `Resolved ${json.resolved ?? 0} of ${json.total ?? 0} unassigned orders`);
+        if (json.unmatched) setUnmatched(json.unmatched);
         await load();
       }
     } catch {
@@ -138,9 +141,12 @@ export function SortedLocationSection() {
         <div className="flex items-center gap-3">
           {resolveMsg && <span className="text-xs text-slate-400">{resolveMsg}</span>}
           {data && data.unresolved > 0 && (
-            <span className="text-xs text-amber-600">
-              {data.unresolved.toLocaleString()} orders still unresolved
-            </span>
+            <button
+              onClick={() => setShowUnmatched(v => !v)}
+              className="text-xs text-amber-600 hover:text-amber-800 transition-colors"
+            >
+              {data.unresolved.toLocaleString()} still unresolved {showUnmatched ? '▲' : '▼'}
+            </button>
           )}
           <button
             onClick={() => void resolveNow()}
@@ -160,6 +166,18 @@ export function SortedLocationSection() {
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {showUnmatched && unmatched.length > 0 && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-3 space-y-1">
+          <p className="text-xs font-semibold text-amber-700 mb-2">Unmatched uploaders — add to staff_locations in Supabase to resolve:</p>
+          {unmatched.map(u => (
+            <div key={u.name} className="flex justify-between text-xs">
+              <span className="text-slate-700">{u.name}</span>
+              <span className="text-slate-400">{u.count} order{u.count !== 1 ? 's' : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading && <p className="text-sm text-slate-400 text-center py-6">Loading location data…</p>}
 
