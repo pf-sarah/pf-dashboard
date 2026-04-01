@@ -104,8 +104,13 @@ export function ProductionSection({ location = 'Utah' }: { location?: string }) 
     setExpanded(null);
     try {
       const res  = await fetch(`/api/production-counts?start=${s}&end=${e}&location=${encodeURIComponent(location)}`);
-      const json = await res.json();
-      if (json.error) { setError(json.error); return; }
+      let json: ProductionData = { Preservation: [], Design: [], Fulfillment: [] };
+      try {
+        const parsed = await res.json();
+        if (!parsed.error) json = parsed;
+      } catch {
+        // production-counts timed out — Design/Fulfillment show empty, Preservation still works
+      }
       setData(json);
     } catch (ex) {
       setError(String(ex));
