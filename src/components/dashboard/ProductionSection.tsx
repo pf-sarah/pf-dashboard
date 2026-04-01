@@ -103,15 +103,36 @@ export function ProductionSection({ location = 'Utah' }: { location?: string }) 
     setError('');
     setExpanded(null);
     try {
-      const res  = await fetch(`/api/production-counts?start=${s}&end=${e}&location=${encodeURIComponent(location)}`);
-      let json: ProductionData = { Preservation: [], Design: [], Fulfillment: [] };
+      const [presRes, countsRes] = await Promise.all([
+        fetch(`/api/pipeline-orders?status=bouquetReceived&location=${encodeURIComponent(location)}`),
+        fetch(`/api/production-counts?start=${s}&end=${e}&location=${encodeURIComponent(location)}`),
+      ]);
+
+      // Preservation — filter pipeline orders by enteredAt date range
+      const presJson   = await presRes.json();
+      const presOrders = (presJson.orders ?? []) as {
+        num: string; variant: string; staff: string; enteredAt: string; eventDate: string;
+      }[];
+      const filtered = presOrders.filter(o => o.enteredAt >= s && o.enteredAt <= e);
+      const staffMap: Record<string, StaffRow> = {};
+      filtered.forEach(o => {
+        const staff = o.staff || 'Unassigned';
+        if (!staffMap[staff]) staffMap[staff] = { staff, count: 0, orders: [] };
+        staffMap[staff].count++;
+        staffMap[staff].orders.push({ orderNum: o.num, variant: o.variant, enteredAt: o.enteredAt, eventDate: o.eventDate });
+      });
+      const Preservation = Object.values(staffMap).sort((a, b) => b.count - a.count);
+
+      // Design + Fulfillment — graceful fallback if production-counts times out
+      let countsJson = { Design: [] as StaffRow[], Fulfillment: [] as StaffRow[] };
       try {
-        const parsed = await res.json();
-        if (!parsed.error) json = parsed;
+        const parsed = await countsRes.json();
+        if (!parsed.error) countsJson = parsed;
       } catch {
-        // production-counts timed out — Design/Fulfillment show empty, Preservation still works
+        // production-counts timed out — Design/Fulfillment show empty
       }
-      setData(json);
+
+      setData({ Preservation, Design: countsJson.Design ?? [], Fulfillment: countsJson.Fulfillment ?? [] });
     } catch (ex) {
       setError(String(ex));
     } finally {
