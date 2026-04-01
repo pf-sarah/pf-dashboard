@@ -86,13 +86,13 @@ export async function GET(req: NextRequest) {
   const queryStatus = (status: string) => {
     const q = supabase
       .from('order_status_history')
-      .select('order_num, variant_title')
+      .select('order_num')
       .eq('status', status)
       .gte('first_seen_at', startISO)
       .lte('first_seen_at', endISO);
     // Don't filter by location here — some orders have blank location in snapshot.
     // Location filtering happens via the PF Details endpoint which has accurate location.
-    return q.then(r => [...new Set((r.data ?? []).map(x => `${x.order_num}|${x.variant_title ?? ''}`))]);
+    return q.then(r => [...new Set((r.data ?? []).map(x => x.order_num))]);
   };
 
   try {
@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
       const searches = await Promise.all(
         batch.map(num =>
           pfPost<SearchResponse>('/OrderProducts/Search', {
-            searchTerm: num.split('|')[0], pageNumber: 1, pageSize: 5,
+            searchTerm: num, pageNumber: 1, pageSize: 5,
           }).catch(() => null)
         )
       );
@@ -146,15 +146,7 @@ export async function GET(req: NextRequest) {
       );
 
       batch.forEach((num, j) => {
-        const d = detailsList[j];
-        if (!d) return;
-        // Match by order num AND variant title so multi-product orders each get their own slot
-        const key = `${num.split('|')[0]}|${d.variantTitle ?? ''}`;
-        if (key === num || num.endsWith('|')) {
-          detailsByNum[num] = d;
-        } else {
-          detailsByNum[key] = d;
-        }
+        if (detailsList[j]) detailsByNum[num] = detailsList[j]!;
       });
     }
 
