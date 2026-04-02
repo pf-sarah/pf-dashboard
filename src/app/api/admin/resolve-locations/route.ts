@@ -132,6 +132,7 @@ async function runResolve(previewOnly: boolean) {
     twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
     let oldOrderCount = 0;
     const unresolvedOrders: { orderNum: string; variantTitle: string; status: string; orderDate: string }[] = [];
+    const pendingStaffSearch = new Map<string, { orderNum: string; variantTitle: string; status: string; orderDate: string }>();
 
     for (let i = 0; i < allEntries.length; i += BATCH) {
       const batch = allEntries.slice(i, i + BATCH);
@@ -166,21 +167,51 @@ async function runResolve(previewOnly: boolean) {
 
         const location = staffLocationMap[uploaderName] ?? '';
         if (!location) {
-          // Track whether this is old (>12 months) for reporting
-          const orderDate = d.originalOrderDate ? new Date(d.originalOrderDate) : null;
-          const isOld = orderDate ? orderDate < twelveMonthsAgo : false;
-          if (isOld) oldOrderCount++;
-
-          const label = uploaderName
-            ? (usedFallback ? `[frame] ${uploaderName}` : uploaderName)
-            : '(no photo)';
-          unmatchedNames.set(label, (unmatchedNames.get(label) ?? 0) + 1);
-          unresolvedOrders.push({ orderNum, variantTitle, status, orderDate: itemOrderDate });
+          // Queue for preservation-staff search fallback (Step 5b)
+          pendingStaffSearch.set(key, { orderNum, variantTitle, status, orderDate: itemOrderDate });
           return;
         }
 
         if (usedFallback) noPhotoResolved++;
         rows.push({ order_product_key: key, order_num: orderNum, location });
+      });
+    }
+
+    // ── Step 5b: Fallback — resolve via preservation staff (bouquetReceived assignee) ──
+    interface SearchStaffItem {
+      preservationUserFirstName?: string;
+      preservationUserLastName?:  string;
+    }
+    interface SearchStaffResponse { items?: SearchStaffItem[] }
+
+    const pendingList = [...pendingStaffSearch.entries()];
+    const SEARCH_STAFF_BATCH = 20;
+    for (let i = 0; i < pendingList.length; i += SEARCH_STAFF_BATCH) {
+      const batch = pendingList.slice(i, i + SEARCH_STAFF_BATCH);
+      const results = await Promise.all(
+        batch.map(([, v]) =>
+          pfPost<SearchStaffResponse>('/OrderProducts/Search', {
+            searchTerm: v.orderNum, pageNumber: 1, pageSize: 1,
+          }).catch(() => null)
+        )
+      );
+      results.forEach((res, j) => {
+        const [key, { orderNum, variantTitle, status, orderDate }] = batch[j];
+        const item = res?.items?.[0];
+        const staffName = item
+          ? [item.preservationUserFirstName, item.preservationUserLastName].filter(Boolean).join(' ').trim()
+          : '';
+        const location = staffLocationMap[staffName] ?? '';
+        if (location) {
+          rows.push({ order_product_key: key, order_num: orderNum, location });
+        } else {
+          const orderDateObj = orderDate ? new Date(orderDate) : null;
+          const isOld = orderDateObj ? orderDateObj < twelveMonthsAgo : false;
+          if (isOld) oldOrderCount++;
+          const label = staffName ? `[preservation] ${staffName}` : '(no photo)';
+          unmatchedNames.set(label, (unmatchedNames.get(label) ?? 0) + 1);
+          unresolvedOrders.push({ orderNum, variantTitle, status, orderDate });
+        }
       });
     }
 
