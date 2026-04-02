@@ -152,17 +152,23 @@ async function runResolve(previewOnly: boolean) {
           return;
         }
 
-        // Try bouquet uploader first, fall back to frame uploader
-        const bouquetUpload = d.orderProductUploads?.find(u => u.uploadType === 'bouquet');
-        const frameUpload   = d.orderProductUploads?.find(u => u.uploadType === 'frame');
+        // Try bouquet uploader first, then frame, then any other upload type
+        const UPLOAD_PRIORITY = ['bouquet', 'frame'];
+        const uploads = d.orderProductUploads ?? [];
+        const prioritized = [
+          ...UPLOAD_PRIORITY.map(t => uploads.find(u => u.uploadType === t)),
+          ...uploads.filter(u => !UPLOAD_PRIORITY.includes(u.uploadType)),
+        ].filter(Boolean) as DetailsUpload[];
 
         let uploaderName = '';
         let usedFallback = false;
-        if (bouquetUpload) {
-          uploaderName = [bouquetUpload.uploadedByUserFirstName, bouquetUpload.uploadedByUserLastName].filter(Boolean).join(' ').trim();
-        } else if (frameUpload) {
-          uploaderName = [frameUpload.uploadedByUserFirstName, frameUpload.uploadedByUserLastName].filter(Boolean).join(' ').trim();
-          usedFallback = true;
+        for (const upload of prioritized) {
+          const name = [upload.uploadedByUserFirstName, upload.uploadedByUserLastName].filter(Boolean).join(' ').trim();
+          if (name && staffLocationMap[name]) {
+            uploaderName = name;
+            usedFallback = upload.uploadType !== 'bouquet';
+            break;
+          }
         }
 
         const location = staffLocationMap[uploaderName] ?? '';
