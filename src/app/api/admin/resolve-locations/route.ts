@@ -75,6 +75,8 @@ async function runResolve(previewOnly: boolean) {
       results.forEach(items => {
         if (!items) return;
         items.forEach(item => {
+          // Skip orders that haven't been assigned a location yet (pre-bouquet)
+          if (item.status === 'orderReceived') return;
           // Only unassigned orders (no location or location is blank)
           if (item.location) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
