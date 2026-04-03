@@ -25,67 +25,32 @@ interface SearchResponse {
   items: SearchItem[];
 }
 
-const PRESERVATION_STATUSES = new Set([
-  'bouquetReceived', 'checkedOn', 'progress', 'almostReadyToFrame',
-]);
-const DESIGN_STATUSES = new Set([
-  'readyToFrame', 'frameCompleted', 'disapproved', 'approved', 'noResponse',
-]);
-const FULFILLMENT_STATUSES = new Set([
-  'readyToSeal', 'glued', 'readyToPackage', 'readyToFulfill', 'preparingToBeShipped',
-]);
+const PRESERVATION_STATUSES = new Set(['bouquetReceived','checkedOn','progress','almostReadyToFrame']);
+const DESIGN_STATUSES = new Set(['readyToFrame','frameCompleted','disapproved','approved','noResponse']);
+const FULFILLMENT_STATUSES = new Set(['readyToSeal','glued','readyToPackage','readyToFulfill','preparingToBeShipped']);
 
 function resolveStaff(item: SearchItem, status: string): string | null {
   let first: string | null = null;
   let last:  string | null = null;
-
-  if (PRESERVATION_STATUSES.has(status)) {
-    first = item.preservationUserFirstName ?? null;
-    last  = item.preservationUserLastName  ?? null;
-  } else if (DESIGN_STATUSES.has(status)) {
-    first = item.assignedToUserFirstName ?? null;
-    last  = item.assignedToUserLastName  ?? null;
-  } else if (FULFILLMENT_STATUSES.has(status)) {
-    first = item.fulfillmentUserFirstName ?? null;
-    last  = item.fulfillmentUserLastName  ?? null;
-  }
-
-  const name = [first, last].filter(Boolean).join(' ').trim();
-  return name || null;
+  if (PRESERVATION_STATUSES.has(status)) { first = item.preservationUserFirstName ?? null; last = item.preservationUserLastName ?? null; }
+  else if (DESIGN_STATUSES.has(status))  { first = item.assignedToUserFirstName ?? null;   last = item.assignedToUserLastName ?? null; }
+  else if (FULFILLMENT_STATUSES.has(status)) { first = item.fulfillmentUserFirstName ?? null; last = item.fulfillmentUserLastName ?? null; }
+  return [first, last].filter(Boolean).join(' ').trim() || null;
 }
 
-export async function runStatusSnapshot(): Promise<{
-  scanned:  number;
-  inserted: number;
-  error?:   string;
-}> {
-  // ── Step 1: Scan WeeklyReport (18 months) ──────────────────────────────────
+export async function runStatusSnapshot(): Promise<{ scanned: number; inserted: number; deleted: number; error?: string }> {
   const paths: string[] = [];
   const today = new Date();
   for (let m = 0; m < 18; m++) {
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
-    const lastOfMonth  = m === 0
-      ? today
-      : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
-    paths.push(
-      `/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`
-    );
+    const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
+    paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
   }
 
-  const seen = new Set<string>();
-  const now  = new Date().toISOString();
-
-  const records: {
-    order_product_key: string;
-    order_num:         string;
-    variant_title:     string | null;
-    status:            string;
-    location:          string;
-    entered_at:        string;
-    staff_name:        string | null;
-  }[] = [];
-
-  // num → indices into records (for staff fan-out after Search)
+  const seen     = new Set<string>();
+  const liveKeys = new Set<string>();
+  const now      = new Date().toISOString();
+  const records: { order_product_key: string; order_num: string; variant_title: string | null; status: string; location: string; entered_at: string; staff_name: string | null }[] = [];
   const numToIndices = new Map<string, number[]>();
 
   for (let i = 0; i < paths.length; i += 6) {
@@ -99,81 +64,50 @@ export async function runStatusSnapshot(): Promise<{
         const key = `${num}|${item.variantTitle ?? ''}|${item.status}`;
         if (seen.has(key)) return;
         seen.add(key);
-
+        const opKey = `${num}|${item.variantTitle ?? ''}`;
+        liveKeys.add(`${opKey}|||${item.status}`);
         const idx = records.length;
-        records.push({
-          order_product_key: `${num}|${item.variantTitle ?? ''}`,
-          order_num:         num,
-          variant_title:     item.variantTitle ?? null,
-          status:            item.status,
-          location:          item.location ?? '',
-          // orderDateUpdated is unreliable — use it if present, otherwise now.
-          // Accurate entered_at for production counting comes from the history
-          // array in Details, which we store separately in production_events.
-          entered_at:        item.orderDateUpdated ?? now,
-          staff_name:        null,
-        });
-
+        records.push({ order_product_key: opKey, order_num: num, variant_title: item.variantTitle ?? null, status: item.status, location: item.location ?? '', entered_at: item.orderDateUpdated ?? now, staff_name: null });
         if (!numToIndices.has(num)) numToIndices.set(num, []);
         numToIndices.get(num)!.push(idx);
       });
     });
   }
 
-  if (!records.length) return { scanned: 0, inserted: 0 };
+  if (!records.length) return { scanned: 0, inserted: 0, deleted: 0 };
 
-  // ── Step 2: Batch Search for staff names ───────────────────────────────────
-  // One Search call per unique order number — fans out to all statuses/products.
+  let deleted = 0;
+  try {
+    const { data: existingRows } = await supabase.from('order_status_history').select('id, order_product_key, status');
+    if (existingRows?.length) {
+      const staleIds = existingRows.filter(r => !liveKeys.has(`${r.order_product_key}|||${r.status}`)).map(r => r.id);
+      if (staleIds.length > 0) {
+        const BATCH = 500;
+        for (let i = 0; i < staleIds.length; i += BATCH) {
+          await supabase.from('order_status_history').delete().in('id', staleIds.slice(i, i + BATCH));
+        }
+        deleted = staleIds.length;
+      }
+    }
+  } catch { /* non-fatal */ }
+
   const uniqueNums = [...numToIndices.keys()];
   const SEARCH_BATCH = 50;
-
   for (let i = 0; i < uniqueNums.length; i += SEARCH_BATCH) {
     const batch = uniqueNums.slice(i, i + SEARCH_BATCH);
-    const results = await Promise.all(
-      batch.map(num =>
-        pfPost<SearchResponse>('/OrderProducts/Search', {
-          searchTerm: num,
-          pageNumber: 1,
-          pageSize:   1,
-        }).catch(() => null)
-      )
-    );
-
+    const results = await Promise.all(batch.map(num => pfPost<SearchResponse>('/OrderProducts/Search', { searchTerm: num, pageNumber: 1, pageSize: 1 }).catch(() => null)));
     results.forEach((data, j) => {
       const item = data?.items?.[0];
       if (!item) return;
-      const indices = numToIndices.get(batch[j]) ?? [];
-      indices.forEach(idx => {
-        records[idx].staff_name = resolveStaff(item, records[idx].status);
-      });
+      (numToIndices.get(batch[j]) ?? []).forEach(idx => { records[idx].staff_name = resolveStaff(item, records[idx].status); });
     });
   }
 
-  // ── Step 3: Upsert — update staff_name but preserve existing entered_at ────
-  // We split into two operations:
-  // 1. Insert new rows (ignoreDuplicates: true) — preserves entered_at for existing rows
-  // 2. Update staff_name only on existing rows via a separate update
-  const { error: upsertError } = await supabase
-    .from('order_status_history')
-    .upsert(records, { onConflict: 'order_product_key,status', ignoreDuplicates: true });
+  const { error: upsertError } = await supabase.from('order_status_history').upsert(records, { onConflict: 'order_product_key,status', ignoreDuplicates: true });
+  if (upsertError) return { scanned: records.length, inserted: 0, deleted, error: upsertError.message };
 
-  if (upsertError) return { scanned: records.length, inserted: 0, error: upsertError.message };
+  const staffUpdates = records.filter(r => r.staff_name !== null).map(r => ({ order_product_key: r.order_product_key, status: r.status, staff_name: r.staff_name, location: r.location }));
+  if (staffUpdates.length) await supabase.from('order_status_history').upsert(staffUpdates, { onConflict: 'order_product_key,status', ignoreDuplicates: false });
 
-  // Update staff_name on existing rows without touching entered_at
-  const staffUpdates = records
-    .filter(r => r.staff_name !== null)
-    .map(r => ({
-      order_product_key: r.order_product_key,
-      status:            r.status,
-      staff_name:        r.staff_name,
-      location:          r.location,
-    }));
-
-  if (staffUpdates.length) {
-    await supabase
-      .from('order_status_history')
-      .upsert(staffUpdates, { onConflict: 'order_product_key,status', ignoreDuplicates: false });
-  }
-
-  return { scanned: records.length, inserted: records.length };
+  return { scanned: records.length, inserted: records.length, deleted };
 }
