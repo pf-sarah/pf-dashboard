@@ -12,6 +12,10 @@ export async function POST() {
   if (result.error) {
     return NextResponse.json({ error: result.error }, { status: 500 });
   }
-
-  return NextResponse.json({ ok: true, scanned: result.scanned, timestamp: new Date().toISOString() });
+  return NextResponse.json({
+    ok:        true,
+    scanned:   result.scanned,
+    deleted:   result.deleted,
+    timestamp: new Date().toISOString(),
+  });
 }
