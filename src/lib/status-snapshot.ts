@@ -61,10 +61,10 @@ export async function runStatusSnapshot(): Promise<{ scanned: number; inserted: 
         if (!item.status) return;
         const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
         if (!num) return;
-        const key = `${num}|${item.variantTitle ?? ''}|${item.status}`;
+        const key = item.uuid ? `${num}|${item.uuid}|${item.status}` : `${num}|${item.variantTitle ?? ''}|${item.status}`;
         if (seen.has(key)) return;
         seen.add(key);
-        const opKey = `${num}|${item.variantTitle ?? ''}`;
+        const opKey = item.uuid ? `${num}|${item.uuid}` : `${num}|${item.variantTitle ?? ''}`;
         liveKeys.add(`${opKey}|||${item.status}`);
         const idx = records.length;
         records.push({ order_product_key: opKey, order_num: num, variant_title: item.variantTitle ?? null, status: item.status, location: item.location ?? '', entered_at: item.orderDateUpdated ?? now, staff_name: null });
