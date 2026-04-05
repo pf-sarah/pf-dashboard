@@ -129,7 +129,7 @@ export async function GET(req: NextRequest) {
           });
         });
       });
-      if (orders.length >= 2000) break;
+      if (orders.length >= 10000) break;
     }
 
     if (!orders.length) {
