@@ -106,8 +106,21 @@ export async function runStatusSnapshot(): Promise<{ scanned: number; inserted: 
   const { error: upsertError } = await supabase.from('order_status_history').upsert(records, { onConflict: 'order_product_key,status', ignoreDuplicates: true });
   if (upsertError) return { scanned: records.length, inserted: 0, deleted, error: upsertError.message };
 
-  const staffUpdates = records.filter(r => r.staff_name !== null).map(r => ({ order_product_key: r.order_product_key, status: r.status, staff_name: r.staff_name, location: r.location }));
-  if (staffUpdates.length) await supabase.from('order_status_history').upsert(staffUpdates, { onConflict: 'order_product_key,status', ignoreDuplicates: false });
+  // Update staff_name AND location on existing rows (ignoreDuplicates: false so location gets corrected)
+  const updates = records
+    .filter(r => r.staff_name !== null || r.location !== '')
+    .map(r => ({
+      order_product_key: r.order_product_key,
+      status:            r.status,
+      staff_name:        r.staff_name,
+      location:          r.location,
+    }));
+
+  if (updates.length) {
+    await supabase
+      .from('order_status_history')
+      .upsert(updates, { onConflict: 'order_product_key,status', ignoreDuplicates: false });
+  }
 
   return { scanned: records.length, inserted: records.length, deleted };
 }
