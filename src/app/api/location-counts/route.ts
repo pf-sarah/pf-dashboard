@@ -44,8 +44,8 @@ export async function GET() {
     PIPELINE_STATUSES.forEach(s => { finalUtah[s]=(utah[s]??0)+(resolvedUtah[s]??0); finalGeorgia[s]=(georgia[s]??0)+(resolvedGeorgia[s]??0); });
 
     const [utahRows, georgiaRows] = await Promise.all([
-      supabase.from('rtf_by_location').select('order_num, variant_title, status, staff_name, entered_at').eq('resolved_location','Utah').in('status', PIPELINE_STATUSES),
-      supabase.from('rtf_by_location').select('order_num, variant_title, status, staff_name, entered_at').eq('resolved_location','Georgia').in('status', PIPELINE_STATUSES),
+      supabase.from('rtf_by_location').select('order_num, variant_title, status, staff_name, entered_at').eq('resolved_location','Utah').in('status', PIPELINE_STATUSES).limit(10000),
+      supabase.from('rtf_by_location').select('order_num, variant_title, status, staff_name, entered_at').eq('resolved_location','Georgia').in('status', PIPELINE_STATUSES).limit(10000),
     ]);
 
     const utahOrders: Record<string,OrderEntry[]>={}, georgiaOrders: Record<string,OrderEntry[]>={};
