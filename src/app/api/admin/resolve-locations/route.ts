@@ -26,12 +26,19 @@ interface DetailsUpload {
   uploadedByUserLastName?:  string | null;
 }
 
+interface OrderProduct {
+  uuid:          string;
+  variantTitle?: string;
+  status?:       string;
+}
+
 interface Details {
   orderProductUploads?: DetailsUpload[];
   originalOrderDate?:   string | null;
   orderStatus?:         string | null;
   orderTags?:           string[] | null;
   tags?:                string | null;
+  pressedFloralOrderLineItems?: OrderProduct[];
 }
 
 export async function GET() {
@@ -47,16 +54,16 @@ export async function POST() {
 }
 
 async function runResolve(previewOnly: boolean) {
-
   try {
     // ── Step 1: Load staff → location map ─────────────────────────────────────
     const { data: staffRows } = await supabase.from('staff_locations').select('name, location');
     const staffLocationMap: Record<string, string> = {};
     staffRows?.forEach(r => { staffLocationMap[r.name] = r.location; });
 
-    // ── Step 2: Load already-resolved keys ───────────────────────────────────
-    const { data: cached } = await supabase.from('order_location_cache').select('order_product_key');
-    const alreadyResolved = new Set((cached ?? []).map(r => r.order_product_key));
+    // ── Step 2: Load already-resolved order numbers ───────────────────────────
+    // We track by order_num now so we don't re-scan orders already fully resolved
+    const { data: cached } = await supabase.from('order_location_cache').select('order_num');
+    const alreadyResolvedOrders = new Set((cached ?? []).map(r => r.order_num));
 
     // ── Step 3: Scan WeeklyReport for unassigned orders ───────────────────────
     const today = new Date();
@@ -64,10 +71,10 @@ async function runResolve(previewOnly: boolean) {
     for (let m = 0; m < 18; m++) {
       const first = new Date(today.getFullYear(), today.getMonth() - m, 1);
       const last  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
-      paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(first)}&endDate=${fmtDate(last)}`);
+      paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(first)}&endDate=${fmtDate(last)}&pageSize=1000`);
     }
 
-    // key → { orderNum, variantTitle, uuid (may be null), status, orderDate }
+    // Collect unique unassigned order numbers to resolve
     const toResolve = new Map<string, { orderNum: string; variantTitle: string; uuid: string | null; status: string; orderDate: string }>();
 
     for (let i = 0; i < paths.length; i += 6) {
@@ -75,16 +82,13 @@ async function runResolve(previewOnly: boolean) {
       results.forEach(items => {
         if (!items) return;
         items.forEach(item => {
-          // Skip orders that haven't been assigned a location yet (pre-bouquet)
           if (item.status === 'orderReceived') return;
-          // Only unassigned orders (no location or location is blank)
           if (item.location) return;
           const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
           if (!num) return;
-          const key = `${num}|${item.variantTitle ?? ''}`;
-          if (alreadyResolved.has(key)) return;
-          if (!toResolve.has(key)) {
-            toResolve.set(key, {
+          if (alreadyResolvedOrders.has(num)) return;
+          if (!toResolve.has(num)) {
+            toResolve.set(num, {
               orderNum:     num,
               variantTitle: item.variantTitle ?? '',
               uuid:         item.uuid ?? null,
@@ -122,17 +126,14 @@ async function runResolve(previewOnly: boolean) {
       });
     }
 
-    // ── Step 5: Fetch Details for each order to get bouquet uploader ──────────
+    // ── Step 5: Fetch Details to get location + ALL order products ────────────
     const allEntries = [...toResolve.entries()].filter(([, v]) => !!v.uuid) as [string, { orderNum: string; variantTitle: string; uuid: string; status: string; orderDate: string }][];
     const BATCH = 30;
-    const rows: { order_product_key: string; order_num: string; location: string }[] = [];
-    const unmatchedNames = new Map<string, number>(); // name → count of orders
-    let noPhotoResolved = 0;
-    const twelveMonthsAgo = new Date();
-    twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1);
-    let oldOrderCount = 0;
+    const rows: { order_product_key: string; order_num: string; location: string; variant_title: string; status: string; order_date: string }[] = [];
+    const unmatchedNames = new Map<string, number>();
     const unresolvedOrders: { orderNum: string; variantTitle: string; status: string; orderDate: string }[] = [];
     const pendingStaffSearch = new Map<string, { orderNum: string; variantTitle: string; status: string; orderDate: string }>();
+    let noPhotoResolved = 0;
 
     for (let i = 0; i < allEntries.length; i += BATCH) {
       const batch = allEntries.slice(i, i + BATCH);
@@ -143,16 +144,39 @@ async function runResolve(previewOnly: boolean) {
       );
       results.forEach((d, j) => {
         if (!d) return;
-        const [key, { orderNum, variantTitle, status, orderDate: itemOrderDate }] = batch[j];
+        const [, { orderNum, variantTitle, status, orderDate: itemOrderDate }] = batch[j];
 
         // Check for GA tag → auto-assign Georgia
         const tagStr = Array.isArray(d.orderTags) ? d.orderTags.join(',') : (d.tags ?? '');
         if (tagStr.toUpperCase().includes('GA')) {
-          rows.push({ order_product_key: key, order_num: orderNum, location: 'Georgia' });
+          // Store all products for this order as Georgia
+          const products = d.pressedFloralOrderLineItems ?? [];
+          if (products.length > 0) {
+            products.forEach(p => {
+              if (!p.uuid || !p.status) return;
+              rows.push({
+                order_product_key: `${orderNum}|${p.uuid}`,
+                order_num:         orderNum,
+                location:          'Georgia',
+                variant_title:     p.variantTitle ?? '',
+                status:            p.status,
+                order_date:        itemOrderDate,
+              });
+            });
+          } else {
+            rows.push({
+              order_product_key: `${orderNum}|${variantTitle}`,
+              order_num:         orderNum,
+              location:          'Georgia',
+              variant_title:     variantTitle,
+              status,
+              order_date:        itemOrderDate,
+            });
+          }
           return;
         }
 
-        // Try bouquet uploader first, then frame, then any other upload type
+        // Try bouquet uploader first
         const UPLOAD_PRIORITY = ['bouquet', 'frame'];
         const uploads = d.orderProductUploads ?? [];
         const prioritized = [
@@ -173,17 +197,40 @@ async function runResolve(previewOnly: boolean) {
 
         const location = staffLocationMap[uploaderName] ?? '';
         if (!location) {
-          // Queue for preservation-staff search fallback (Step 5b)
-          pendingStaffSearch.set(key, { orderNum, variantTitle, status, orderDate: itemOrderDate });
+          pendingStaffSearch.set(orderNum, { orderNum, variantTitle, status, orderDate: itemOrderDate });
           return;
         }
 
         if (usedFallback) noPhotoResolved++;
-        rows.push({ order_product_key: key, order_num: orderNum, location });
+
+        // Store ALL products for this order with their UUIDs
+        const products = d.pressedFloralOrderLineItems ?? [];
+        if (products.length > 0) {
+          products.forEach(p => {
+            if (!p.uuid || !p.status) return;
+            rows.push({
+              order_product_key: `${orderNum}|${p.uuid}`,
+              order_num:         orderNum,
+              location,
+              variant_title:     p.variantTitle ?? '',
+              status:            p.status,
+              order_date:        itemOrderDate,
+            });
+          });
+        } else {
+          rows.push({
+            order_product_key: `${orderNum}|${variantTitle}`,
+            order_num:         orderNum,
+            location,
+            variant_title:     variantTitle,
+            status,
+            order_date:        itemOrderDate,
+          });
+        }
       });
     }
 
-    // ── Step 5b: Fallback — resolve via preservation staff (bouquetReceived assignee) ──
+    // ── Step 5b: Fallback via preservation staff ──────────────────────────────
     interface SearchStaffItem {
       preservationUserFirstName?: string;
       preservationUserLastName?:  string;
@@ -202,18 +249,22 @@ async function runResolve(previewOnly: boolean) {
         )
       );
       results.forEach((res, j) => {
-        const [key, { orderNum, variantTitle, status, orderDate }] = batch[j];
+        const [, { orderNum, variantTitle, status, orderDate }] = batch[j];
         const item = res?.items?.[0];
         const staffName = item
           ? [item.preservationUserFirstName, item.preservationUserLastName].filter(Boolean).join(' ').trim()
           : '';
         const location = staffLocationMap[staffName] ?? '';
         if (location) {
-          rows.push({ order_product_key: key, order_num: orderNum, location });
+          rows.push({
+            order_product_key: `${orderNum}|${variantTitle}`,
+            order_num:         orderNum,
+            location,
+            variant_title:     variantTitle,
+            status,
+            order_date:        orderDate,
+          });
         } else {
-          const orderDateObj = orderDate ? new Date(orderDate) : null;
-          const isOld = orderDateObj ? orderDateObj < twelveMonthsAgo : false;
-          if (isOld) oldOrderCount++;
           const label = staffName ? `[preservation] ${staffName}` : '(no photo)';
           unmatchedNames.set(label, (unmatchedNames.get(label) ?? 0) + 1);
           unresolvedOrders.push({ orderNum, variantTitle, status, orderDate });
@@ -221,33 +272,16 @@ async function runResolve(previewOnly: boolean) {
       });
     }
 
-    // Build sorted unmatched list for preview/debugging
     const unmatched = [...unmatchedNames.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([name, count]) => ({ name, count }));
 
     if (previewOnly) {
-      return NextResponse.json({
-        previewOnly: true,
-        wouldResolve: rows.length,
-        noPhotoResolved,
-        oldOrderCount,
-        unmatched,
-        unresolvedOrders,
-        total: toResolve.size,
-      });
+      return NextResponse.json({ previewOnly: true, wouldResolve: rows.length, unmatched, unresolvedOrders, total: toResolve.size });
     }
 
     if (!rows.length) {
-      return NextResponse.json({
-        resolved: 0,
-        total: toResolve.size,
-        noPhotoResolved,
-        oldOrderCount,
-        unmatched,
-        unresolvedOrders,
-        message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location`,
-      });
+      return NextResponse.json({ resolved: 0, total: toResolve.size, unmatched, unresolvedOrders, message: `Scanned ${toResolve.size} unassigned orders but none could be matched to a location` });
     }
 
     // ── Step 6: Upsert to cache ───────────────────────────────────────────────
@@ -257,7 +291,11 @@ async function runResolve(previewOnly: boolean) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    return NextResponse.json({ resolved: rows.length, noPhotoResolved, oldOrderCount, total: toResolve.size, unmatched, unresolvedOrders });
+    // ── Step 7: Also update order_status_history with resolved locations ──────
+    // This ensures the Sorted by Location view immediately reflects the new locations
+    await supabase.rpc('apply_cache_locations');
+
+    return NextResponse.json({ resolved: rows.length, noPhotoResolved, total: toResolve.size, unmatched, unresolvedOrders });
 
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
