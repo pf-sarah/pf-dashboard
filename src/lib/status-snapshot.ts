@@ -18,7 +18,7 @@ export async function runStatusSnapshot(): Promise<{
   // This ensures the snapshot completes within Vercel's 300s limit
   const paths: string[] = [];
   const today = new Date();
-  for (let m = 0; m < 6; m++) {
+  for (let m = 0; m < 12; m++) {
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
     const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
     paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
