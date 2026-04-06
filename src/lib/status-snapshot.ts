@@ -14,8 +14,6 @@ interface WeeklyReportItem {
 export async function runStatusSnapshot(): Promise<{
   scanned: number; inserted: number; deleted: number; error?: string;
 }> {
-  // Scan 6 months only — all active pipeline orders are within this window
-  // This ensures the snapshot completes within Vercel's 300s limit
   const paths: string[] = [];
   const today = new Date();
   for (let m = 0; m < 12; m++) {
@@ -24,9 +22,10 @@ export async function runStatusSnapshot(): Promise<{
     paths.push(`/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}`);
   }
 
-  const seen     = new Set<string>();
-  const liveKeys = new Set<string>();
-  const now      = new Date().toISOString();
+  const seen           = new Set<string>();
+  const liveKeys       = new Set<string>();
+  const variantCounter = new Map<string, number>();
+  const now            = new Date().toISOString();
 
   const records: {
     order_product_key: string; order_num: string; variant_title: string | null;
@@ -41,13 +40,27 @@ export async function runStatusSnapshot(): Promise<{
         if (!item.status) return;
         const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? '');
         if (!num) return;
-        // Use UUID as key if available, otherwise fall back to variant_title
-        // UUID correctly handles multiple identical variants in the same order
-        const opKey = item.uuid ? `${num}|${item.uuid}` : `${num}|${item.variantTitle ?? ''}`;
-        const key   = `${opKey}|||${item.status}`;
+
+        // Build a unique key per order product.
+        // If UUID is available, use it (handles identical variants correctly).
+        // Otherwise use variant+counter so duplicate variants each get their own row.
+        let opKey: string;
+        if (item.uuid) {
+          opKey = `${num}|${item.uuid}`;
+        } else {
+          const cKey = `${num}|${item.variantTitle ?? ''}|${item.status}`;
+          const cnt  = variantCounter.get(cKey) ?? 0;
+          variantCounter.set(cKey, cnt + 1);
+          opKey = cnt === 0
+            ? `${num}|${item.variantTitle ?? ''}`
+            : `${num}|${item.variantTitle ?? ''}|${cnt}`;
+        }
+
+        const key = `${opKey}|||${item.status}`;
         if (seen.has(key)) return;
         seen.add(key);
         liveKeys.add(key);
+
         records.push({
           order_product_key: opKey,
           order_num:         num,
