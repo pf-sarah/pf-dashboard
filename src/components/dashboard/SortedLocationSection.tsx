@@ -1,24 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
-interface OrderRow {
-  id: string; num: string; name: string; variant: string;
-  orderDate: string; eventDate: string; staff: string;
-  enteredAt: string; location: string;
+interface UuidOrderEntry {
+  uuid:      string;
+  orderNum:  string;
+  status:    string;
+  location:  string | null;
+  staffName: string | null;
+  orderDate: string | null;
 }
 
 interface LocationData {
-  Utah: Record<string, number>;
-  Georgia: Record<string, number>;
-  unresolved: number;
-  cachedCount: number;
+  Utah:          Record<string, number>;
+  Georgia:       Record<string, number>;
+  UtahOrders:    Record<string, UuidOrderEntry[]>;
+  GeorgiaOrders: Record<string, UuidOrderEntry[]>;
+  unresolved:    number;
+  lastSynced:    string;
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<string, string> = {
   bouquetReceived:      'Bouquet Received',
@@ -55,128 +60,97 @@ const DEPT_TEXT: Record<string, string> = {
   Fulfillment:  'text-amber-700',
 };
 
-// ─── Order panel — fetches from pipeline-orders on demand ────────────────────
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return iso; }
+}
+
+// ─── Order Panel ──────────────────────────────────────────────────────────────
 
 function OrderPanel({
   status,
-  location,
+  orders,
   onClose,
 }: {
-  status:   string;
-  location: string;
-  onClose:  () => void;
+  status:  string;
+  orders:  UuidOrderEntry[];
+  onClose: () => void;
 }) {
-  const [orders,  setOrders]  = useState<OrderRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState('');
-  const [search,  setSearch]  = useState('');
+  const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    setLoading(true);
-    setError('');
-    fetch(`/api/pipeline-orders?status=${status}&location=${encodeURIComponent(location)}`)
-      .then(r => r.json())
-      .then((d: { error?: string; orders?: OrderRow[] }) => {
-        if (d.error) { setError(d.error); return; }
-        setOrders(d.orders ?? []);
-      })
-      .catch((e: unknown) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [status, location]);
-
-  const filtered = search.trim()
-    ? orders.filter(o => {
-        const q = search.toLowerCase();
-        return o.num.includes(q) || o.name.toLowerCase().includes(q) ||
-               o.variant.toLowerCase().includes(q) || o.staff.toLowerCase().includes(q);
-      })
-    : orders;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(o =>
+      o.orderNum.includes(q) ||
+      o.uuid.toLowerCase().includes(q) ||
+      (o.staffName ?? '').toLowerCase().includes(q)
+    );
+  }, [orders, search]);
 
   return (
     <div className="mt-2 rounded-lg border border-slate-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50">
         <span className="text-xs font-semibold text-slate-600">
-          {STATUS_LABELS[status] ?? status}
-          {!loading && ` — ${orders.length} orders`}
+          {STATUS_LABELS[status] ?? status} — {orders.length} order products
         </span>
         <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
       </div>
-
-      {loading ? (
-        <div className="px-4 py-5 text-xs text-slate-400">
-          <div className="flex items-center gap-2 mb-1">
-            <svg className="animate-spin h-3.5 w-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-            </svg>
-            <span className="italic">Loading orders from PF API…</span>
-          </div>
-          <p className="text-slate-300 text-[10px]">Scanning order history — this may take 30–60 seconds</p>
-        </div>
-      ) : error ? (
-        <p className="px-4 py-3 text-xs text-red-500">{error}</p>
-      ) : (
-        <>
-          <div className="px-3 py-2 border-b border-slate-100">
-            <input
-              type="text"
-              placeholder="Search order #, customer, frame, staff…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-700 bg-white placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-300"
-              autoFocus
-            />
-            {search && (
-              <p className="text-xs text-slate-400 mt-1">{filtered.length} of {orders.length}</p>
-            )}
-          </div>
-          <div className="overflow-auto max-h-72">
-            <table className="min-w-full text-xs">
-              <thead className="sticky top-0 bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">Order #</th>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">Customer</th>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">Frame</th>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">Staff</th>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">In status since</th>
-                  <th className="px-3 py-1.5 text-left font-medium text-slate-500">Event date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-4 text-center text-slate-400 italic">No results</td>
-                  </tr>
-                ) : filtered.map((o, i) => (
-                  <tr key={`${o.num}|${o.variant}|${i}`}
-                    className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
-                    <td className="px-3 py-1.5 font-mono text-indigo-700 whitespace-nowrap">#{o.num}</td>
-                    <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">{o.name || '—'}</td>
-                    <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{o.variant || '—'}</td>
-                    <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
-                      {o.staff || <span className="text-slate-300 italic">unassigned</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.enteredAt || '—'}</td>
-                    <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{o.eventDate || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <div className="px-3 py-2 border-b border-slate-100">
+        <input
+          type="text"
+          placeholder="Search order #, UUID, staff…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          autoFocus
+          className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-700 bg-white placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+        />
+        {search && <p className="text-xs text-slate-400 mt-1">{filtered.length} of {orders.length}</p>}
+      </div>
+      <div className="overflow-auto max-h-72">
+        <table className="min-w-full text-xs">
+          <thead className="sticky top-0 bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th className="px-3 py-1.5 text-left font-medium text-slate-500">Order #</th>
+              <th className="px-3 py-1.5 text-left font-medium text-slate-500">UUID</th>
+              <th className="px-3 py-1.5 text-left font-medium text-slate-500">Staff</th>
+              <th className="px-3 py-1.5 text-left font-medium text-slate-500">Order Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-slate-400 italic">No results</td>
+              </tr>
+            ) : filtered.map(o => (
+              <tr key={o.uuid} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <td className="px-3 py-1.5 font-mono text-indigo-700 whitespace-nowrap">#{o.orderNum}</td>
+                <td className="px-3 py-1.5 font-mono text-slate-400 whitespace-nowrap text-[10px]">{o.uuid}</td>
+                <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap">
+                  {o.staffName || <span className="text-slate-300 italic">unassigned</span>}
+                </td>
+                <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{fmtDate(o.orderDate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-// ─── Location column ──────────────────────────────────────────────────────────
+// ─── Location Column ──────────────────────────────────────────────────────────
 
 function LocationColumn({
   name,
   counts,
+  orders,
 }: {
   name:   string;
   counts: Record<string, number>;
+  orders: Record<string, UuidOrderEntry[]>;
 }) {
   const [expandedStatus, setExpandedStatus] = useState<string | null>(null);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -198,8 +172,9 @@ function LocationColumn({
             </CardHeader>
             <CardContent className="px-4 pb-3 space-y-1">
               {statuses.map(st => {
-                const count      = counts[st] ?? 0;
-                const isExpanded = expandedStatus === st;
+                const count       = counts[st] ?? 0;
+                const isExpanded  = expandedStatus === st;
+                const statusOrders = orders[st] ?? [];
                 return (
                   <div key={st}>
                     <div className="flex justify-between items-center text-xs">
@@ -212,7 +187,6 @@ function LocationColumn({
                               ? 'bg-indigo-200 text-indigo-800'
                               : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
                           }`}
-                          title="Click to load orders from PF API"
                         >
                           {count.toLocaleString()}
                         </button>
@@ -220,12 +194,17 @@ function LocationColumn({
                         <span className="text-slate-300 font-semibold text-xs">0</span>
                       )}
                     </div>
-                    {isExpanded && (
+                    {isExpanded && statusOrders.length > 0 && (
                       <OrderPanel
                         status={st}
-                        location={name}
+                        orders={statusOrders}
                         onClose={() => setExpandedStatus(null)}
                       />
+                    )}
+                    {isExpanded && statusOrders.length === 0 && (
+                      <div className="mt-2 px-3 py-3 text-xs text-slate-400 italic border border-slate-200 rounded-lg bg-white">
+                        No orders in cache yet — run the UUID sync to populate.
+                      </div>
                     )}
                   </div>
                 );
@@ -238,18 +217,15 @@ function LocationColumn({
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export function SortedLocationSection() {
-  const [data,       setData]       = useState<LocationData | null>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState('');
-  const [resolving,  setResolving]  = useState(false);
-  const [resolveMsg, setResolveMsg] = useState('');
-  const [unmatched,     setUnmatched]     = useState<{ name: string; count: number }[]>([]);
-  const [showUnmatched, setShowUnmatched] = useState(false);
-  const [unresolvedOrders,     setUnresolvedOrders]     = useState<{ orderNum: string; variantTitle: string; status: string; orderDate: string }[]>([]);
-  const [showUnresolvedOrders, setShowUnresolvedOrders] = useState(false);
+  const [data,      setData]      = useState<LocationData | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState('');
+  const [syncing,   setSyncing]   = useState(false);
+  const [syncMsg,   setSyncMsg]   = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
 
   async function load() {
     setLoading(true);
@@ -266,29 +242,51 @@ export function SortedLocationSection() {
     }
   }
 
-  async function resolveNow() {
-    setResolving(true);
-    setResolveMsg('');
+  async function runSync() {
+    setSyncing(true);
+    setSyncMsg('Syncing UUIDs from PF API… this takes 2–3 minutes');
     try {
-      const res  = await fetch('/api/admin/resolve-locations', { method: 'POST' });
-      const json = await res.json() as {
-        resolved?: number; total?: number; message?: string; error?: string;
-        unmatched?: { name: string; count: number }[];
-        unresolvedOrders?: { orderNum: string; variantTitle: string; status: string; orderDate: string }[];
-      };
+      const res  = await fetch('/api/cron/uuid-location-sync', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}` },
+      });
+      const json = await res.json() as { message?: string; error?: string; synced?: number; resolved?: number; unresolved?: number };
       if (json.error) {
-        setResolveMsg(`Failed: ${json.error}`);
+        setSyncMsg(`Sync failed: ${json.error}`);
       } else {
-        setResolveMsg(json.message ?? `Resolved ${json.resolved ?? 0} of ${json.total ?? 0}`);
-        if (json.unmatched) setUnmatched(json.unmatched);
-        if (json.unresolvedOrders) setUnresolvedOrders(json.unresolvedOrders);
+        setSyncMsg(json.message ?? `Synced ${json.synced} UUIDs`);
         await load();
       }
-    } catch { setResolveMsg('Failed to resolve'); }
-    setResolving(false);
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
   }
 
   useEffect(() => { void load(); }, []);
+
+  // Global search across both locations
+  const globalResults = useMemo(() => {
+    const q = globalSearch.trim().toLowerCase();
+    if (!q || !data) return [];
+    const results: (UuidOrderEntry & { locationName: string })[] = [];
+    (['Utah', 'Georgia'] as const).forEach(loc => {
+      const ordersMap = loc === 'Utah' ? data.UtahOrders : data.GeorgiaOrders;
+      Object.values(ordersMap ?? {}).forEach(entries => {
+        entries.forEach(o => {
+          if (
+            o.orderNum.includes(q) ||
+            o.uuid.toLowerCase().includes(q) ||
+            (o.staffName ?? '').toLowerCase().includes(q)
+          ) {
+            results.push({ ...o, locationName: loc });
+          }
+        });
+      });
+    });
+    return results.slice(0, 200);
+  }, [globalSearch, data]);
 
   return (
     <section className="space-y-4">
@@ -298,22 +296,27 @@ export function SortedLocationSection() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Sorted by Location
           </h2>
-          <span className="text-xs text-slate-400">PF counts + resolved unassigned orders</span>
+          <span className="text-xs text-slate-400">UUID-based — PF counts + cache</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {resolveMsg && <span className="text-xs text-slate-400">{resolveMsg}</span>}
+          {syncMsg && <span className="text-xs text-slate-400 max-w-xs truncate">{syncMsg}</span>}
           {data && data.unresolved > 0 && (
-            <button onClick={() => setShowUnmatched(v => !v)}
-              className="text-xs text-amber-600 hover:text-amber-800 transition-colors">
-              {data.unresolved.toLocaleString()} still unresolved {showUnmatched ? '▲' : '▼'}
-            </button>
+            <span className="text-xs text-amber-600">
+              {data.unresolved.toLocaleString()} unresolved in PF
+            </span>
           )}
-          <button onClick={() => void resolveNow()} disabled={resolving}
-            className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors">
-            {resolving ? 'Resolving…' : 'Resolve Unassigned'}
+          <button
+            onClick={() => void runSync()}
+            disabled={syncing}
+            className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+          >
+            {syncing ? 'Syncing…' : 'Sync UUIDs'}
           </button>
-          <button onClick={() => void load()} disabled={loading}
-            className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors">
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
+          >
             {loading ? 'Loading…' : 'Refresh'}
           </button>
         </div>
@@ -321,43 +324,60 @@ export function SortedLocationSection() {
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 
-      {/* Unmatched uploaders */}
-      {showUnmatched && unmatched.length > 0 && (
-        <div className="rounded border border-amber-200 bg-amber-50 p-3 space-y-1">
-          <p className="text-xs font-semibold text-amber-700 mb-2">Unmatched uploaders — add to staff_locations in Supabase:</p>
-          {unmatched.map(u => (
-            <div key={u.name} className="flex justify-between text-xs">
-              <span className="text-slate-700">{u.name}</span>
-              <span className="text-slate-400">{u.count} order{u.count !== 1 ? 's' : ''}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Global search */}
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="Search by order #, UUID, or staff name…"
+          value={globalSearch}
+          onChange={e => setGlobalSearch(e.target.value)}
+          className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-700 bg-white placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+        />
+        {globalSearch && (
+          <button
+            onClick={() => setGlobalSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 text-lg"
+          >×</button>
+        )}
+      </div>
 
-      {unresolvedOrders.length > 0 && (
-        <div>
-          <button onClick={() => setShowUnresolvedOrders(v => !v)}
-            className="text-xs text-slate-500 hover:text-slate-700 transition-colors mb-2">
-            {unresolvedOrders.length} unresolved order details {showUnresolvedOrders ? '▲' : '▼'}
-          </button>
-          {showUnresolvedOrders && (
-            <div className="rounded border border-slate-200 bg-slate-50 overflow-auto max-h-64">
-              <table className="w-full text-xs">
-                <thead className="bg-slate-100 sticky top-0">
+      {/* Global search results */}
+      {globalSearch.trim() && (
+        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-2 border-b border-slate-100 bg-slate-50">
+            <span className="text-xs font-semibold text-slate-600">
+              {globalResults.length} result{globalResults.length !== 1 ? 's' : ''} for &quot;{globalSearch}&quot;
+              {globalResults.length === 200 && ' (showing first 200)'}
+            </span>
+          </div>
+          {globalResults.length === 0 ? (
+            <p className="px-4 py-4 text-xs text-slate-400 italic">No order products found.</p>
+          ) : (
+            <div className="overflow-auto max-h-80">
+              <table className="min-w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50 border-b border-slate-100">
                   <tr>
-                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Order #</th>
-                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Variant</th>
-                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Status</th>
-                    <th className="text-left px-3 py-2 font-semibold text-slate-600">Order Date</th>
+                    <th className="px-4 py-2 text-left font-medium text-slate-500">Order #</th>
+                    <th className="px-4 py-2 text-left font-medium text-slate-500">UUID</th>
+                    <th className="px-4 py-2 text-left font-medium text-slate-500">Location</th>
+                    <th className="px-4 py-2 text-left font-medium text-slate-500">Status</th>
+                    <th className="px-4 py-2 text-left font-medium text-slate-500">Staff</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {unresolvedOrders.map((o, i) => (
-                    <tr key={i} className="border-t border-slate-200">
-                      <td className="px-3 py-1.5 text-slate-700">{o.orderNum}</td>
-                      <td className="px-3 py-1.5 text-slate-500">{o.variantTitle}</td>
-                      <td className="px-3 py-1.5 text-slate-500">{o.status}</td>
-                      <td className="px-3 py-1.5 text-slate-400">{o.orderDate}</td>
+                  {globalResults.map(r => (
+                    <tr key={r.uuid} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                      <td className="px-4 py-2 font-mono text-indigo-700 whitespace-nowrap">#{r.orderNum}</td>
+                      <td className="px-4 py-2 font-mono text-slate-400 whitespace-nowrap text-[10px]">{r.uuid}</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.locationName}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span className="bg-slate-100 text-slate-700 rounded px-1.5 py-0.5">
+                          {STATUS_LABELS[r.status] ?? r.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">
+                        {r.staffName || <span className="text-slate-300 italic">unassigned</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -371,14 +391,22 @@ export function SortedLocationSection() {
 
       {!loading && data && (
         <>
-          {data.cachedCount > 0 && (
-            <p className="text-xs text-slate-400">
-              {data.cachedCount.toLocaleString()} unassigned orders resolved from bouquet upload history
-            </p>
+          {data.lastSynced === 'cache empty — run sync' && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+              Cache is empty — click <strong>Sync UUIDs</strong> to populate order lists for the first time. This takes 2–3 minutes.
+            </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <LocationColumn name="Utah"    counts={data.Utah}    />
-            <LocationColumn name="Georgia" counts={data.Georgia} />
+            <LocationColumn
+              name="Utah"
+              counts={data.Utah}
+              orders={data.UtahOrders ?? {}}
+            />
+            <LocationColumn
+              name="Georgia"
+              counts={data.Georgia}
+              orders={data.GeorgiaOrders ?? {}}
+            />
           </div>
         </>
       )}
