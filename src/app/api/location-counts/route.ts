@@ -126,17 +126,18 @@ export async function GET() {
       statuses: [...statuses],
     }));
 
-    const totalUnsorted = Object.values(unassigned).reduce((a, b) => a + b, 0)
-      - Object.values(cacheUtah).reduce((a, b) => a + b, 0)
-      - Object.values(cacheGeorgia).reduce((a, b) => a + b, 0);
-
+    const pfTotal       = Object.values(utah).reduce((a, b) => a + b, 0) + Object.values(georgia).reduce((a, b) => a + b, 0) + Object.values(unassigned).reduce((a, b) => a + b, 0);
+    const sortedUtah    = Object.values(finalUtah).reduce((a, b) => a + b, 0);
+    const sortedGeorgia = Object.values(finalGeorgia).reduce((a, b) => a + b, 0);
+    const totalUnsorted = Math.max(0, pfTotal - sortedUtah - sortedGeorgia);
     return NextResponse.json({
       Utah:          finalUtah,
       Georgia:       finalGeorgia,
       UtahOrders:    utahOrders,
       GeorgiaOrders: georgiaOrders,
       unsortedOrders,
-      totalUnsorted:  Math.max(0, totalUnsorted),
+      totalUnsorted,
+      pfTotal,
       lastSynced:    cacheRows?.[0] ? 'cache populated' : 'cache empty — run sync',
     });
 
