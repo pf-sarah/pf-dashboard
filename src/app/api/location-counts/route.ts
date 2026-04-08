@@ -97,6 +97,7 @@ export async function GET() {
 
     return NextResponse.json({
       Utah:          finalUtah,
+      Unassigned:    unassigned,
       Georgia:       finalGeorgia,
       UtahOrders:    utahOrders,
       GeorgiaOrders: georgiaOrders,
