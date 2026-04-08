@@ -12,13 +12,18 @@ interface UuidOrderEntry {
   orderDate: string | null;
 }
 
+interface UnsortedOrder {
+  orderNum: string;
+  statuses: string[];
+}
+
 interface LocationData {
   Utah:          Record<string, number>;
   Georgia:       Record<string, number>;
-  Unassigned:    Record<string, number>;
   UtahOrders:    Record<string, UuidOrderEntry[]>;
   GeorgiaOrders: Record<string, UuidOrderEntry[]>;
-  unresolved:    number;
+  unsortedOrders: UnsortedOrder[];
+  totalUnsorted:  number;
   lastSynced:    string;
 }
 
@@ -185,6 +190,55 @@ function LocationColumn({ name, counts, orders }: { name: string; counts: Record
   );
 }
 
+function UnsortedPanel({ orders }: { orders: UnsortedOrder[] }) {
+  const [search, setSearch] = useState('');
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(o => o.orderNum.includes(q));
+  }, [orders, search]);
+
+  return (
+    <div className="rounded-lg border border-orange-200 bg-orange-50 overflow-hidden">
+      <div className="px-4 py-3 border-b border-orange-200 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <span className="text-xs font-semibold text-orange-700">
+            {orders.length} order{orders.length !== 1 ? 's' : ''} could not be sorted to a location
+          </span>
+          <p className="text-xs text-orange-500 mt-0.5">These orders have no staff assigned in PF — assign a staff member in PF to resolve</p>
+        </div>
+        <input
+          type="text"
+          placeholder="Search order #…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="border border-orange-200 rounded px-2 py-1 text-xs bg-white text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-300"
+        />
+      </div>
+      <div className="overflow-auto max-h-48">
+        <table className="min-w-full text-xs">
+          <thead className="sticky top-0 bg-orange-50 border-b border-orange-100">
+            <tr>
+              <th className="px-4 py-1.5 text-left font-medium text-orange-700">Order #</th>
+              <th className="px-4 py-1.5 text-left font-medium text-orange-700">Statuses</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(o => (
+              <tr key={o.orderNum} className="border-b border-orange-50 last:border-0 hover:bg-orange-100/50">
+                <td className="px-4 py-1.5 font-mono text-indigo-700 whitespace-nowrap">#{o.orderNum}</td>
+                <td className="px-4 py-1.5 text-slate-500">
+                  {o.statuses.map(s => STATUS_LABELS[s] ?? s).join(', ')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function SortedLocationSection() {
   const [data,         setData]         = useState<LocationData | null>(null);
   const [loading,      setLoading]      = useState(true);
@@ -193,6 +247,7 @@ export function SortedLocationSection() {
   const [syncMsg,      setSyncMsg]      = useState('');
   const [resolving,    setResolving]    = useState(false);
   const [resolveMsg,   setResolveMsg]   = useState('');
+  const [showUnsorted, setShowUnsorted] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
 
   async function load() {
@@ -212,7 +267,7 @@ export function SortedLocationSection() {
 
   async function runSync() {
     setSyncing(true);
-    setSyncMsg('Syncing UUIDs from PF API… this takes 2\u20133 minutes');
+    setSyncMsg('Syncing UUIDs from PF API… this takes 2–3 minutes');
     try {
       const res  = await fetch('/api/cron/uuid-location-sync', {
         method: 'GET',
@@ -274,10 +329,6 @@ export function SortedLocationSection() {
     return results.slice(0, 200);
   }, [globalSearch, data]);
 
-  const unassignedTotal = data?.Unassigned
-    ? Object.values(data.Unassigned).reduce((a, b) => a + b, 0)
-    : 0;
-
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -285,17 +336,25 @@ export function SortedLocationSection() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Sorted by Location
           </h2>
-          <span className="text-xs text-slate-400">PF API counts — UUID cache for order lists</span>
+          <span className="text-xs text-slate-400">PF API counts + cache-resolved unassigned</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {syncMsg    && <span className="text-xs text-slate-400 max-w-xs truncate">{syncMsg}</span>}
           {resolveMsg && <span className="text-xs text-indigo-500 max-w-xs truncate">{resolveMsg}</span>}
+          {data && data.totalUnsorted > 0 && (
+            <button
+              onClick={() => setShowUnsorted(p => !p)}
+              className="px-3 py-1 text-xs border border-orange-300 rounded text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors"
+            >
+              {data.totalUnsorted.toLocaleString()} unsorted orders
+            </button>
+          )}
           <button
             onClick={() => void resolveUnassigned()}
-            disabled={resolving || unassignedTotal === 0}
+            disabled={resolving}
             className="px-3 py-1 text-xs border border-amber-300 rounded text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 transition-colors"
           >
-            {resolving ? 'Resolving…' : `Resolve Unassigned (${unassignedTotal.toLocaleString()})`}
+            {resolving ? 'Resolving…' : 'Resolve Unassigned'}
           </button>
           <button
             onClick={() => void runSync()}
@@ -315,6 +374,10 @@ export function SortedLocationSection() {
       </div>
 
       {error && <p className="text-xs text-red-500">{error}</p>}
+
+      {showUnsorted && data?.unsortedOrders && data.unsortedOrders.length > 0 && (
+        <UnsortedPanel orders={data.unsortedOrders} />
+      )}
 
       <div className="relative">
         <input
@@ -381,10 +444,9 @@ export function SortedLocationSection() {
               Cache is empty — click <strong>Sync UUIDs</strong> to populate order lists for the first time.
             </div>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <LocationColumn name="Utah"       counts={data.Utah       ?? {}} orders={data.UtahOrders    ?? {}} />
-            <LocationColumn name="Georgia"    counts={data.Georgia    ?? {}} orders={data.GeorgiaOrders ?? {}} />
-            <LocationColumn name="Unassigned" counts={data.Unassigned ?? {}} orders={{}} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <LocationColumn name="Utah"    counts={data.Utah    ?? {}} orders={data.UtahOrders    ?? {}} />
+            <LocationColumn name="Georgia" counts={data.Georgia ?? {}} orders={data.GeorgiaOrders ?? {}} />
           </div>
         </>
       )}
