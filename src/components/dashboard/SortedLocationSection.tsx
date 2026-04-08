@@ -58,7 +58,7 @@ const DEPT_TEXT: Record<string, string> = {
 };
 
 function fmtDate(iso: string | null): string {
-  if (!iso) return '\u2014';
+  if (!iso) return '—';
   try {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   } catch { return iso; }
@@ -80,14 +80,14 @@ function OrderPanel({ status, orders, onClose }: { status: string; orders: UuidO
     <div className="mt-2 rounded-lg border border-slate-200 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50">
         <span className="text-xs font-semibold text-slate-600">
-          {STATUS_LABELS[status] ?? status} \u2014 {orders.length} order products
+          {STATUS_LABELS[status] ?? status} — {orders.length} order products
         </span>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">\u00d7</button>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">×</button>
       </div>
       <div className="px-3 py-2 border-b border-slate-100">
         <input
           type="text"
-          placeholder="Search order #, UUID, staff\u2026"
+          placeholder="Search order #, UUID, staff…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           autoFocus
@@ -141,7 +141,7 @@ function LocationColumn({ name, counts, orders }: { name: string; counts: Record
           <Card key={dept} className={`border ${DEPT_COLORS[dept]}`}>
             <CardHeader className="pb-1 pt-3 px-4">
               <CardTitle className={`text-xs font-semibold uppercase tracking-wide ${DEPT_TEXT[dept]}`}>
-                {dept} \u2014 {deptTotal.toLocaleString()}
+                {dept} — {deptTotal.toLocaleString()}
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-3 space-y-1">
@@ -171,7 +171,7 @@ function LocationColumn({ name, counts, orders }: { name: string; counts: Record
                     )}
                     {isExpanded && statusOrders.length === 0 && (
                       <div className="mt-2 px-3 py-3 text-xs text-slate-400 italic border border-slate-200 rounded-lg bg-white">
-                        No orders in cache yet \u2014 run the UUID sync to populate.
+                        No orders in cache yet — run the UUID sync to populate.
                       </div>
                     )}
                   </div>
@@ -212,7 +212,7 @@ export function SortedLocationSection() {
 
   async function runSync() {
     setSyncing(true);
-    setSyncMsg('Syncing UUIDs from PF API\u2026 this takes 2\u20133 minutes');
+    setSyncMsg('Syncing UUIDs from PF API… this takes 2\u20133 minutes');
     try {
       const res  = await fetch('/api/cron/uuid-location-sync', {
         method: 'GET',
@@ -234,7 +234,7 @@ export function SortedLocationSection() {
 
   async function resolveUnassigned() {
     setResolving(true);
-    setResolveMsg('Resolving unassigned orders via staff lookup\u2026');
+    setResolveMsg('Resolving unassigned orders via staff lookup…');
     try {
       const res  = await fetch('/api/admin/resolve-unassigned', { method: 'POST' });
       const json = await res.json() as { message?: string; error?: string; resolved?: number; stillUnresolved?: number };
@@ -285,7 +285,7 @@ export function SortedLocationSection() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Sorted by Location
           </h2>
-          <span className="text-xs text-slate-400">PF API counts \u2014 UUID cache for order lists</span>
+          <span className="text-xs text-slate-400">PF API counts — UUID cache for order lists</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {syncMsg    && <span className="text-xs text-slate-400 max-w-xs truncate">{syncMsg}</span>}
@@ -295,21 +295,21 @@ export function SortedLocationSection() {
             disabled={resolving || unassignedTotal === 0}
             className="px-3 py-1 text-xs border border-amber-300 rounded text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-40 transition-colors"
           >
-            {resolving ? 'Resolving\u2026' : `Resolve Unassigned (${unassignedTotal.toLocaleString()})`}
+            {resolving ? 'Resolving…' : `Resolve Unassigned (${unassignedTotal.toLocaleString()})`}
           </button>
           <button
             onClick={() => void runSync()}
             disabled={syncing}
             className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
           >
-            {syncing ? 'Syncing\u2026' : 'Sync UUIDs'}
+            {syncing ? 'Syncing…' : 'Sync UUIDs'}
           </button>
           <button
             onClick={() => void load()}
             disabled={loading}
             className="px-3 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Loading\u2026' : 'Refresh'}
+            {loading ? 'Loading…' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -319,13 +319,13 @@ export function SortedLocationSection() {
       <div className="relative">
         <input
           type="text"
-          placeholder="Search by order #, UUID, or staff name\u2026"
+          placeholder="Search by order #, UUID, or staff name…"
           value={globalSearch}
           onChange={e => setGlobalSearch(e.target.value)}
           className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-700 bg-white placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
         />
         {globalSearch && (
-          <button onClick={() => setGlobalSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 text-lg">\u00d7</button>
+          <button onClick={() => setGlobalSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 text-lg">×</button>
         )}
       </div>
 
@@ -372,13 +372,13 @@ export function SortedLocationSection() {
         </div>
       )}
 
-      {loading && <p className="text-sm text-slate-400 text-center py-6">Loading location data\u2026</p>}
+      {loading && <p className="text-sm text-slate-400 text-center py-6">Loading location data…</p>}
 
       {!loading && data && (
         <>
-          {data.lastSynced === 'cache empty \u2014 run sync' && (
+          {data.lastSynced === 'cache empty — run sync' && (
             <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-              Cache is empty \u2014 click <strong>Sync UUIDs</strong> to populate order lists for the first time.
+              Cache is empty — click <strong>Sync UUIDs</strong> to populate order lists for the first time.
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
