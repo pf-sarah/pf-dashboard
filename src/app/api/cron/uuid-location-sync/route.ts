@@ -38,19 +38,21 @@ interface WeeklyReportItem {
 }
 
 export async function GET(req: NextRequest) {
-  // Allow cron secret OR authenticated dashboard call
   const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const cronOk = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  if (!cronOk) {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
   return runSync();
 }
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const cronOk = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  if (!cronOk) {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return runSync();
 }
