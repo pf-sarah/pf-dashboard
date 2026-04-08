@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import { pfPost, pfGetAll, fmtDate } from '@/lib/pf-api';
 import { supabase } from '@/lib/supabase';
 
