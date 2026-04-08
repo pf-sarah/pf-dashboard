@@ -271,7 +271,6 @@ export function SortedLocationSection() {
     try {
       const res  = await fetch('/api/cron/uuid-location-sync', {
         method: 'GET',
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}` },
       });
       const json = await res.json() as { message?: string; error?: string; synced?: number };
       if (json.error) {
