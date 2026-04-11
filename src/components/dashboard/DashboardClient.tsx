@@ -63,7 +63,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
     <div className="space-y-6">
 
       {/* ── Top-level tab bar ─────────────────────────────────────────────────── */}
-      <div className="flex border-b border-slate-200 -mb-2">
+      <div className="flex border-b border-slate-200">
         {([
           ['dashboard',  'Department Dashboard'],
           ['scheduling', 'Scheduling'],

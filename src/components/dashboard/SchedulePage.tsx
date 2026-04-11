@@ -626,25 +626,43 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
   const mondayIso = monday.toISOString().split('T')[0];
   const sundayIso = addDays(mondayIso, 6);
 
-  const [dateFrom,    setDateFrom]    = useState(mondayIso);
-  const [dateTo,      setDateTo]      = useState(sundayIso);
-  const [eventCounts, setEventCounts] = useState<Record<string, number>>(parseDateRange(mondayIso, sundayIso));
-  const [eventTotal,  setEventTotal]  = useState(Object.values(parseDateRange(mondayIso, sundayIso)).reduce((a,b)=>a+b,0));
-  const [dayPcts,     setDayPcts]     = useState([10, 30, 20, 15, 5, 15, 5]);
-  const [utPct,       setUtPct]       = useState(50);
-  const [gaPct,       setGaPct]       = useState(40);
-  const [unkPct,      setUnkPct]      = useState(10);
-  const [team,        setTeam]        = useState<PresTeamMember[]>(
+  // ── Load persisted settings from localStorage ─────────────────────────────
+  function loadStored<T>(key: string, fallback: T): T {
+    try {
+      const v = localStorage.getItem(key);
+      return v !== null ? (JSON.parse(v) as T) : fallback;
+    } catch { return fallback; }
+  }
+
+  const [dateFrom,    setDateFromRaw]  = useState(() => loadStored('pres-dateFrom', mondayIso));
+  const [dateTo,      setDateToRaw]    = useState(() => loadStored('pres-dateTo',   sundayIso));
+  const [eventCounts, setEventCounts]  = useState<Record<string, number>>(() => parseDateRange(loadStored('pres-dateFrom', mondayIso), loadStored('pres-dateTo', sundayIso)));
+  const [eventTotal,  setEventTotal]   = useState(() => Object.values(parseDateRange(loadStored('pres-dateFrom', mondayIso), loadStored('pres-dateTo', sundayIso))).reduce((a,b)=>a+b,0));
+  const [dayPcts,     setDayPctsRaw]   = useState<number[]>(() => loadStored('pres-dayPcts', [10, 30, 20, 15, 5, 15, 5]));
+  const [utPct,       setUtPctRaw]     = useState<number>(() => loadStored('pres-utPct', 50));
+  const [gaPct,       setGaPctRaw]     = useState<number>(() => loadStored('pres-gaPct', 40));
+  const [unkPct,      setUnkPctRaw]    = useState<number>(() => loadStored('pres-unkPct', 10));
+  const [team,        setTeam]         = useState<PresTeamMember[]>(
     location === 'Utah' ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
                         : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
   );
 
+  // Persist helpers
+  function setDateFrom(v: string) { setDateFromRaw(v); try { localStorage.setItem('pres-dateFrom', JSON.stringify(v)); } catch {} }
+  function setDateTo(v: string)   { setDateToRaw(v);   try { localStorage.setItem('pres-dateTo',   JSON.stringify(v)); } catch {} }
+  function setDayPcts(fn: (prev: number[]) => number[]) {
+    setDayPctsRaw(prev => { const next = fn(prev); try { localStorage.setItem('pres-dayPcts', JSON.stringify(next)); } catch {} return next; });
+  }
+  function setUtPct(v: number) { setUtPctRaw(v); try { localStorage.setItem('pres-utPct', JSON.stringify(v)); } catch {} }
+  function setGaPct(v: number) { setGaPctRaw(v); try { localStorage.setItem('pres-gaPct', JSON.stringify(v)); } catch {} }
+  function setUnkPct(v: number) { setUnkPctRaw(v); try { localStorage.setItem('pres-unkPct', JSON.stringify(v)); } catch {} }
+
   // Reset team when location changes
-  useState(() => {
+  useEffect(() => {
     setTeam(location === 'Utah'
       ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
       : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] })));
-  });
+  }, [location]);
 
   function loadRange(from: string, to: string) {
     const counts = parseDateRange(from, to);
@@ -657,7 +675,7 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
     const dow = d.getDay();
     const mon = new Date(d); mon.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
     let from: Date, to: Date;
-    if (mode === 'thisweek')  { from = mon; to = new Date(mon); to.setDate(mon.getDate() + 6); }
+    if (mode === 'thisweek')      { from = mon; to = new Date(mon); to.setDate(mon.getDate() + 6); }
     else if (mode === 'nextweek') { from = new Date(mon); from.setDate(mon.getDate() + 7); to = new Date(from); to.setDate(from.getDate() + 6); }
     else if (mode === 'next2')    { from = new Date(mon); from.setDate(mon.getDate() + 7); to = new Date(from); to.setDate(from.getDate() + 13); }
     else { from = new Date(d.getFullYear(), d.getMonth(), 1); to = new Date(d.getFullYear(), d.getMonth() + 1, 0); }
@@ -669,17 +687,16 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
   const locPct = location === 'Utah' ? utPct : gaPct;
   const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
-  // Build 7-day grid from today
+  // Build 7-day grid — always use dayPcts distribution applied to total × locPct
+  // Direct event-date data is used as the total source; distribution is always by dayPcts
   const sevenDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
     const iso = d.toISOString().split('T')[0];
-    const directCnt = eventCounts[iso] ?? 0;
     const dow = d.getDay();
     const dayIdx = dow === 0 ? 6 : dow - 1;
-    const est = directCnt > 0
-      ? Math.round(directCnt * locPct / 100)
-      : Math.round(eventTotal * (locPct / 100) * (dayPcts[dayIdx] / 100));
+    // Always apply day-of-week % to the location-split total
+    const est = Math.round(eventTotal * (locPct / 100) * (dayPcts[dayIdx] / 100));
     return { iso, est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), isWknd: dow === 0 || dow === 6 };
   });
 
@@ -758,11 +775,11 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
           <h3 className="text-sm font-semibold text-slate-700 mb-1">Location split</h3>
           <p className="text-xs text-slate-400 mb-3">% of deliveries going to each location.</p>
           <div className="space-y-2">
-            {[['Utah', utPct, setUtPct], ['Georgia', gaPct, setGaPct], ['Unknown', unkPct, setUnkPct]].map(([label, val, setter]) => (
-              <div key={label as string} className="flex items-center gap-3">
-                <span className="text-xs text-slate-500 w-16">{label as string}</span>
-                <input type="number" value={val as number} min="0" max="100"
-                  onChange={e => (setter as (v: number) => void)(parseFloat(e.target.value) || 0)}
+            {([['Utah', utPct, setUtPct], ['Georgia', gaPct, setGaPct], ['Unknown', unkPct, setUnkPct]] as [string, number, (v: number) => void][]).map(([label, val, setter]) => (
+              <div key={label} className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 w-16">{label}</span>
+                <input type="number" value={val} min="0" max="100"
+                  onChange={e => setter(parseFloat(e.target.value) || 0)}
                   className="w-14 border border-slate-200 rounded px-2 py-1 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                 <span className="text-xs text-slate-400">%</span>
               </div>
