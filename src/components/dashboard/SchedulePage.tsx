@@ -135,7 +135,7 @@ function buildDefaultUtahSchedule(): WeekSchedule[] {
 
 function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
   return Array.from({ length: WEEKS }, () => ({
-    'ga-1': 35, 'ga-2': 35, 'ga-3': 35, 'ga-4': 35, 'ga-5': 0,
+    'ga-1': 0, 'ga-2': 0, 'ga-3': 0, 'ga-4': 0, 'ga-5': 0,
   }));
 }
 
@@ -557,6 +557,572 @@ function HistoricalsTab({ designers, location }: {
   );
 }
 
+// ─── Preservation team data ────────────────────────────────────────────────────
+
+const UTAH_PRESERVATION_TEAM = [
+  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
+  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
+  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, rate: 0, hours: Array(7).fill(0) },
+  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, rate: 0, hours: Array(7).fill(0) },
+];
+
+const GEORGIA_PRESERVATION_TEAM = [
+  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
+  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
+  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, rate: 0, hours: Array(7).fill(0) },
+  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, rate: 0, hours: Array(7).fill(0) },
+];
+
+const UTAH_FULFILLMENT_TEAM = [
+  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+];
+
+const GEORGIA_FULFILLMENT_TEAM = [
+  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+];
+
+type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; rate: number; hours: number[] };
+type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; rate: number; hours: number[] };
+
+const WEEK_LABELS_8 = ['Apr 7','Apr 14','Apr 21','Apr 28','May 5','May 12','May 19','May 26'];
+
+function parseDateRange(from: string, to: string): Record<string, number> {
+  // Returns mock event-date counts for the range — in production this would
+  // call /api/event-dates?from=X&to=Y which pulls from EventDateSection data
+  const MOCK: Record<string, number> = {
+    '2026-04-07':3,'2026-04-08':10,'2026-04-09':1,'2026-04-10':6,
+    '2026-04-11':33,'2026-04-12':5,'2026-04-13':1,'2026-04-14':4,
+    '2026-04-15':8,'2026-04-16':12,'2026-04-17':7,'2026-04-18':22,
+    '2026-04-19':18,'2026-04-20':3,'2026-04-21':9,'2026-04-22':15,
+    '2026-04-23':11,'2026-04-24':6,'2026-04-25':14,'2026-04-26':20,
+    '2026-04-27':17,'2026-04-28':5,'2026-04-29':8,'2026-04-30':13,
+  };
+  const result: Record<string, number> = {};
+  let d = new Date(from + 'T12:00:00');
+  const end = new Date(to + 'T12:00:00');
+  while (d <= end) {
+    const iso = d.toISOString().split('T')[0];
+    if (MOCK[iso]) result[iso] = MOCK[iso];
+    d.setDate(d.getDate() + 1);
+  }
+  return result;
+}
+
+// ─── PreservationSection ───────────────────────────────────────────────────────
+
+function PreservationSection({ location, preservationQueue, countsLoading }: {
+  location: 'Utah' | 'Georgia';
+  preservationQueue: number;
+  countsLoading: boolean;
+}) {
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1));
+  const mondayIso = monday.toISOString().split('T')[0];
+  const sundayIso = addDays(mondayIso, 6);
+
+  const [dateFrom,    setDateFrom]    = useState(mondayIso);
+  const [dateTo,      setDateTo]      = useState(sundayIso);
+  const [eventCounts, setEventCounts] = useState<Record<string, number>>(parseDateRange(mondayIso, sundayIso));
+  const [eventTotal,  setEventTotal]  = useState(Object.values(parseDateRange(mondayIso, sundayIso)).reduce((a,b)=>a+b,0));
+  const [dayPcts,     setDayPcts]     = useState([10, 30, 20, 15, 5, 15, 5]);
+  const [utPct,       setUtPct]       = useState(50);
+  const [gaPct,       setGaPct]       = useState(40);
+  const [unkPct,      setUnkPct]      = useState(10);
+  const [team,        setTeam]        = useState<PresTeamMember[]>(
+    location === 'Utah' ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
+                        : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
+  );
+
+  // Reset team when location changes
+  useState(() => {
+    setTeam(location === 'Utah'
+      ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
+      : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] })));
+  });
+
+  function loadRange(from: string, to: string) {
+    const counts = parseDateRange(from, to);
+    setEventCounts(counts);
+    setEventTotal(Object.values(counts).reduce((a, b) => a + b, 0));
+  }
+
+  function setQuick(mode: string) {
+    const d = new Date();
+    const dow = d.getDay();
+    const mon = new Date(d); mon.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+    let from: Date, to: Date;
+    if (mode === 'thisweek')  { from = mon; to = new Date(mon); to.setDate(mon.getDate() + 6); }
+    else if (mode === 'nextweek') { from = new Date(mon); from.setDate(mon.getDate() + 7); to = new Date(from); to.setDate(from.getDate() + 6); }
+    else if (mode === 'next2')    { from = new Date(mon); from.setDate(mon.getDate() + 7); to = new Date(from); to.setDate(from.getDate() + 13); }
+    else { from = new Date(d.getFullYear(), d.getMonth(), 1); to = new Date(d.getFullYear(), d.getMonth() + 1, 0); }
+    const f = from.toISOString().split('T')[0];
+    const t = to.toISOString().split('T')[0];
+    setDateFrom(f); setDateTo(t); loadRange(f, t);
+  }
+
+  const locPct = location === 'Utah' ? utPct : gaPct;
+  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+  // Build 7-day grid from today
+  const sevenDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const iso = d.toISOString().split('T')[0];
+    const directCnt = eventCounts[iso] ?? 0;
+    const dow = d.getDay();
+    const dayIdx = dow === 0 ? 6 : dow - 1;
+    const est = directCnt > 0
+      ? Math.round(directCnt * locPct / 100)
+      : Math.round(eventTotal * (locPct / 100) * (dayPcts[dayIdx] / 100));
+    return { iso, est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), isWknd: dow === 0 || dow === 6 };
+  });
+
+  function updateHours(mi: number, di: number, val: number) {
+    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, hours: m.hours.map((h, j) => j === di ? val : h) } : m));
+  }
+  function updateRate(mi: number, val: number) {
+    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, rate: val } : m));
+  }
+
+  const dayTotals = Array.from({ length: 7 }, (_, di) =>
+    team.reduce((s, m) => s + Math.round((m.hours[di] ?? 0) * m.ratio), 0)
+  );
+
+  const tagStyle: Record<string, string> = {
+    hourly: 'bg-slate-100 text-slate-600',
+    flex:   'bg-indigo-100 text-indigo-700',
+    oncall: 'bg-pink-100 text-pink-700',
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Date range picker */}
+      <div className="bg-white border border-slate-100 rounded-xl p-4">
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <span className="text-xs font-medium text-slate-500">Event date range</span>
+          {(['thisweek','nextweek','next2','thismonth'] as const).map((m, i) => (
+            <button key={m} onClick={() => setQuick(m)}
+              className="text-xs px-3 py-1 border border-slate-200 rounded-full text-slate-600 hover:bg-slate-50 transition-colors">
+              {['This week','Next week','Next 2 wks','This month'][i]}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+          <span className="text-xs text-slate-400">to</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+          <button onClick={() => loadRange(dateFrom, dateTo)}
+            className="px-4 py-1.5 text-xs font-medium bg-rose-700 text-white rounded hover:bg-rose-800 transition-colors">
+            Load
+          </button>
+          {eventTotal > 0 && (
+            <span className="text-sm font-medium text-rose-700">{eventTotal} total orders</span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Day-of-week % */}
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">Arrival % by day of week</h3>
+          <p className="text-xs text-slate-400 mb-3">% of weekly orders that typically arrive each day. Should total 100%.</p>
+          <div className="space-y-2">
+            {dayNames.map((d, i) => (
+              <div key={d} className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 w-20">{d}</span>
+                <input type="number" value={dayPcts[i]} min="0" max="100"
+                  onChange={e => setDayPcts(prev => prev.map((v, j) => j === i ? parseFloat(e.target.value) || 0 : v))}
+                  className="w-14 border border-slate-200 rounded px-2 py-1 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                <span className="text-xs text-slate-400">%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-slate-400">Total:</span>
+            <span className={`text-xs font-semibold ${dayPcts.reduce((a,b)=>a+b,0) === 100 ? 'text-green-700' : 'text-red-600'}`}>
+              {dayPcts.reduce((a,b)=>a+b,0)}%
+            </span>
+          </div>
+        </div>
+
+        {/* Location split */}
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">Location split</h3>
+          <p className="text-xs text-slate-400 mb-3">% of deliveries going to each location.</p>
+          <div className="space-y-2">
+            {[['Utah', utPct, setUtPct], ['Georgia', gaPct, setGaPct], ['Unknown', unkPct, setUnkPct]].map(([label, val, setter]) => (
+              <div key={label as string} className="flex items-center gap-3">
+                <span className="text-xs text-slate-500 w-16">{label as string}</span>
+                <input type="number" value={val as number} min="0" max="100"
+                  onChange={e => (setter as (v: number) => void)(parseFloat(e.target.value) || 0)}
+                  className="w-14 border border-slate-200 rounded px-2 py-1 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                <span className="text-xs text-slate-400">%</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-slate-400">Total:</span>
+            <span className={`text-xs font-semibold ${utPct + gaPct + unkPct === 100 ? 'text-green-700' : 'text-red-600'}`}>
+              {utPct + gaPct + unkPct}%
+            </span>
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <p className="text-xs text-slate-400 mb-2">Based on {eventTotal} total orders in range</p>
+            <div className="flex gap-6">
+              <div><p className="text-xs text-slate-400">Utah est.</p><p className="text-xl font-semibold text-indigo-700">{Math.round(eventTotal * utPct / 100)}</p></div>
+              <div><p className="text-xs text-slate-400">Georgia est.</p><p className="text-xl font-semibold text-indigo-700">{Math.round(eventTotal * gaPct / 100)}</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 7-day grid */}
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-2">
+          Estimated deliveries — next 7 days ({location} · {locPct}%)
+        </p>
+        <div className="grid grid-cols-7 gap-2">
+          {sevenDays.map((d, i) => (
+            <div key={i} className={`bg-white border rounded-lg p-2 text-center ${d.isWknd ? 'border-indigo-200' : 'border-slate-100'}`}>
+              <p className="text-[10px] text-slate-400">{d.dateStr}</p>
+              <p className={`text-xs font-medium mb-1 ${d.isWknd ? 'text-indigo-600' : 'text-slate-600'}`}>{d.label}</p>
+              <p className={`text-xl font-semibold ${d.est === 0 ? 'text-slate-300' : 'text-green-700'}`}>{d.est}</p>
+              <p className="text-[10px] text-slate-400">est.</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Team schedule */}
+      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-700">{location} preservation team</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Hours per day · capacity vs estimated deliveries · cost per order</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="px-3 py-2 text-left font-medium text-slate-500 min-w-[140px]">Team member</th>
+                <th className="px-2 py-2 text-center font-medium text-slate-500">Ratio</th>
+                <th className="px-2 py-2 text-center font-medium text-slate-500">Rate</th>
+                {sevenDays.map((d, i) => (
+                  <th key={i} className={`px-2 py-2 text-center font-medium min-w-[72px] ${i === 0 ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}>
+                    {d.label}<br /><span className="font-normal">{d.dateStr}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {team.map((m, mi) => (
+                <tr key={m.id} className={mi % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-700">{m.name}</div>
+                    <div className="text-slate-400">{m.ratio} ord/hr
+                      <span className={`ml-1.5 text-[10px] rounded px-1 py-px ${tagStyle[m.pay]}`}>{m.pay}</span>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 text-center text-slate-600">{m.ratio}</td>
+                  <td className="px-2 py-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <span className="text-slate-400 text-xs">$</span>
+                      <input type="number" value={m.rate || ''} placeholder="0" min="0" step="0.5"
+                        onChange={e => updateRate(mi, parseFloat(e.target.value) || 0)}
+                        className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                    </div>
+                  </td>
+                  {sevenDays.map((d, di) => {
+                    const h = m.hours[di] ?? 0;
+                    const orders = Math.round(h * m.ratio);
+                    return (
+                      <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
+                        <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
+                          onChange={e => updateHours(mi, di, parseFloat(e.target.value) || 0)}
+                          className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {/* Capacity row */}
+              <tr className="border-t-2 border-slate-200 bg-slate-50 font-medium">
+                <td colSpan={3} className="px-3 py-2 text-xs text-slate-600">Daily capacity (orders)</td>
+                {sevenDays.map((d, di) => {
+                  const cap = dayTotals[di];
+                  const est = d.est;
+                  const diff = cap - est;
+                  return (
+                    <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
+                      <div className="text-indigo-700 font-semibold">{cap}</div>
+                      {est > 0 && (
+                        <div className={`text-[10px] font-medium ${diff > 0 ? 'text-green-700' : diff < 0 ? 'text-red-600' : 'text-amber-600'}`}>
+                          {diff > 0 ? '+' : ''}{diff} vs est.
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+              {/* Est deliveries row */}
+              <tr className="bg-slate-50/50">
+                <td colSpan={3} className="px-3 py-1.5 text-[10px] text-slate-400">Est. deliveries</td>
+                {sevenDays.map((d, di) => (
+                  <td key={di} className="px-2 py-1.5 text-center text-[10px] text-slate-400">{d.est || '—'}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Cost summary */}
+      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-700">Team cost summary</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="px-4 py-2 text-left font-medium text-slate-500">Team member</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Week hrs</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Est. orders</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Hourly rate</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Week labor cost</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">CPO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {team.map((m, mi) => {
+                const wh = m.hours.reduce((a, b) => a + b, 0);
+                const wo = Math.round(wh * m.ratio);
+                const wc = wh * m.rate;
+                const cpo = wo > 0 && wc > 0 ? wc / wo : null;
+                return (
+                  <tr key={m.id} className={mi % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                    <td className="px-4 py-2 font-medium text-slate-700">{m.name}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wh}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wo}</td>
+                    <td className="px-3 py-2 text-right text-slate-500">{m.rate > 0 ? fmt$(m.rate) + '/hr' : '—'}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wc > 0 ? fmt$(wc) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{cpo !== null ? <span className="text-amber-700">{fmt$(cpo)}</span> : <span className="text-slate-300">need rate</span>}</td>
+                  </tr>
+                );
+              })}
+              {(() => {
+                const totH = team.reduce((s, m) => s + m.hours.reduce((a, b) => a + b, 0), 0);
+                const totO = team.reduce((s, m) => s + Math.round(m.hours.reduce((a, b) => a + b, 0) * m.ratio), 0);
+                const totC = team.reduce((s, m) => s + m.hours.reduce((a, b) => a + b, 0) * m.rate, 0);
+                const tCPO = totO > 0 && totC > 0 ? totC / totO : null;
+                return (
+                  <tr className="border-t-2 border-slate-200 bg-indigo-50/30 font-semibold">
+                    <td className="px-4 py-2 text-slate-700">Team total</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totH}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totO}</td>
+                    <td className="px-3 py-2 text-right">—</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totC > 0 ? fmt$(totC) : '—'}</td>
+                    <td className="px-3 py-2 text-right">{tCPO !== null ? <span className="text-amber-700">{fmt$(tCPO)}</span> : '—'}</td>
+                  </tr>
+                );
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── FulfillmentSection ────────────────────────────────────────────────────────
+
+function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
+  location: 'Utah' | 'Georgia';
+  fulfillmentQueue: number;
+  countsLoading: boolean;
+}) {
+  const [team, setTeam] = useState<FfTeamMember[]>(
+    location === 'Utah' ? UTAH_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
+                        : GEORGIA_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
+  );
+
+  function updateHours(mi: number, wi: number, val: number) {
+    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, hours: m.hours.map((h, j) => j === wi ? val : h) } : m));
+  }
+  function updateRate(mi: number, val: number) {
+    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, rate: val } : m));
+  }
+
+  const weekCap  = team.reduce((s, m) => s + Math.round((m.hours[0] ?? 0) * m.ratio), 0);
+  const weekCost = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
+  const teamCPO  = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
+  const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Fulfillment queue</p>
+          <p className="text-xs text-slate-400 mb-2">Approved + Glued</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xl font-semibold text-amber-700">{countsLoading ? '…' : fulfillmentQueue.toLocaleString()}</p>
+            <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">live</span>
+          </div>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
+          <p className="text-xs text-slate-400 mb-2">&nbsp;</p>
+          <p className="text-xl font-semibold text-slate-900">{weekCap} <span className="text-sm font-normal text-slate-400">orders</span></p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Team CPO</p>
+          <p className="text-xs text-slate-400 mb-2">weighted avg this week</p>
+          <p className="text-xl font-semibold text-slate-900">{teamCPO !== null ? fmt$(teamCPO) : '—'}</p>
+        </div>
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Weeks to clear queue</p>
+          <p className="text-xs text-slate-400 mb-2">at current pace</p>
+          <p className="text-xl font-semibold text-slate-900">{weeksToClr !== null ? `${weeksToClr}w` : '—'}</p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-700">{location} fulfillment team</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Schedule hours per week · cost per order calculated from hourly rate + ratio</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="px-3 py-2 text-left font-medium text-slate-500 min-w-[160px]">Name</th>
+                <th className="px-2 py-2 text-center font-medium text-slate-500">Ratio</th>
+                <th className="px-2 py-2 text-center font-medium text-slate-500">Rate</th>
+                {WEEK_LABELS_8.map((w, i) => (
+                  <th key={i} className={`px-2 py-2 text-center font-medium min-w-[80px] ${i === 0 ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}>
+                    {w}{i === 0 && <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 rounded px-1">now</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {team.map((m, mi) => (
+                <tr key={m.id} className={mi % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-700">{m.name}</div>
+                    <div className="text-slate-400">{m.ratio} ord/hr</div>
+                  </td>
+                  <td className="px-2 py-2 text-center text-slate-600">{m.ratio}</td>
+                  <td className="px-2 py-2 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <span className="text-slate-400 text-xs">$</span>
+                      <input type="number" value={m.rate || ''} placeholder="0" min="0" step="0.5"
+                        onChange={e => updateRate(mi, parseFloat(e.target.value) || 0)}
+                        className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                    </div>
+                  </td>
+                  {WEEK_LABELS_8.map((_, wi) => {
+                    const h = m.hours[wi] ?? 0;
+                    const o = Math.round(h * m.ratio);
+                    const cost = h * m.rate;
+                    const cpo = o > 0 && cost > 0 ? cost / o : null;
+                    return (
+                      <td key={wi} className={`px-2 py-1.5 text-center ${wi === 0 ? 'bg-indigo-50/30' : ''}`}>
+                        <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
+                          onChange={e => updateHours(mi, wi, parseFloat(e.target.value) || 0)}
+                          className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
+                        {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                <td colSpan={3} className="px-3 py-2 text-xs text-slate-600">Week total</td>
+                {WEEK_LABELS_8.map((_, wi) => {
+                  const c = team.reduce((s, m) => s + Math.round((m.hours[wi] ?? 0) * m.ratio), 0);
+                  const cost = team.reduce((s, m) => s + (m.hours[wi] ?? 0) * m.rate, 0);
+                  const cpo = c > 0 && cost > 0 ? cost / c : null;
+                  return (
+                    <td key={wi} className={`px-2 py-2 text-center ${wi === 0 ? 'bg-indigo-50/50' : ''}`}>
+                      <div className="text-amber-700">{c} ord</div>
+                      {cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Cost summary */}
+      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-700">Team cost summary</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="px-4 py-2 text-left font-medium text-slate-500">Team member</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Week hrs</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Est. orders</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Hourly rate</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">Week labor cost</th>
+                <th className="px-3 py-2 text-right font-medium text-slate-500">CPO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {team.map((m, mi) => {
+                const wh = m.hours[0] ?? 0;
+                const wo = Math.round(wh * m.ratio);
+                const wc = wh * m.rate;
+                const cpo = wo > 0 && wc > 0 ? wc / wo : null;
+                return (
+                  <tr key={m.id} className={mi % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                    <td className="px-4 py-2 font-medium text-slate-700">{m.name}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wh}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wo}</td>
+                    <td className="px-3 py-2 text-right text-slate-500">{m.rate > 0 ? fmt$(m.rate) + '/hr' : '—'}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{wc > 0 ? fmt$(wc) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{cpo !== null ? <span className="text-amber-700">{fmt$(cpo)}</span> : <span className="text-slate-300">need rate</span>}</td>
+                  </tr>
+                );
+              })}
+              {(() => {
+                const totH = team.reduce((s, m) => s + (m.hours[0] ?? 0), 0);
+                const totO = team.reduce((s, m) => s + Math.round((m.hours[0] ?? 0) * m.ratio), 0);
+                const totC = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
+                const tCPO = totO > 0 && totC > 0 ? totC / totO : null;
+                return (
+                  <tr className="border-t-2 border-slate-200 bg-indigo-50/30 font-semibold">
+                    <td className="px-4 py-2 text-slate-700">Team total</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totH}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totO}</td>
+                    <td className="px-3 py-2 text-right">—</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{totC > 0 ? fmt$(totC) : '—'}</td>
+                    <td className="px-3 py-2 text-right">{tCPO !== null ? <span className="text-amber-700">{fmt$(tCPO)}</span> : '—'}</td>
+                  </tr>
+                );
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Props from DashboardClient ────────────────────────────────────────────────
 
 interface SchedulePageProps {
@@ -837,53 +1403,20 @@ export function SchedulePage({
 
       {/* ── PRESERVATION dept ───────────────────────────────────────────────── */}
       {dept === 'preservation' && (
-        <div className="bg-white border border-slate-100 rounded-xl p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-green-400" />
-            <h2 className="text-sm font-semibold text-slate-700">Preservation Scheduling</h2>
-            <span className="text-xs bg-green-100 text-green-700 rounded px-2 py-0.5">coming soon</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-green-50 border border-green-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-green-700 uppercase tracking-wide mb-1">Current pipeline</p>
-              <p className="text-2xl font-semibold text-green-800">
-                {countsLoading ? '…' : preservationQueue.toLocaleString()}
-              </p>
-              <p className="text-xs text-green-600 mt-0.5">Bouquet Received + Checked On + In Progress</p>
-            </div>
-          </div>
-          <p className="text-sm text-slate-500">
-            Preservation scheduling will connect to <strong>Orders by Event Date</strong> to estimate
-            incoming deliveries by week. You will be able to input the percentage of orders arriving
-            each day of the week, the GA vs UT split, and then plan team members&apos; hours against
-            expected delivery volume. Coming in a future update.
-          </p>
-        </div>
+        <PreservationSection
+          location={location}
+          preservationQueue={preservationQueue}
+          countsLoading={countsLoading}
+        />
       )}
 
       {/* ── FULFILLMENT dept ────────────────────────────────────────────────── */}
       {dept === 'fulfillment' && (
-        <div className="bg-white border border-slate-100 rounded-xl p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-amber-400" />
-            <h2 className="text-sm font-semibold text-slate-700">Fulfillment Scheduling</h2>
-            <span className="text-xs bg-amber-100 text-amber-700 rounded px-2 py-0.5">coming soon</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-amber-50 border border-amber-100 rounded-lg p-4">
-              <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-1">Fulfillment queue</p>
-              <p className="text-2xl font-semibold text-amber-800">
-                {countsLoading ? '…' : fulfillmentQueue.toLocaleString()}
-              </p>
-              <p className="text-xs text-amber-600 mt-0.5">Approved + Glued — ready to seal</p>
-            </div>
-          </div>
-          <p className="text-sm text-slate-500">
-            Fulfillment scheduling will use the <strong>Approved + Glued</strong> queue as the sealing
-            backlog. Team members will have a CPO ratio and you will be able to schedule hours against
-            queue size. Coming in a future update.
-          </p>
-        </div>
+        <FulfillmentSection
+          location={location}
+          fulfillmentQueue={fulfillmentQueue}
+          countsLoading={countsLoading}
+        />
       )}
 
       {/* ── DESIGN dept ─────────────────────────────────────────────────────── */}
