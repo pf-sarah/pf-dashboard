@@ -13,18 +13,22 @@ interface UuidOrderEntry {
 }
 
 interface UnsortedOrder {
-  orderNum: string;
-  statuses: string[];
+  orderNum:         string;
+  statuses:         string[];
+  assumedCancelled: boolean;
 }
 
 interface LocationData {
-  Utah:          Record<string, number>;
-  Georgia:       Record<string, number>;
-  UtahOrders:    Record<string, UuidOrderEntry[]>;
-  GeorgiaOrders: Record<string, UuidOrderEntry[]>;
-  unsortedOrders: UnsortedOrder[];
-  totalUnsorted:  number;
-  lastSynced:    string;
+  Utah:                 Record<string, number>;
+  Georgia:              Record<string, number>;
+  UtahOrders:           Record<string, UuidOrderEntry[]>;
+  GeorgiaOrders:        Record<string, UuidOrderEntry[]>;
+  unsortedOrders:       UnsortedOrder[];
+  totalUnsorted:        number;
+  genuinelyUnsorted:    number;
+  assumedCancelledCount: number;
+  pfTotal:              number;
+  lastSynced:           string;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -33,7 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
   progress:             'In Progress',
   almostReadyToFrame:   'Almost Ready to Frame',
   readyToFrame:         'Ready to Frame',
-  frameCompleted:       'No Response',
+  frameCompleted:       'Frame Completed',
   disapproved:          'Disapproved',
   approved:             'Approved',
   noResponse:           'No Response',
@@ -69,7 +73,11 @@ function fmtDate(iso: string | null): string {
   } catch { return iso; }
 }
 
-function OrderPanel({ status, orders, onClose }: { status: string; orders: UuidOrderEntry[]; onClose: () => void }) {
+function OrderPanel({ status, orders, onClose }: {
+  status: string;
+  orders: UuidOrderEntry[];
+  onClose: () => void;
+}) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -130,7 +138,13 @@ function OrderPanel({ status, orders, onClose }: { status: string; orders: UuidO
   );
 }
 
-function LocationColumn({ name, counts, orders }: { name: string; counts: Record<string, number>; orders: Record<string, UuidOrderEntry[]> }) {
+function LocationColumn({
+  name, counts, orders,
+}: {
+  name: string;
+  counts: Record<string, number>;
+  orders: Record<string, UuidOrderEntry[]>;
+}) {
   const [expandedStatus, setExpandedStatus] = useState<string | null>(null);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
@@ -162,17 +176,26 @@ function LocationColumn({ name, counts, orders }: { name: string; counts: Record
                         <button
                           onClick={() => setExpandedStatus(prev => prev === st ? null : st)}
                           className={`rounded px-2 py-0.5 text-xs font-semibold transition-colors cursor-pointer ${
-                            isExpanded ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                            isExpanded
+                              ? 'bg-indigo-200 text-indigo-800'
+                              : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
                           }`}
                         >
                           {count.toLocaleString()}
+                          {statusOrders.length > 0 && statusOrders.length !== count && (
+                            <span className="ml-1 text-[10px] opacity-60">({statusOrders.length} listed)</span>
+                          )}
                         </button>
                       ) : (
                         <span className="text-slate-300 font-semibold text-xs">0</span>
                       )}
                     </div>
                     {isExpanded && statusOrders.length > 0 && (
-                      <OrderPanel status={st} orders={statusOrders} onClose={() => setExpandedStatus(null)} />
+                      <OrderPanel
+                        status={st}
+                        orders={statusOrders}
+                        onClose={() => setExpandedStatus(null)}
+                      />
                     )}
                     {isExpanded && statusOrders.length === 0 && (
                       <div className="mt-2 px-3 py-3 text-xs text-slate-400 italic border border-slate-200 rounded-lg bg-white">
@@ -190,22 +213,37 @@ function LocationColumn({ name, counts, orders }: { name: string; counts: Record
   );
 }
 
-function UnsortedPanel({ orders }: { orders: UnsortedOrder[] }) {
-  const [search, setSearch] = useState('');
+function UnsortedPanel({ orders, genuinelyUnsorted, assumedCancelledCount }: {
+  orders: UnsortedOrder[];
+  genuinelyUnsorted: number;
+  assumedCancelledCount: number;
+}) {
+  const [search,    setSearch]    = useState('');
+  const [tab,       setTab]       = useState<'unresolved' | 'cancelled'>('unresolved');
+
+  const activeOrders = useMemo(() =>
+    orders.filter(o => tab === 'cancelled' ? o.assumedCancelled : !o.assumedCancelled),
+    [orders, tab]
+  );
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(o => o.orderNum.includes(q));
-  }, [orders, search]);
+    if (!q) return activeOrders;
+    return activeOrders.filter(o => o.orderNum.includes(q));
+  }, [activeOrders, search]);
 
   return (
     <div className="rounded-lg border border-orange-200 bg-orange-50 overflow-hidden">
+      {/* Header */}
       <div className="px-4 py-3 border-b border-orange-200 flex items-center justify-between gap-4 flex-wrap">
         <div>
           <span className="text-xs font-semibold text-orange-700">
-            {orders.length} order{orders.length !== 1 ? 's' : ''} could not be sorted to a location
+            {genuinelyUnsorted} unresolved · {assumedCancelledCount} assumed cancelled
           </span>
-          <p className="text-xs text-orange-500 mt-0.5">These orders have no staff assigned in PF — assign a staff member in PF to resolve</p>
+          <p className="text-xs text-orange-500 mt-0.5">
+            Unresolved orders have no staff assigned in PF — assign a staff member to resolve.
+            Assumed cancelled are old orders (pre-#22000) your team can clear from PF.
+          </p>
         </div>
         <input
           type="text"
@@ -215,21 +253,61 @@ function UnsortedPanel({ orders }: { orders: UnsortedOrder[] }) {
           className="border border-orange-200 rounded px-2 py-1 text-xs bg-white text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-orange-300"
         />
       </div>
-      <div className="overflow-auto max-h-48">
+
+      {/* Tabs */}
+      <div className="flex border-b border-orange-200">
+        <button
+          onClick={() => setTab('unresolved')}
+          className={`px-4 py-2 text-xs font-medium transition-colors ${
+            tab === 'unresolved'
+              ? 'bg-white text-orange-700 border-b-2 border-orange-400'
+              : 'text-orange-500 hover:bg-orange-100/50'
+          }`}
+        >
+          Unresolved ({genuinelyUnsorted})
+        </button>
+        <button
+          onClick={() => setTab('cancelled')}
+          className={`px-4 py-2 text-xs font-medium transition-colors ${
+            tab === 'cancelled'
+              ? 'bg-white text-slate-600 border-b-2 border-slate-400'
+              : 'text-slate-400 hover:bg-orange-100/50'
+          }`}
+        >
+          Assumed Cancelled ({assumedCancelledCount})
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-auto max-h-64">
         <table className="min-w-full text-xs">
           <thead className="sticky top-0 bg-orange-50 border-b border-orange-100">
             <tr>
               <th className="px-4 py-1.5 text-left font-medium text-orange-700">Order #</th>
               <th className="px-4 py-1.5 text-left font-medium text-orange-700">Statuses</th>
+              {tab === 'cancelled' && (
+                <th className="px-4 py-1.5 text-left font-medium text-slate-400">Note</th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => (
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="px-4 py-4 text-center text-slate-400 italic">
+                  {search ? 'No matching orders' : 'No orders in this category'}
+                </td>
+              </tr>
+            ) : filtered.map(o => (
               <tr key={o.orderNum} className="border-b border-orange-50 last:border-0 hover:bg-orange-100/50">
                 <td className="px-4 py-1.5 font-mono text-indigo-700 whitespace-nowrap">#{o.orderNum}</td>
                 <td className="px-4 py-1.5 text-slate-500">
                   {o.statuses.map(s => STATUS_LABELS[s] ?? s).join(', ')}
                 </td>
+                {tab === 'cancelled' && (
+                  <td className="px-4 py-1.5 text-slate-400 italic text-[10px]">
+                    Pre-location tracking — likely cancelled
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -269,9 +347,7 @@ export function SortedLocationSection() {
     setSyncing(true);
     setSyncMsg('Syncing UUIDs from PF API… this takes 2–3 minutes');
     try {
-      const res  = await fetch('/api/cron/uuid-location-sync', {
-        method: 'GET',
-      });
+      const res  = await fetch('/api/cron/uuid-location-sync', { method: 'GET' });
       const json = await res.json() as { message?: string; error?: string; synced?: number };
       if (json.error) {
         setSyncMsg(`Sync failed: ${json.error}`);
@@ -328,26 +404,41 @@ export function SortedLocationSection() {
     return results.slice(0, 200);
   }, [globalSearch, data]);
 
+  const unsortedButtonLabel = useMemo(() => {
+    if (!data) return '';
+    const parts = [];
+    if (data.genuinelyUnsorted > 0) parts.push(`${data.genuinelyUnsorted} unresolved`);
+    if (data.assumedCancelledCount > 0) parts.push(`${data.assumedCancelledCount} assumed cancelled`);
+    return parts.join(' · ');
+  }, [data]);
+
   return (
     <section className="space-y-4">
+      {/* Header row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-baseline gap-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Sorted by Location
           </h2>
-          <span className="text-xs text-slate-400">PF API counts + cache-resolved unassigned</span>
+          <span className="text-xs text-slate-400">PF counts + resolved unassigned orders</span>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {syncMsg    && <span className="text-xs text-slate-400 max-w-xs truncate">{syncMsg}</span>}
           {resolveMsg && <span className="text-xs text-indigo-500 max-w-xs truncate">{resolveMsg}</span>}
-          {data && data.totalUnsorted > 0 && (
+
+          {data && (data.totalUnsorted > 0) && (
             <button
               onClick={() => setShowUnsorted(p => !p)}
-              className="px-3 py-1 text-xs border border-orange-300 rounded text-orange-700 bg-orange-50 hover:bg-orange-100 transition-colors"
+              className={`px-3 py-1 text-xs border rounded transition-colors ${
+                showUnsorted
+                  ? 'border-orange-400 bg-orange-100 text-orange-800'
+                  : 'border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100'
+              }`}
             >
-              {data.totalUnsorted.toLocaleString()} unsorted orders
+              {unsortedButtonLabel}
             </button>
           )}
+
           <button
             onClick={() => void resolveUnassigned()}
             disabled={resolving}
@@ -374,10 +465,16 @@ export function SortedLocationSection() {
 
       {error && <p className="text-xs text-red-500">{error}</p>}
 
+      {/* Unsorted panel */}
       {showUnsorted && data?.unsortedOrders && data.unsortedOrders.length > 0 && (
-        <UnsortedPanel orders={data.unsortedOrders} />
+        <UnsortedPanel
+          orders={data.unsortedOrders}
+          genuinelyUnsorted={data.genuinelyUnsorted ?? 0}
+          assumedCancelledCount={data.assumedCancelledCount ?? 0}
+        />
       )}
 
+      {/* Global search */}
       <div className="relative">
         <input
           type="text"
@@ -387,7 +484,10 @@ export function SortedLocationSection() {
           className="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm text-slate-700 bg-white placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-300"
         />
         {globalSearch && (
-          <button onClick={() => setGlobalSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 text-lg">×</button>
+          <button
+            onClick={() => setGlobalSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 text-lg"
+          >×</button>
         )}
       </div>
 
@@ -420,7 +520,9 @@ export function SortedLocationSection() {
                       <td className="px-4 py-2 font-mono text-slate-400 whitespace-nowrap text-[10px]">{r.uuid}</td>
                       <td className="px-4 py-2 text-slate-600 whitespace-nowrap">{r.locationName}</td>
                       <td className="px-4 py-2 whitespace-nowrap">
-                        <span className="bg-slate-100 text-slate-700 rounded px-1.5 py-0.5">{STATUS_LABELS[r.status] ?? r.status}</span>
+                        <span className="bg-slate-100 text-slate-700 rounded px-1.5 py-0.5">
+                          {STATUS_LABELS[r.status] ?? r.status}
+                        </span>
                       </td>
                       <td className="px-4 py-2 text-slate-600 whitespace-nowrap">
                         {r.staffName || <span className="text-slate-300 italic">unassigned</span>}

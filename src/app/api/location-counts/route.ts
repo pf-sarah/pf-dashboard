@@ -15,6 +15,9 @@ const PIPELINE_STATUSES = [
   'readyToSeal', 'glued', 'readyToPackage', 'readyToFulfill', 'preparingToBeShipped',
 ];
 
+// Orders below this number are assumed cancelled (pre-location-tracking era)
+const OLD_ORDER_THRESHOLD = 22000;
+
 export interface UuidOrderEntry {
   uuid:      string;
   orderNum:  string;
@@ -24,12 +27,18 @@ export interface UuidOrderEntry {
   orderDate: string | null;
 }
 
+export interface UnsortedOrder {
+  orderNum:         string;
+  statuses:         string[];
+  assumedCancelled: boolean;
+}
+
 export async function GET() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
-    // ── Step 1: PF API counts (source of truth) ───────────────────────────────
+    // ── Step 1: PF API counts (source of truth for totals) ────────────────────
     const pfCounts = await pfGet<PFCount[]>('/OrderProducts/CountsByLocation');
 
     const utah:       Record<string, number> = {};
@@ -47,7 +56,9 @@ export async function GET() {
       }
     });
 
-    // ── Step 2: Cache rows — resolved + unresolved ────────────────────────────
+    // ── Step 2: Pull ALL cache rows ───────────────────────────────────────────
+    // We use uuid_location_cache as the source for order lists.
+    // After the SQL sync, all bouquet-resolved orders now have location set here.
     const { data: cacheRows } = await supabase
       .from('uuid_location_cache')
       .select('uuid, order_num, status, location, staff_name, order_date')
@@ -56,11 +67,14 @@ export async function GET() {
 
     const utahOrders:    Record<string, UuidOrderEntry[]> = {};
     const georgiaOrders: Record<string, UuidOrderEntry[]> = {};
-    const cacheUtah:     Record<string, number> = {};
-    const cacheGeorgia:  Record<string, number> = {};
 
-    // Track unsorted: order_num -> Set of statuses (deduplicate by order+status)
-    const unsortedMap: Map<string, Set<string>> = new Map();
+    // Count how many cache rows are resolved per location per status
+    // (used to compute the final totals alongside PF API counts)
+    const cacheUtah:    Record<string, number> = {};
+    const cacheGeorgia: Record<string, number> = {};
+
+    // Unsorted: order_num → Set of statuses
+    const unsortedMap = new Map<string, Set<string>>();
 
     PIPELINE_STATUSES.forEach(s => {
       utahOrders[s]    = [];
@@ -86,22 +100,22 @@ export async function GET() {
         georgiaOrders[r.status]?.push(entry);
         cacheGeorgia[r.status] = (cacheGeorgia[r.status] ?? 0) + 1;
       } else {
-        // Unresolved — track order number + status for unsorted report
+        // Unresolved — track for unsorted panel
         if (!unsortedMap.has(r.order_num)) unsortedMap.set(r.order_num, new Set());
         unsortedMap.get(r.order_num)!.add(r.status);
       }
     });
 
-    // ── Step 3: Final counts = PF API + cache-resolved extras ─────────────────
-    // PF API already counts its own assigned orders correctly.
-    // Cache-resolved orders were unassigned in PF, so we add only the cache
-    // counts for orders that PF put in "unassigned" bucket.
-    // We cap the addition at the unassigned count to avoid double-counting.
+    // ── Step 3: Final counts ──────────────────────────────────────────────────
+    // PF API is source of truth for assigned orders.
+    // Cache-resolved orders (bouquet upload method) filled the unassigned bucket.
+    // We add cache-resolved counts on top of PF assigned, capped at unassigned total
+    // to avoid double counting.
     const finalUtah:    Record<string, number> = {};
     const finalGeorgia: Record<string, number> = {};
 
     PIPELINE_STATUSES.forEach(s => {
-      const pfUnassigned = unassigned[s] ?? 0;
+      const pfUnassigned    = unassigned[s] ?? 0;
       const resolvedUtah    = Math.min(cacheUtah[s]    ?? 0, pfUnassigned);
       const resolvedGeorgia = Math.min(cacheGeorgia[s] ?? 0, pfUnassigned - resolvedUtah);
       finalUtah[s]    = (utah[s]    ?? 0) + resolvedUtah;
@@ -120,25 +134,40 @@ export async function GET() {
       georgiaOrders[s].sort(fifo);
     });
 
-    // ── Step 5: Build unsorted report ─────────────────────────────────────────
-    const unsortedOrders = [...unsortedMap.entries()].map(([orderNum, statuses]) => ({
+    // ── Step 5: Build unsorted report with assumed-cancelled flag ─────────────
+    const unsortedOrders: UnsortedOrder[] = [...unsortedMap.entries()].map(([orderNum, statuses]) => ({
       orderNum,
-      statuses: [...statuses],
+      statuses:         [...statuses],
+      assumedCancelled: parseInt(orderNum, 10) < OLD_ORDER_THRESHOLD,
     }));
 
-    const pfTotal       = Object.values(utah).reduce((a, b) => a + b, 0) + Object.values(georgia).reduce((a, b) => a + b, 0) + Object.values(unassigned).reduce((a, b) => a + b, 0);
+    // Sort: recent unsorted first, then old assumed-cancelled
+    unsortedOrders.sort((a, b) => {
+      if (a.assumedCancelled !== b.assumedCancelled) return a.assumedCancelled ? 1 : -1;
+      return parseInt(b.orderNum, 10) - parseInt(a.orderNum, 10);
+    });
+
+    const pfTotal       = Object.values(utah).reduce((a, b) => a + b, 0)
+                        + Object.values(georgia).reduce((a, b) => a + b, 0)
+                        + Object.values(unassigned).reduce((a, b) => a + b, 0);
     const sortedUtah    = Object.values(finalUtah).reduce((a, b) => a + b, 0);
     const sortedGeorgia = Object.values(finalGeorgia).reduce((a, b) => a + b, 0);
     const totalUnsorted = Math.max(0, pfTotal - sortedUtah - sortedGeorgia);
+
+    const genuinelyUnsorted  = unsortedOrders.filter(o => !o.assumedCancelled).length;
+    const assumedCancelledCount = unsortedOrders.filter(o => o.assumedCancelled).length;
+
     return NextResponse.json({
-      Utah:          finalUtah,
-      Georgia:       finalGeorgia,
-      UtahOrders:    utahOrders,
-      GeorgiaOrders: georgiaOrders,
+      Utah:               finalUtah,
+      Georgia:            finalGeorgia,
+      UtahOrders:         utahOrders,
+      GeorgiaOrders:      georgiaOrders,
       unsortedOrders,
       totalUnsorted,
+      genuinelyUnsorted,
+      assumedCancelledCount,
       pfTotal,
-      lastSynced:    cacheRows?.[0] ? 'cache populated' : 'cache empty — run sync',
+      lastSynced: cacheRows?.[0] ? 'cache populated' : 'cache empty — run sync',
     });
 
   } catch (e) {
