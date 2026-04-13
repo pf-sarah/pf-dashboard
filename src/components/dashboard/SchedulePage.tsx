@@ -1442,42 +1442,37 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   const staff = location === 'Utah' ? UTAH_STAFF : GEORGIA_STAFF;
   const days   = getWeekdays(weekOffset);
 
-  // Week index relative to current week — for design (weekly) and ff (weekly) schedules
-  // Preservation uses day index within the 5-day window
-  const weekIdx = weekOffset; // design/ff schedule week index
+  // Week index for design/ff (weekly schedules)
+  const weekIdx = weekOffset;
 
-  function getAvail(person: StaffMember, iso: string): number {
-    const stored = masterAvailability[person.id];
-    if (stored?.overrides?.[iso] !== undefined) return stored.overrides[iso];
-    if (stored?.defaultHours !== undefined)     return stored.defaultHours;
-    // Fall back to what's in their home dept schedule
-    if (person.homeDept === 'design') {
-      const wkHours = designHours[person.id]?.[weekIdx] ?? 0;
-      return Math.round(wkHours / 5); // weekly → daily
-    }
-    if (person.homeDept === 'preservation') {
-      // pres is already daily — find which day index this iso is in current week
-      const dayI = days.findIndex(d => d.iso === iso);
-      return presHours[person.id]?.[dayI] ?? 0;
-    }
-    if (person.homeDept === 'fulfillment') {
-      const wkHours = ffHours[person.id]?.[weekIdx] ?? 0;
-      return Math.round(wkHours / 5);
-    }
-    return 8;
-  }
-
-  // Scheduled hours for a person on a given day across all depts
-  function getScheduled(person: StaffMember, iso: string, dayI: number): {
+  // ── Weekly totals per person ──────────────────────────────────────────────
+  // Design: stored as weekly hours directly
+  // Preservation: stored as daily hours (5 days) — sum for week total
+  // Fulfillment: stored as weekly hours directly
+  function getWeeklyScheduled(person: StaffMember): {
     design: number; preservation: number; fulfillment: number; total: number;
   } {
-    // Design: weekly hours / 5
-    const dHrs = Math.round((designHours[person.id]?.[weekIdx] ?? 0) / 5);
-    // Preservation: daily
-    const pHrs = presHours[person.id]?.[dayI] ?? 0;
-    // Fulfillment: weekly / 5
-    const fHrs = Math.round((ffHours[person.id]?.[weekIdx] ?? 0) / 5);
+    const dHrs = designHours[person.id]?.[weekIdx] ?? 0;
+    const pHrs = (presHours[person.id] ?? []).reduce((a, b) => a + b, 0);
+    const fHrs = ffHours[person.id]?.[weekIdx] ?? 0;
     return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
+  }
+
+  // Weekly available = defaultHours × 5 days, unless overridden at week level
+  function getWeeklyAvail(person: StaffMember): number {
+    const stored = masterAvailability[person.id];
+    const defaultPerDay = stored?.defaultHours ?? 8;
+    // Week-level override keyed by Monday ISO of this week
+    const mondayIso = days[0]?.iso ?? '';
+    if (stored?.overrides?.[mondayIso] !== undefined) return stored.overrides[mondayIso];
+    return defaultPerDay * 5;
+  }
+
+  // Daily available for a specific day (used for preservation which is daily)
+  function getDailyAvail(person: StaffMember, iso: string): number {
+    const stored = masterAvailability[person.id];
+    if (stored?.overrides?.[iso] !== undefined) return stored.overrides[iso];
+    return stored?.defaultHours ?? 8;
   }
 
   function setDefault(personId: string, hours: number) {
@@ -1485,23 +1480,24 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
     onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, defaultHours: hours } });
   }
 
+  // Override for a specific day (pres team) or week Monday (design/ff)
   function setOverride(personId: string, iso: string, hours: number) {
     const existing = masterAvailability[personId] ?? { defaultHours: 8, overrides: {} };
-    const newOverrides = { ...existing.overrides, [iso]: hours };
-    onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, overrides: newOverrides } });
+    onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, overrides: { ...existing.overrides, [iso]: hours } } });
   }
 
   const weekLabel = weekOffset === 0 ? 'This week'
     : weekOffset === 1 ? 'Next week'
-    : weekOffset === 2 ? 'Week after next'
-    : `Week +${weekOffset}`;
+    : 'Week after next';
 
-  // Group staff by dept for visual separation
+  // Group staff by dept
   const grouped = [
-    { dept: 'design',       label: 'Design',       members: staff.filter(s => s.homeDept === 'design') },
-    { dept: 'preservation', label: 'Preservation',  members: staff.filter(s => s.homeDept === 'preservation') },
-    { dept: 'fulfillment',  label: 'Fulfillment',   members: staff.filter(s => s.homeDept === 'fulfillment') },
+    { dept: 'design',       label: 'Design',      members: staff.filter(s => s.homeDept === 'design') },
+    { dept: 'preservation', label: 'Preservation', members: staff.filter(s => s.homeDept === 'preservation') },
+    { dept: 'fulfillment',  label: 'Fulfillment',  members: staff.filter(s => s.homeDept === 'fulfillment') },
   ] as const;
+
+  const mondayIso = days[0]?.iso ?? '';
 
   return (
     <div className="space-y-4">
@@ -1510,21 +1506,23 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
         <div>
           <h2 className="text-sm font-semibold text-slate-700">{location} master schedule</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            All staff availability vs scheduled hours across departments.
+            Weekly availability vs scheduled hours. Design &amp; fulfillment show weekly totals. Preservation shows daily.
             <span className="ml-2 text-red-500 font-medium">Red ⚠ = over-scheduled</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setWeekOffset(Math.max(0, weekOffset - 1))} disabled={weekOffset === 0}
             className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-          <span className="text-xs font-medium text-slate-600 min-w-[100px] text-center">{weekLabel}</span>
+          <span className="text-xs font-medium text-slate-600 min-w-[100px] text-center">
+            {weekLabel} · {days[0]?.dateStr} – {days[4]?.dateStr}
+          </span>
           <button onClick={() => setWeekOffset(Math.min(2, weekOffset + 1))} disabled={weekOffset >= 2}
             className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
         </div>
       </div>
 
       {/* Legend */}
-      <div className="flex gap-4 flex-wrap">
+      <div className="flex gap-3 flex-wrap">
         {(['design','preservation','fulfillment'] as const).map(d => (
           <span key={d} className={`text-xs rounded px-2 py-0.5 ${DEPT_COLOR[d]}`}>{d.charAt(0).toUpperCase()+d.slice(1)}</span>
         ))}
@@ -1532,97 +1530,150 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
         <span className="text-xs bg-red-100 text-red-700 rounded px-2 py-0.5">⚠ Over-scheduled</span>
       </div>
 
-      {/* Master table */}
-      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500 min-w-[64px]">Default<br/>hrs/day</th>
-                {days.map(d => (
-                  <th key={d.iso} className="px-2 py-2 text-center font-medium text-slate-500 min-w-[90px]">
-                    <div>{d.label}</div>
-                    <div className="font-normal text-[10px]">{d.dateStr}</div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {grouped.map(({ dept, label, members }) => (
-                <>
-                  {/* Dept group header */}
-                  <tr key={`header-${dept}`} className="bg-slate-50/80 border-t border-slate-200">
-                    <td colSpan={7} className={`px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide ${DEPT_COLOR[dept].split(' ')[1]}`}>
-                      {label}
-                    </td>
+      {/* ── DESIGN + FULFILLMENT staff — weekly view ─────────────────────────── */}
+      {(['design','fulfillment'] as const).map(deptKey => {
+        const deptMembers = staff.filter(s => s.homeDept === deptKey);
+        if (deptMembers.length === 0) return null;
+        return (
+          <div key={deptKey} className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+            <div className={`px-5 py-2.5 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide ${DEPT_COLOR[deptKey].split(' ')[1]}`}>
+              {deptKey.charAt(0).toUpperCase()+deptKey.slice(1)} — weekly view ({days[0]?.dateStr} – {days[4]?.dateStr})
+            </div>
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500">Default<br/>hrs/day</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500">Available<br/>this week</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500 text-indigo-600">Design<br/>hrs</th>
+                  <th className="px-3 py-2 text-center font-medium text-green-700">Pres<br/>hrs</th>
+                  <th className="px-3 py-2 text-center font-medium text-amber-700">FF<br/>hrs</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500">Total<br/>scheduled</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500">Remaining<br/>for flex</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deptMembers.map((person, pi) => {
+                  const sched    = getWeeklyScheduled(person);
+                  const avail    = getWeeklyAvail(person);
+                  const remain   = avail - sched.total;
+                  const over     = sched.total > avail && sched.total > 0;
+                  const defaultH = masterAvailability[person.id]?.defaultHours ?? 8;
+                  const weekOverride = masterAvailability[person.id]?.overrides?.[mondayIso];
+                  return (
+                    <tr key={person.id} className={`border-b border-slate-50 ${pi % 2 === 0 ? '' : 'bg-slate-50/30'} ${over ? 'bg-red-50' : ''}`}>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <div className="font-medium text-slate-700">{person.name}</div>
+                        {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
+                      </td>
+                      {/* Default hours/day */}
+                      <td className="px-3 py-2 text-center">
+                        <input type="number" value={defaultH || ''} min="0" max="12" placeholder="8"
+                          onChange={e => setDefault(person.id, parseFloat(e.target.value) || 0)}
+                          className="w-12 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                      </td>
+                      {/* Available this week (default×5 or week override) */}
+                      <td className="px-3 py-2 text-center">
+                        <input type="number" value={weekOverride !== undefined ? weekOverride : avail} min="0" max="60" placeholder={String(defaultH * 5)}
+                          onChange={e => setOverride(person.id, mondayIso, parseFloat(e.target.value) || 0)}
+                          className={`w-14 border rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${weekOverride !== undefined ? 'border-indigo-300 text-indigo-700' : 'border-slate-200'}`}
+                          title="Total available hours this week (click to override)" />
+                      </td>
+                      <td className="px-3 py-2 text-center font-medium text-indigo-700">{sched.design || '—'}</td>
+                      <td className="px-3 py-2 text-center font-medium text-green-700">{sched.preservation || '—'}</td>
+                      <td className="px-3 py-2 text-center font-medium text-amber-700">{sched.fulfillment || '—'}</td>
+                      <td className="px-3 py-2 text-center font-semibold text-slate-700">{sched.total || '—'}</td>
+                      <td className={`px-3 py-2 text-center font-semibold ${over ? 'text-red-600' : remain > 0 ? 'text-green-700' : 'text-slate-400'}`}>
+                        {over ? `⚠ ${Math.abs(remain)}h over` : remain > 0 ? `${remain}h free` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+
+      {/* ── PRESERVATION staff — daily view ──────────────────────────────────── */}
+      {(() => {
+        const presMembers = staff.filter(s => s.homeDept === 'preservation');
+        if (presMembers.length === 0) return null;
+        return (
+          <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+            <div className="px-5 py-2.5 border-b border-slate-100 text-xs font-semibold uppercase tracking-wide text-green-700">
+              Preservation — daily view
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100">
+                    <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
+                    <th className="px-3 py-2 text-center font-medium text-slate-500">Default<br/>hrs/day</th>
+                    {days.map(d => (
+                      <th key={d.iso} className="px-2 py-2 text-center font-medium text-slate-500 min-w-[90px]">
+                        <div>{d.label}</div>
+                        <div className="font-normal text-[10px]">{d.dateStr}</div>
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-center font-medium text-slate-500">Week<br/>remaining</th>
                   </tr>
-                  {members.map((person, pi) => {
-                    const defaultHrs = masterAvailability[person.id]?.defaultHours ?? (
-                      person.homeDept === 'design' ? Math.round((designHours[person.id]?.[weekIdx] ?? 0) / 5)
-                      : person.homeDept === 'fulfillment' ? Math.round((ffHours[person.id]?.[weekIdx] ?? 0) / 5)
-                      : presHours[person.id]?.[0] ?? 8
-                    );
+                </thead>
+                <tbody>
+                  {presMembers.map((person, pi) => {
+                    const defaultH = masterAvailability[person.id]?.defaultHours ?? 8;
+                    const weekSched = getWeeklyScheduled(person);
+                    const weekAvail = defaultH * 5;
+                    const weekRemain = weekAvail - weekSched.total;
+                    const weekOver = weekSched.total > weekAvail && weekSched.total > 0;
                     return (
-                      <tr key={person.id} className={pi % 2 === 0 ? '' : 'bg-slate-50/30'}>
+                      <tr key={person.id} className={`border-b border-slate-50 ${pi % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
                         <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
                           <div className="font-medium text-slate-700">{person.name}</div>
-                          <div className="flex items-center gap-1 mt-0.5">
-                            <span className={`text-[10px] rounded px-1 py-px ${DEPT_COLOR[person.homeDept]}`}>{person.homeDept.slice(0,4)}</span>
-                            {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
-                          </div>
+                          {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
                         </td>
-                        {/* Default hours input */}
                         <td className="px-3 py-2 text-center">
-                          <input type="number" value={defaultHrs || ''} min="0" max="12" placeholder="8"
+                          <input type="number" value={defaultH || ''} min="0" max="12" placeholder="8"
                             onChange={e => setDefault(person.id, parseFloat(e.target.value) || 0)}
                             className="w-12 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                         </td>
-                        {/* Per-day cells */}
                         {days.map((d, di) => {
-                          const avail   = getAvail(person, d.iso);
-                          const sched   = getScheduled(person, d.iso, di);
-                          const over    = sched.total > avail && sched.total > 0;
-                          const remain  = avail - sched.total;
+                          const avail   = getDailyAvail(person, d.iso);
+                          const presHrs = presHours[person.id]?.[di] ?? 0;
+                          const over    = presHrs > avail && presHrs > 0;
+                          const remain  = avail - presHrs;
                           const isOverridden = masterAvailability[person.id]?.overrides?.[d.iso] !== undefined;
                           return (
                             <td key={d.iso} className={`px-2 py-1.5 text-center ${over ? 'bg-red-50' : ''}`}>
-                              {/* Available override input */}
                               <div className="flex items-center justify-center gap-0.5 mb-0.5">
-                                <input type="number" value={avail || ''} min="0" max="12" placeholder={String(defaultHrs)}
+                                <input type="number" value={avail || ''} min="0" max="12" placeholder={String(defaultH)}
                                   onChange={e => setOverride(person.id, d.iso, parseFloat(e.target.value) || 0)}
-                                  className={`w-10 border rounded px-1 py-0.5 text-center text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${
-                                    isOverridden ? 'border-indigo-300 text-indigo-700' : 'border-slate-200 text-slate-600'
-                                  }`}
-                                  title="Available hours this day (click to override)" />
-                                <span className="text-[10px] text-slate-400">avail</span>
+                                  className={`w-10 border rounded px-1 py-0.5 text-center text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${isOverridden ? 'border-indigo-300 text-indigo-700' : 'border-slate-200 text-slate-500'}`}
+                                  title="Available hours this day" />
+                                <span className="text-[10px] text-slate-300">av</span>
                               </div>
-                              {/* Scheduled breakdown */}
-                              {sched.total > 0 && (
-                                <div className="space-y-0.5">
-                                  {sched.design > 0       && <div className="text-[10px] text-indigo-600">{sched.design}h des</div>}
-                                  {sched.preservation > 0 && <div className="text-[10px] text-green-700">{sched.preservation}h pres</div>}
-                                  {sched.fulfillment > 0  && <div className="text-[10px] text-amber-700">{sched.fulfillment}h ff</div>}
-                                </div>
-                              )}
-                              {/* Over/remaining indicator */}
+                              {presHrs > 0 && <div className="text-[10px] text-green-700 font-medium">{presHrs}h pres</div>}
                               {over ? (
-                                <div className="text-[10px] text-red-600 font-semibold mt-0.5">⚠ +{sched.total - avail}h over</div>
-                              ) : remain > 0 && sched.total >= 0 ? (
-                                <div className="text-[10px] text-slate-400 mt-0.5">{remain}h free</div>
+                                <div className="text-[10px] text-red-600 font-semibold">⚠ +{presHrs - avail}h</div>
+                              ) : remain > 0 ? (
+                                <div className="text-[10px] text-slate-400">{remain}h free</div>
                               ) : null}
                             </td>
                           );
                         })}
+                        {/* Week remaining summary */}
+                        <td className={`px-3 py-2 text-center font-semibold ${weekOver ? 'text-red-600' : weekRemain > 0 ? 'text-green-700' : 'text-slate-400'}`}>
+                          {weekOver ? `⚠ ${Math.abs(weekRemain)}h over` : weekRemain > 0 ? `${weekRemain}h free` : '—'}
+                        </td>
                       </tr>
                     );
                   })}
-                </>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 gap-4">
@@ -1630,12 +1681,12 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
           const deptStaff = staff.filter(s => s.homeDept === d && !s.onCall);
           const totalAvail = deptStaff.reduce((sum, p) => {
             const def = masterAvailability[p.id]?.defaultHours ?? 8;
-            return sum + def * 5; // 5 days
+            const mondayOverride = masterAvailability[p.id]?.overrides?.[mondayIso];
+            return sum + (mondayOverride !== undefined ? mondayOverride : def * 5);
           }, 0);
           const totalSched = deptStaff.reduce((sum, p) => {
-            if (d === 'design')       return sum + (designHours[p.id]?.[weekIdx] ?? 0);
-            if (d === 'preservation') return sum + (presHours[p.id]?.reduce((a,b)=>a+b,0) ?? 0);
-            return sum + (ffHours[p.id]?.[weekIdx] ?? 0);
+            const s = getWeeklyScheduled(p);
+            return sum + s.total;
           }, 0);
           const pct = totalAvail > 0 ? Math.round(totalSched / totalAvail * 100) : 0;
           return (
@@ -1645,13 +1696,13 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
               </p>
               <div className="flex items-end gap-1 mb-1">
                 <span className="text-xl font-semibold text-slate-900">{totalSched}</span>
-                <span className="text-xs text-slate-400 mb-0.5">/ {totalAvail} hrs</span>
+                <span className="text-xs text-slate-400 mb-0.5">/ {totalAvail} hrs this week</span>
               </div>
               <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                 <div className={`h-1.5 rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-green-500' : 'bg-slate-300'}`}
                   style={{ width: `${Math.min(100, pct)}%` }} />
               </div>
-              <p className="text-xs text-slate-400 mt-1">{pct}% capacity utilized</p>
+              <p className="text-xs text-slate-400 mt-1">{pct}% utilized · {Math.max(0, totalAvail - totalSched)}h free for flex</p>
             </div>
           );
         })}
