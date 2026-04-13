@@ -1446,26 +1446,29 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   const weekIdx = weekOffset;
 
   // ── Weekly totals per person ──────────────────────────────────────────────
-  // Design: stored as weekly hours directly
-  // Preservation: stored as daily hours (5 days) — sum for week total
-  // Fulfillment: stored as weekly hours directly
+  // Fall back to hardcoded defaults when nothing has been persisted yet
+  const defaultUtahSched    = buildDefaultUtahSchedule();
+  const defaultGeorgiaSched = buildDefaultGeorgiaSchedule();
+  const defaultSched = location === 'Utah' ? defaultUtahSched : defaultGeorgiaSched;
+
   function getWeeklyScheduled(person: StaffMember): {
     design: number; preservation: number; fulfillment: number; total: number;
   } {
-    const dHrs = designHours[person.id]?.[weekIdx] ?? 0;
+    // Design: use persisted hours if available, else fall back to default schedule
+    const dHrs = designHours[person.id]?.[weekIdx] ?? defaultSched[weekIdx]?.[person.id] ?? 0;
+    // Preservation: daily hours summed
     const pHrs = (presHours[person.id] ?? []).reduce((a, b) => a + b, 0);
+    // Fulfillment: use persisted hours if available, else fall back to default (0)
     const fHrs = ffHours[person.id]?.[weekIdx] ?? 0;
     return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
   }
 
-  // Weekly available = defaultHours × 5 days, unless overridden at week level
+  // Weekly available = defaultHours × 5, overridable per week
   function getWeeklyAvail(person: StaffMember): number {
     const stored = masterAvailability[person.id];
-    const defaultPerDay = stored?.defaultHours ?? 8;
-    // Week-level override keyed by Monday ISO of this week
     const mondayIso = days[0]?.iso ?? '';
     if (stored?.overrides?.[mondayIso] !== undefined) return stored.overrides[mondayIso];
-    return defaultPerDay * 5;
+    return (stored?.defaultHours ?? 8) * 5;
   }
 
   // Daily available for a specific day (used for preservation which is daily)
