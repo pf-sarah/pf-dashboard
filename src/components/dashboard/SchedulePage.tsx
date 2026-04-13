@@ -511,17 +511,17 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
 // ─── Preservation team data ────────────────────────────────────────────────────
 
 const UTAH_PRESERVATION_TEAM = [
-  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
-  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
-  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, rate: 0, hours: Array(7).fill(0) },
-  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, rate: 0, hours: Array(7).fill(0) },
+  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, rate: 0, hours: Array(5).fill(0) },
+  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, rate: 0, hours: Array(5).fill(0) },
 ];
 
 const GEORGIA_PRESERVATION_TEAM = [
-  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
-  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(7).fill(8) },
-  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, rate: 0, hours: Array(7).fill(0) },
-  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, rate: 0, hours: Array(7).fill(0) },
+  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, rate: 0, hours: Array(5).fill(0) },
+  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, rate: 0, hours: Array(5).fill(0) },
 ];
 
 const UTAH_FULFILLMENT_TEAM = [
@@ -849,7 +849,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const [eventTotal,  setEventTotal]  = useState(() => Object.values(parseDateRange(mondayIso, sundayIso)).reduce((a,b)=>a+b,0));
 
   // Use persisted settings
-  const dayPcts  = presSettings.dayPcts ?? [10,30,20,15,5,15,5];
+  const dayPcts  = presSettings.dayPcts ?? [20,25,25,20,10];
   const utPct    = presSettings.utPct   ?? 50;
   const gaPct    = presSettings.gaPct   ?? 40;
   const unkPct   = presSettings.unkPct  ?? 10;
@@ -869,7 +869,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const defaultTeam = location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM;
   const team: PresTeamMember[] = defaultTeam.map((m, mi) => {
     const roster = presRoster[m.id];
-    const hours  = presHours[m.id] ?? Array(7).fill(m.hours[0] ?? 0);
+    const hours  = presHours[m.id] ?? Array(5).fill(m.hours[0] ?? 0);
     return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, hours };
   });
 
@@ -892,15 +892,25 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   }
 
   const locPct   = location === 'Utah' ? utPct : gaPct;
-  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
 
-  const sevenDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() + i);
-    const iso = d.toISOString().split('T')[0];
-    const dow = d.getDay(); const dayIdx = dow === 0 ? 6 : dow - 1;
-    const est = Math.round(eventTotal * (locPct / 100) * (dayPcts[dayIdx] / 100));
-    return { iso, est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), isWknd: dow === 0 || dow === 6 };
-  });
+  // Build next 5 weekdays (Mon-Fri only)
+  const fiveDays = (() => {
+    const days = [];
+    const d = new Date();
+    while (days.length < 5) {
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) {
+        const iso = d.toISOString().split('T')[0];
+        const dayIdx = dow - 1; // Mon=0..Fri=4
+        const est = Math.round(eventTotal * (locPct / 100) * ((dayPcts[dayIdx] ?? 0) / 100));
+        days.push({ iso, est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
+      }
+      d.setDate(d.getDate() + 1);
+    }
+    return days;
+  })();
+  const sevenDays = fiveDays; // alias kept for JSX compatibility
 
   function updateHours(mi: number, di: number, val: number) {
     const id = defaultTeam[mi].id;
@@ -913,7 +923,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresRosterChange({ ...presRoster, [id]: { ...existing, [field]: val } });
   }
 
-  const dayTotals = Array.from({ length: 7 }, (_, di) =>
+  const dayTotals = Array.from({ length: 5 }, (_, di) =>
     team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[di] ?? 0) / m.ratio) : 0), 0)
   );
 
@@ -1003,11 +1013,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-2">
           Estimated deliveries — next 7 days ({location} · {locPct}%)
         </p>
-        <div className="grid grid-cols-7 gap-2">
+        <div className="grid grid-cols-5 gap-2">
           {sevenDays.map((d, i) => (
-            <div key={i} className={`bg-white border rounded-lg p-2 text-center ${d.isWknd ? 'border-indigo-200' : 'border-slate-100'}`}>
+            <div key={i} className={`bg-white border border-slate-100 rounded-lg p-2 text-center`}>
               <p className="text-[10px] text-slate-400">{d.dateStr}</p>
-              <p className={`text-xs font-medium mb-1 ${d.isWknd ? 'text-indigo-600' : 'text-slate-600'}`}>{d.label}</p>
+              <p className={`text-xs font-medium mb-1 text-slate-600`}>{d.label}</p>
               <p className={`text-xl font-semibold ${d.est === 0 ? 'text-slate-300' : 'text-green-700'}`}>{d.est}</p>
               <p className="text-[10px] text-slate-400">est.</p>
             </div>
@@ -1348,6 +1358,308 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   );
 }
 
+// ─── Master roster data ───────────────────────────────────────────────────────
+// All real staff per location with home dept and whether they are on-call only
+
+interface StaffMember {
+  id:       string;
+  name:     string;
+  homeDept: 'design' | 'preservation' | 'fulfillment';
+  onCall:   boolean;
+}
+
+const UTAH_STAFF: StaffMember[] = [
+  { id: 'ut-mgr', name: 'Jennika Merrill',       homeDept: 'design',       onCall: false },
+  { id: 'ut-1',   name: 'Deanna L Brown',         homeDept: 'design',       onCall: false },
+  { id: 'ut-2',   name: 'Sarah Glissmeyer',        homeDept: 'design',       onCall: false },
+  { id: 'ut-3',   name: 'Kathryn Hill',            homeDept: 'design',       onCall: false },
+  { id: 'ut-4',   name: 'Mia Legas',               homeDept: 'design',       onCall: false },
+  { id: 'ut-5',   name: 'Sloane James',            homeDept: 'design',       onCall: false },
+  { id: 'ut-6',   name: 'Audrey Brown',            homeDept: 'design',       onCall: false },
+  { id: 'ut-7',   name: 'Chloe Leonard',           homeDept: 'design',       onCall: false },
+  { id: 'ut-p1',  name: 'Katelyn Wilson',          homeDept: 'preservation', onCall: false },
+  { id: 'ut-p2',  name: 'Emma Dunakey',            homeDept: 'preservation', onCall: true  },
+  { id: 'ut-f1',  name: 'Izabella DePrima',        homeDept: 'fulfillment',  onCall: false },
+  { id: 'ut-f2',  name: 'Warner Neuenschwander',   homeDept: 'fulfillment',  onCall: false },
+  { id: 'ut-f3',  name: 'Owen Shaw',               homeDept: 'fulfillment',  onCall: false },
+  { id: 'ut-f4',  name: 'Emma Swenson',            homeDept: 'fulfillment',  onCall: false },
+];
+
+const GEORGIA_STAFF: StaffMember[] = [
+  { id: 'ga-1',  name: 'Katherine Piper',  homeDept: 'design',       onCall: false },
+  { id: 'ga-2',  name: 'Allanna Harlan',   homeDept: 'design',       onCall: false },
+  { id: 'ga-3',  name: 'Erin Webb',        homeDept: 'design',       onCall: false },
+  { id: 'ga-4',  name: 'Rachel Tucker',    homeDept: 'design',       onCall: false },
+  { id: 'ga-p1', name: 'Amber Garrett',    homeDept: 'preservation', onCall: false },
+  { id: 'ga-p2', name: 'Celt Stewart',     homeDept: 'preservation', onCall: false },
+  { id: 'ga-f1', name: 'Yann Jean-Louis',  homeDept: 'fulfillment',  onCall: false },
+  { id: 'ga-f2', name: 'Nahid Knight',     homeDept: 'fulfillment',  onCall: false },
+  { id: 'ga-f3', name: 'Shantel Phifer',   homeDept: 'fulfillment',  onCall: false },
+];
+
+const DEPT_COLOR: Record<string, string> = {
+  design:       'bg-indigo-100 text-indigo-700',
+  preservation: 'bg-green-100 text-green-700',
+  fulfillment:  'bg-amber-100 text-amber-700',
+};
+
+// Returns next N weekdays (Mon-Fri) from today, optionally offset by weeks
+function getWeekdays(weekOffset: number): { iso: string; label: string; dateStr: string }[] {
+  const days: { iso: string; label: string; dateStr: string }[] = [];
+  // Start from Monday of the offset week
+  const today = new Date();
+  const dow = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + weekOffset * 7);
+  monday.setHours(0,0,0,0);
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push({
+      iso:     d.toISOString().split('T')[0],
+      label:   d.toLocaleDateString('en-US', { weekday: 'short' }),
+      dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    });
+  }
+  return days;
+}
+
+// ─── MasterScheduleSection ────────────────────────────────────────────────────
+
+function MasterScheduleSection({ location, masterAvailability, onAvailabilityChange,
+  designHours, presHours, ffHours, designRoster, presRoster, ffRoster }: {
+  location:             'Utah' | 'Georgia';
+  masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number> }>;
+  onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number> }>) => void;
+  designHours:          Record<string, number[]>;
+  presHours:            Record<string, number[]>;
+  ffHours:              Record<string, number[]>;
+  designRoster:         Record<string, { ratio: number; name: string }>;
+  presRoster:           Record<string, { ratio: number; name: string }>;
+  ffRoster:             Record<string, { ratio: number; name: string }>;
+}) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const staff = location === 'Utah' ? UTAH_STAFF : GEORGIA_STAFF;
+  const days   = getWeekdays(weekOffset);
+
+  // Week index relative to current week — for design (weekly) and ff (weekly) schedules
+  // Preservation uses day index within the 5-day window
+  const weekIdx = weekOffset; // design/ff schedule week index
+
+  function getAvail(person: StaffMember, iso: string): number {
+    const stored = masterAvailability[person.id];
+    if (stored?.overrides?.[iso] !== undefined) return stored.overrides[iso];
+    if (stored?.defaultHours !== undefined)     return stored.defaultHours;
+    // Fall back to what's in their home dept schedule
+    if (person.homeDept === 'design') {
+      const wkHours = designHours[person.id]?.[weekIdx] ?? 0;
+      return Math.round(wkHours / 5); // weekly → daily
+    }
+    if (person.homeDept === 'preservation') {
+      // pres is already daily — find which day index this iso is in current week
+      const dayI = days.findIndex(d => d.iso === iso);
+      return presHours[person.id]?.[dayI] ?? 0;
+    }
+    if (person.homeDept === 'fulfillment') {
+      const wkHours = ffHours[person.id]?.[weekIdx] ?? 0;
+      return Math.round(wkHours / 5);
+    }
+    return 8;
+  }
+
+  // Scheduled hours for a person on a given day across all depts
+  function getScheduled(person: StaffMember, iso: string, dayI: number): {
+    design: number; preservation: number; fulfillment: number; total: number;
+  } {
+    // Design: weekly hours / 5
+    const dHrs = Math.round((designHours[person.id]?.[weekIdx] ?? 0) / 5);
+    // Preservation: daily
+    const pHrs = presHours[person.id]?.[dayI] ?? 0;
+    // Fulfillment: weekly / 5
+    const fHrs = Math.round((ffHours[person.id]?.[weekIdx] ?? 0) / 5);
+    return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
+  }
+
+  function setDefault(personId: string, hours: number) {
+    const existing = masterAvailability[personId] ?? { defaultHours: 8, overrides: {} };
+    onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, defaultHours: hours } });
+  }
+
+  function setOverride(personId: string, iso: string, hours: number) {
+    const existing = masterAvailability[personId] ?? { defaultHours: 8, overrides: {} };
+    const newOverrides = { ...existing.overrides, [iso]: hours };
+    onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, overrides: newOverrides } });
+  }
+
+  const weekLabel = weekOffset === 0 ? 'This week'
+    : weekOffset === 1 ? 'Next week'
+    : weekOffset === 2 ? 'Week after next'
+    : `Week +${weekOffset}`;
+
+  // Group staff by dept for visual separation
+  const grouped = [
+    { dept: 'design',       label: 'Design',       members: staff.filter(s => s.homeDept === 'design') },
+    { dept: 'preservation', label: 'Preservation',  members: staff.filter(s => s.homeDept === 'preservation') },
+    { dept: 'fulfillment',  label: 'Fulfillment',   members: staff.filter(s => s.homeDept === 'fulfillment') },
+  ] as const;
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">{location} master schedule</h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            All staff availability vs scheduled hours across departments.
+            <span className="ml-2 text-red-500 font-medium">Red ⚠ = over-scheduled</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setWeekOffset(Math.max(0, weekOffset - 1))} disabled={weekOffset === 0}
+            className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+          <span className="text-xs font-medium text-slate-600 min-w-[100px] text-center">{weekLabel}</span>
+          <button onClick={() => setWeekOffset(Math.min(2, weekOffset + 1))} disabled={weekOffset >= 2}
+            className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-4 flex-wrap">
+        {(['design','preservation','fulfillment'] as const).map(d => (
+          <span key={d} className={`text-xs rounded px-2 py-0.5 ${DEPT_COLOR[d]}`}>{d.charAt(0).toUpperCase()+d.slice(1)}</span>
+        ))}
+        <span className="text-xs bg-slate-100 text-slate-500 rounded px-2 py-0.5">On call</span>
+        <span className="text-xs bg-red-100 text-red-700 rounded px-2 py-0.5">⚠ Over-scheduled</span>
+      </div>
+
+      {/* Master table */}
+      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-100">
+                <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
+                <th className="px-3 py-2 text-center font-medium text-slate-500 min-w-[64px]">Default<br/>hrs/day</th>
+                {days.map(d => (
+                  <th key={d.iso} className="px-2 py-2 text-center font-medium text-slate-500 min-w-[90px]">
+                    <div>{d.label}</div>
+                    <div className="font-normal text-[10px]">{d.dateStr}</div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.map(({ dept, label, members }) => (
+                <>
+                  {/* Dept group header */}
+                  <tr key={`header-${dept}`} className="bg-slate-50/80 border-t border-slate-200">
+                    <td colSpan={7} className={`px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wide ${DEPT_COLOR[dept].split(' ')[1]}`}>
+                      {label}
+                    </td>
+                  </tr>
+                  {members.map((person, pi) => {
+                    const defaultHrs = masterAvailability[person.id]?.defaultHours ?? (
+                      person.homeDept === 'design' ? Math.round((designHours[person.id]?.[weekIdx] ?? 0) / 5)
+                      : person.homeDept === 'fulfillment' ? Math.round((ffHours[person.id]?.[weekIdx] ?? 0) / 5)
+                      : presHours[person.id]?.[0] ?? 8
+                    );
+                    return (
+                      <tr key={person.id} className={pi % 2 === 0 ? '' : 'bg-slate-50/30'}>
+                        <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
+                          <div className="font-medium text-slate-700">{person.name}</div>
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className={`text-[10px] rounded px-1 py-px ${DEPT_COLOR[person.homeDept]}`}>{person.homeDept.slice(0,4)}</span>
+                            {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
+                          </div>
+                        </td>
+                        {/* Default hours input */}
+                        <td className="px-3 py-2 text-center">
+                          <input type="number" value={defaultHrs || ''} min="0" max="12" placeholder="8"
+                            onChange={e => setDefault(person.id, parseFloat(e.target.value) || 0)}
+                            className="w-12 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        </td>
+                        {/* Per-day cells */}
+                        {days.map((d, di) => {
+                          const avail   = getAvail(person, d.iso);
+                          const sched   = getScheduled(person, d.iso, di);
+                          const over    = sched.total > avail && sched.total > 0;
+                          const remain  = avail - sched.total;
+                          const isOverridden = masterAvailability[person.id]?.overrides?.[d.iso] !== undefined;
+                          return (
+                            <td key={d.iso} className={`px-2 py-1.5 text-center ${over ? 'bg-red-50' : ''}`}>
+                              {/* Available override input */}
+                              <div className="flex items-center justify-center gap-0.5 mb-0.5">
+                                <input type="number" value={avail || ''} min="0" max="12" placeholder={String(defaultHrs)}
+                                  onChange={e => setOverride(person.id, d.iso, parseFloat(e.target.value) || 0)}
+                                  className={`w-10 border rounded px-1 py-0.5 text-center text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${
+                                    isOverridden ? 'border-indigo-300 text-indigo-700' : 'border-slate-200 text-slate-600'
+                                  }`}
+                                  title="Available hours this day (click to override)" />
+                                <span className="text-[10px] text-slate-400">avail</span>
+                              </div>
+                              {/* Scheduled breakdown */}
+                              {sched.total > 0 && (
+                                <div className="space-y-0.5">
+                                  {sched.design > 0       && <div className="text-[10px] text-indigo-600">{sched.design}h des</div>}
+                                  {sched.preservation > 0 && <div className="text-[10px] text-green-700">{sched.preservation}h pres</div>}
+                                  {sched.fulfillment > 0  && <div className="text-[10px] text-amber-700">{sched.fulfillment}h ff</div>}
+                                </div>
+                              )}
+                              {/* Over/remaining indicator */}
+                              {over ? (
+                                <div className="text-[10px] text-red-600 font-semibold mt-0.5">⚠ +{sched.total - avail}h over</div>
+                              ) : remain > 0 && sched.total >= 0 ? (
+                                <div className="text-[10px] text-slate-400 mt-0.5">{remain}h free</div>
+                              ) : null}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4">
+        {(['design','preservation','fulfillment'] as const).map(d => {
+          const deptStaff = staff.filter(s => s.homeDept === d && !s.onCall);
+          const totalAvail = deptStaff.reduce((sum, p) => {
+            const def = masterAvailability[p.id]?.defaultHours ?? 8;
+            return sum + def * 5; // 5 days
+          }, 0);
+          const totalSched = deptStaff.reduce((sum, p) => {
+            if (d === 'design')       return sum + (designHours[p.id]?.[weekIdx] ?? 0);
+            if (d === 'preservation') return sum + (presHours[p.id]?.reduce((a,b)=>a+b,0) ?? 0);
+            return sum + (ffHours[p.id]?.[weekIdx] ?? 0);
+          }, 0);
+          const pct = totalAvail > 0 ? Math.round(totalSched / totalAvail * 100) : 0;
+          return (
+            <div key={d} className="bg-white border border-slate-100 rounded-xl p-4">
+              <p className={`text-xs font-semibold uppercase tracking-wide mb-2 ${DEPT_COLOR[d].split(' ')[1]}`}>
+                {d.charAt(0).toUpperCase()+d.slice(1)}
+              </p>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-xl font-semibold text-slate-900">{totalSched}</span>
+                <span className="text-xs text-slate-400 mb-0.5">/ {totalAvail} hrs</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                <div className={`h-1.5 rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-green-500' : 'bg-slate-300'}`}
+                  style={{ width: `${Math.min(100, pct)}%` }} />
+              </div>
+              <p className="text-xs text-slate-400 mt-1">{pct}% capacity utilized</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Props from DashboardClient ────────────────────────────────────────────────
 
 interface SchedulePageProps {
@@ -1373,7 +1685,7 @@ export function SchedulePage({
 }: SchedulePageProps) {
 
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
-  const [dept,     setDept]     = useState<'design' | 'preservation' | 'fulfillment'>('design');
+  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master'>('design');
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
@@ -1669,11 +1981,12 @@ export function SchedulePage({
       {/* ── Dept tabs + Location toggle + Save indicator ────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex gap-1">
+          <div className="flex gap-1 flex-wrap">
             {([
               ['design',       'Design'],
               ['preservation', 'Preservation'],
               ['fulfillment',  'Fulfillment'],
+              ['master',       'Master Schedule'],
             ] as const).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
@@ -2214,6 +2527,22 @@ export function SchedulePage({
 
         </>
       )}
+
+      {/* ── MASTER SCHEDULE ─────────────────────────────────────────────────── */}
+      {dept === 'master' && (
+        <MasterScheduleSection
+          location={location}
+          masterAvailability={settings.masterAvailability}
+          onAvailabilityChange={(a) => update('masterAvailability', a)}
+          designHours={settings.designHours}
+          presHours={settings.presHours}
+          ffHours={settings.ffHours}
+          designRoster={settings.designRoster}
+          presRoster={settings.presRoster}
+          ffRoster={settings.ffRoster}
+        />
+      )}
+
     </div>
   );
 }
