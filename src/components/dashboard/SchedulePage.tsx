@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,17 +18,6 @@ interface Designer {
 interface WeekSchedule {
   [designerId: string]: number;
 }
-
-// Historical entry: actual hours are manually entered; actual frames come from PF API
-interface HistoricalEntry {
-  weekOf:       string; // ISO Monday date
-  actualHours:  number; // manually entered
-  actualFrames: number; // fetched from PF API (orders with assignedToUser matching designer, orderDateUpdated in that week)
-  fetched:      boolean;
-}
-
-type HistoricalMap = Record<string, Record<string, HistoricalEntry>>;
-// [designerId][weekOf] = HistoricalEntry
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -135,7 +124,7 @@ function buildDefaultUtahSchedule(): WeekSchedule[] {
 
 function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
   return Array.from({ length: WEEKS }, () => ({
-    'ga-1': 35, 'ga-2': 35, 'ga-3': 35, 'ga-4': 35, 'ga-5': 0,
+    'ga-1': 0, 'ga-2': 0, 'ga-3': 0, 'ga-4': 0, 'ga-5': 0,
   }));
 }
 
@@ -252,109 +241,71 @@ function RosterEditor({ designers, onChange, onAdd, onRemove }: {
 
 // ─── HistoricalsTab ────────────────────────────────────────────────────────────
 
-function HistoricalsTab({ designers, location }: {
-  designers: Designer[];
-  location:  'Utah' | 'Georgia';
+function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
+  designers:      Designer[];
+  location:       'Utah' | 'Georgia';
+  teamActuals:    { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
+  onActualsSaved: () => void;
 }) {
-  // 12 past weeks available; user selects which to view
-  const HIST_WEEKS     = 12;
-  const weekOptions    = pastWeeks(HIST_WEEKS); // ISO Monday strings, most-recent first
+  const HIST_WEEKS  = 12;
+  const weekOptions = pastWeeks(HIST_WEEKS);
   const [selectedWeek, setSelectedWeek] = useState(weekOptions[0]);
+  const [saving,       setSaving]       = useState(false);
+  const [saveMsg,      setSaveMsg]      = useState('');
 
-  // historicalMap[designerId][weekOf] = { actualHours, actualFrames, fetched }
-  const [historicalMap, setHistoricalMap] = useState<HistoricalMap>({});
-  const [fetchingWeek,  setFetchingWeek]  = useState<string | null>(null);
-  const [fetchError,    setFetchError]    = useState('');
+  // Local edits before saving
+  const [localEdits, setLocalEdits] = useState<Record<string, { hours: number; frames: number }>>({});
 
-  // ── Fetch actuals for a week from PF API ─────────────────────────────────
-  // We call /api/location-orders with status=frameCompleted&location=X
-  // then filter client-side by assignedTo name + orderDateUpdated in [weekOf, weekOf+7)
-  const fetchActualsForWeek = useCallback(async (weekOf: string) => {
-    setFetchingWeek(weekOf);
-    setFetchError('');
+  // Merge Supabase actuals with local edits for display
+  function getEntry(designerId: string, name: string) {
+    if (localEdits[designerId]) return localEdits[designerId];
+    const row = teamActuals.find(r =>
+      r.department === 'design' &&
+      r.week_of === selectedWeek &&
+      r.member_name === name
+    );
+    return { hours: row?.actual_hours ?? 0, frames: row?.actual_orders ?? 0 };
+  }
+
+  function setEntry(designerId: string, field: 'hours' | 'frames', val: number) {
+    setLocalEdits(prev => ({
+      ...prev,
+      [designerId]: { ...getEntry(designerId, designers.find(d => d.id === designerId)?.name ?? ''), [field]: val },
+    }));
+  }
+
+  async function saveWeek() {
+    setSaving(true);
+    setSaveMsg('');
     try {
-      const weekEnd = addDays(weekOf, 6);
-      const res  = await fetch(
-        `/api/location-orders?location=${location}&status=frameCompleted`
-      );
-      const json = await res.json() as {
-        orders?: {
-          num: string;
-          staff: string;
-          orderDate: string;
-          enteredAt: string;
-        }[];
-      };
-      if (!json.orders) throw new Error('No orders returned');
-
-      // Count frames per designer where orderDateUpdated (enteredAt in our system) falls in this week
-      const counts: Record<string, number> = {};
-      designers.forEach(d => { counts[d.id] = 0; });
-
-      json.orders.forEach(order => {
-        // enteredAt is the date the status changed to frameCompleted — that's our "designed on" date
-        const dateStr = order.enteredAt || order.orderDate;
-        if (!dateStr) return;
-        const date = dateStr.split('T')[0];
-        if (date < weekOf || date > weekEnd) return;
-
-        // Match designer by name (staff field = "First Last")
-        const staffName = (order.staff ?? '').toLowerCase().trim();
-        const matched   = designers.find(d => d.name.toLowerCase().trim() === staffName);
-        if (matched) counts[matched.id] = (counts[matched.id] ?? 0) + 1;
-      });
-
-      setHistoricalMap(prev => {
-        const next = { ...prev };
-        designers.forEach(d => {
-          if (!next[d.id]) next[d.id] = {};
-          next[d.id] = {
-            ...next[d.id],
-            [weekOf]: {
-              weekOf,
-              actualHours:  next[d.id]?.[weekOf]?.actualHours ?? 0,
-              actualFrames: counts[d.id] ?? 0,
-              fetched:      true,
-            },
-          };
+      const saves = designers.map(d => {
+        const entry = getEntry(d.id, d.name);
+        if (entry.hours === 0 && entry.frames === 0) return Promise.resolve();
+        return fetch('/api/actuals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'team', location, weekOf: selectedWeek,
+            department: 'design', memberName: d.name,
+            actualHours: entry.hours, actualOrders: entry.frames,
+          }),
         });
-        return next;
       });
-    } catch (e) {
-      setFetchError(String(e));
-    } finally {
-      setFetchingWeek(null);
-    }
-  }, [designers, location]);
-
-  // Update hours manually
-  function setActualHours(designerId: string, weekOf: string, hours: number) {
-    setHistoricalMap(prev => {
-      const next     = { ...prev };
-      if (!next[designerId]) next[designerId] = {};
-      next[designerId] = {
-        ...next[designerId],
-        [weekOf]: {
-          weekOf,
-          actualHours:  hours,
-          actualFrames: next[designerId]?.[weekOf]?.actualFrames ?? 0,
-          fetched:      next[designerId]?.[weekOf]?.fetched      ?? false,
-        },
-      };
-      return next;
-    });
+      await Promise.all(saves);
+      setLocalEdits({});
+      setSaveMsg('Saved');
+      onActualsSaved();
+      setTimeout(() => setSaveMsg(''), 2000);
+    } catch { setSaveMsg('Save failed'); }
+    setSaving(false);
   }
 
   const weekData = designers.map(d => {
-    const entry  = historicalMap[d.id]?.[selectedWeek];
-    const hours  = entry?.actualHours  ?? 0;
-    const frames = entry?.actualFrames ?? 0;
-    const ratio  = hours > 0 && frames > 0 ? hours / frames : null;
-    const cost   = d.payType === 'salary'
-      ? d.annualSalary / 52
-      : hours * d.hourlyRate;
-    const cpo    = frames > 0 && cost > 0 ? cost / frames : null;
-    return { designer: d, hours, frames, ratio, cost, cpo, fetched: entry?.fetched ?? false };
+    const entry = getEntry(d.id, d.name);
+    const ratio = entry.hours > 0 && entry.frames > 0 ? entry.hours / entry.frames : null;
+    const cost  = d.payType === 'salary' ? d.annualSalary / 52 : entry.hours * d.hourlyRate;
+    const cpo   = entry.frames > 0 && cost > 0 ? cost / entry.frames : null;
+    return { designer: d, hours: entry.hours, frames: entry.frames, ratio, cost, cpo };
   });
 
   const teamFrames = weekData.reduce((s, r) => s + r.frames, 0);
@@ -363,54 +314,52 @@ function HistoricalsTab({ designers, location }: {
   const teamRatio  = teamFrames > 0 && teamHours > 0 ? teamHours / teamFrames : null;
   const teamCPO    = teamFrames > 0 && teamCost  > 0 ? teamCost  / teamFrames : null;
   const hasCost    = designers.some(d =>
-    (d.payType === 'hourly' && d.hourlyRate > 0) ||
-    (d.payType === 'salary' && d.annualSalary > 0)
+    (d.payType === 'hourly' && d.hourlyRate > 0) || (d.payType === 'salary' && d.annualSalary > 0)
   );
-  const isFetched  = weekData.some(r => r.fetched);
+
+  // Monthly summary across all loaded actuals
+  const monthlyByDesigner = useMemo(() => {
+    const map: Record<string, Record<string, { frames: number; hours: number; cost: number }>> = {};
+    teamActuals
+      .filter(r => r.department === 'design')
+      .forEach(r => {
+        const monthKey = new Date(r.week_of + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const d = designers.find(d => d.name === r.member_name);
+        if (!d) return;
+        if (!map[monthKey]) map[monthKey] = {};
+        if (!map[monthKey][d.id]) map[monthKey][d.id] = { frames: 0, hours: 0, cost: 0 };
+        map[monthKey][d.id].frames += r.actual_orders;
+        map[monthKey][d.id].hours  += r.actual_hours;
+        map[monthKey][d.id].cost   += r.actual_hours * (d.hourlyRate ?? 0);
+      });
+    return map;
+  }, [teamActuals, designers]);
 
   return (
     <div className="space-y-5">
-
-      {/* Week selector + fetch button */}
+      {/* Week selector */}
       <div className="flex items-center gap-3 flex-wrap">
         <label className="text-xs font-medium text-slate-500">Week of</label>
-        <select
-          value={selectedWeek}
-          onChange={e => setSelectedWeek(e.target.value)}
-          className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
-        >
+        <select value={selectedWeek} onChange={e => { setSelectedWeek(e.target.value); setLocalEdits({}); }}
+          className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
           {weekOptions.map(w => (
-            <option key={w} value={w}>
-              {fmtDate(w)} – {fmtDate(addDays(w, 6))}
-            </option>
+            <option key={w} value={w}>{fmtDate(w)} – {fmtDate(addDays(w, 6))}</option>
           ))}
         </select>
-        <button
-          onClick={() => void fetchActualsForWeek(selectedWeek)}
-          disabled={fetchingWeek === selectedWeek}
-          className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          {fetchingWeek === selectedWeek ? 'Fetching…' : isFetched ? '↻ Refresh Actuals' : 'Fetch Actuals from PF'}
+        <button onClick={() => void saveWeek()} disabled={saving}
+          className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+          {saving ? 'Saving…' : 'Save week actuals'}
         </button>
-        {fetchError && <span className="text-xs text-red-500">{fetchError}</span>}
-        {!isFetched && (
-          <span className="text-xs text-slate-400 italic">
-            Click &quot;Fetch Actuals&quot; to load frame counts from PF API for this week
-          </span>
-        )}
+        {saveMsg && <span className={`text-xs ${saveMsg === 'Saved' ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</span>}
+        <span className="text-xs text-slate-400 italic">Enter actual frames and hours for each designer, then save.</span>
       </div>
 
-      {/* Per-designer table */}
+      {/* Per-designer actuals table */}
       <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-700">
-              Week of {fmtDate(selectedWeek)}
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Actual frames = order products with frame completed in this date range, assigned to each designer.
-              Enter actual hours worked manually.
-            </p>
+            <h3 className="text-sm font-semibold text-slate-700">Week of {fmtDate(selectedWeek)}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Enter actual frames completed and hours worked. Saved to shared database.</p>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -435,80 +384,46 @@ function HistoricalsTab({ designers, location }: {
                     )}
                   </td>
                   <td className="px-3 py-2 text-center">
-                    {isFetched ? (
-                      <span className="font-semibold text-indigo-700">{row.frames}</span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
+                    <input type="number" value={row.frames || ''} min="0" placeholder="0"
+                      onChange={e => setEntry(row.designer.id, 'frames', parseInt(e.target.value) || 0)}
+                      className="w-16 border border-slate-200 rounded px-2 py-1 text-center text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                   </td>
                   <td className="px-3 py-2 text-center">
-                    <input
-                      type="number"
-                      value={row.hours || ''}
-                      min="0"
-                      step="0.5"
-                      placeholder="0"
-                      onChange={e => setActualHours(row.designer.id, selectedWeek, parseFloat(e.target.value) || 0)}
-                      className="w-16 border border-slate-200 rounded px-2 py-1 text-center text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
-                    />
+                    <input type="number" value={row.hours || ''} min="0" step="0.5" placeholder="0"
+                      onChange={e => setEntry(row.designer.id, 'hours', parseFloat(e.target.value) || 0)}
+                      className="w-16 border border-slate-200 rounded px-2 py-1 text-center text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                   </td>
                   <td className="px-3 py-2 text-center">
                     {row.ratio !== null ? (
                       <span className={`font-semibold ${row.ratio <= 1.4 ? 'text-green-700' : row.ratio <= 1.8 ? 'text-amber-700' : 'text-red-700'}`}>
                         {row.ratio.toFixed(2)} h/f
                       </span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
+                    ) : <span className="text-slate-300">—</span>}
                   </td>
-                  {hasCost && (
-                    <td className="px-3 py-2 text-center text-slate-500">
-                      {row.cost > 0 ? fmt$(row.cost) : '—'}
-                    </td>
-                  )}
-                  {hasCost && (
-                    <td className="px-3 py-2 text-center">
-                      {row.cpo !== null ? (
-                        <span className="font-semibold text-amber-700">{fmt$(row.cpo)}</span>
-                      ) : '—'}
-                    </td>
-                  )}
+                  {hasCost && <td className="px-3 py-2 text-center text-slate-500">{row.cost > 0 ? fmt$(row.cost) : '—'}</td>}
+                  {hasCost && <td className="px-3 py-2 text-center">{row.cpo !== null ? <span className="font-semibold text-amber-700">{fmt$(row.cpo)}</span> : '—'}</td>}
                 </tr>
               ))}
-
-              {/* Team total row */}
               <tr className="border-t-2 border-slate-200 bg-indigo-50/30 font-semibold">
                 <td className="px-4 py-2 text-slate-700">Team total</td>
-                <td className="px-3 py-2 text-center text-indigo-700">
-                  {isFetched ? teamFrames : <span className="text-slate-300">—</span>}
-                </td>
-                <td className="px-3 py-2 text-center text-slate-700">{teamHours > 0 ? teamHours : '—'}</td>
+                <td className="px-3 py-2 text-center text-indigo-700">{teamFrames || '—'}</td>
+                <td className="px-3 py-2 text-center text-slate-700">{teamHours || '—'}</td>
                 <td className="px-3 py-2 text-center">
-                  {teamRatio !== null ? (
-                    <span className={teamRatio <= 1.5 ? 'text-green-700' : teamRatio <= 1.8 ? 'text-amber-700' : 'text-red-700'}>
-                      {teamRatio.toFixed(2)} h/f
-                    </span>
-                  ) : '—'}
+                  {teamRatio !== null ? <span className={teamRatio <= 1.5 ? 'text-green-700' : teamRatio <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{teamRatio.toFixed(2)} h/f</span> : '—'}
                 </td>
                 {hasCost && <td className="px-3 py-2 text-center text-slate-600">{teamCost > 0 ? fmt$(teamCost) : '—'}</td>}
-                {hasCost && (
-                  <td className="px-3 py-2 text-center text-amber-700">
-                    {teamCPO !== null ? fmt$(teamCPO) : '—'}
-                  </td>
-                )}
+                {hasCost && <td className="px-3 py-2 text-center text-amber-700">{teamCPO !== null ? fmt$(teamCPO) : '—'}</td>}
               </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* All-weeks summary grid */}
+      {/* All-weeks overview */}
       <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-100">
           <h3 className="text-sm font-semibold text-slate-700">All weeks overview</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Fetch each week individually to populate. Weeks with no data are shown as dashes.
-          </p>
+          <p className="text-xs text-slate-400 mt-0.5">Populated as you save each week. Shared across all logged-in users.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -516,7 +431,7 @@ function HistoricalsTab({ designers, location }: {
               <tr className="bg-slate-50 border-b border-slate-100">
                 <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap">Designer</th>
                 {weekOptions.map(w => (
-                  <th key={w} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[110px]">
+                  <th key={w} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[100px]">
                     {fmtDate(w).split(',')[0]}
                   </th>
                 ))}
@@ -525,25 +440,18 @@ function HistoricalsTab({ designers, location }: {
             <tbody>
               {designers.map((d, di) => (
                 <tr key={d.id} className={di % 2 === 0 ? '' : 'bg-slate-50/40'}>
-                  <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
-                    {d.name}
-                  </td>
+                  <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{d.name}</td>
                   {weekOptions.map(w => {
-                    const e = historicalMap[d.id]?.[w];
-                    if (!e?.fetched) return (
-                      <td key={w} className="px-3 py-2 text-center text-slate-200">—</td>
-                    );
-                    const r = e.actualHours > 0 && e.actualFrames > 0
-                      ? e.actualHours / e.actualFrames : null;
+                    const row = teamActuals.find(r => r.department === 'design' && r.week_of === w && r.member_name === d.name);
+                    if (!row || (row.actual_hours === 0 && row.actual_orders === 0)) {
+                      return <td key={w} className="px-3 py-2 text-center text-slate-200">—</td>;
+                    }
+                    const r = row.actual_hours > 0 && row.actual_orders > 0 ? row.actual_hours / row.actual_orders : null;
                     return (
                       <td key={w} className="px-3 py-2 text-center">
-                        <div className="font-medium text-indigo-700">{e.actualFrames}f</div>
-                        {e.actualHours > 0 && <div className="text-slate-400">{e.actualHours}h</div>}
-                        {r !== null && (
-                          <div className={r <= 1.5 ? 'text-green-700' : r <= 1.8 ? 'text-amber-700' : 'text-red-700'}>
-                            {r.toFixed(2)}
-                          </div>
-                        )}
+                        <div className="font-medium text-indigo-700">{row.actual_orders}f</div>
+                        <div className="text-slate-400">{row.actual_hours}h</div>
+                        {r !== null && <div className={r <= 1.5 ? 'text-green-700' : r <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{r.toFixed(2)}</div>}
                       </td>
                     );
                   })}
@@ -553,6 +461,104 @@ function HistoricalsTab({ designers, location }: {
           </table>
         </div>
       </div>
+
+      {/* Monthly actuals summary */}
+      {Object.keys(monthlyByDesigner).length > 0 && (
+        <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-700">Monthly actuals summary</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500">Designer</th>
+                  {Object.keys(monthlyByDesigner).sort().map(m => (
+                    <th key={m} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[110px]">{m.split(' ')[0]}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {designers.map((d, di) => (
+                  <tr key={d.id} className={di % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                    <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{d.name}</td>
+                    {Object.keys(monthlyByDesigner).sort().map(m => {
+                      const s = monthlyByDesigner[m]?.[d.id];
+                      if (!s || s.frames === 0) return <td key={m} className="px-3 py-2 text-center text-slate-200">—</td>;
+                      const r = s.hours > 0 && s.frames > 0 ? s.hours / s.frames : null;
+                      const cpo = s.cost > 0 && s.frames > 0 ? s.cost / s.frames : null;
+                      return (
+                        <td key={m} className="px-3 py-2 text-center">
+                          <div className="font-medium text-indigo-700">{s.frames}f</div>
+                          <div className="text-slate-400">{s.hours}h</div>
+                          {r !== null && <div className={r <= 1.5 ? 'text-green-700' : r <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{r.toFixed(2)}</div>}
+                          {hasCost && cpo !== null && <div className="text-amber-600">{fmt$(cpo)}</div>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ActualIntakeInput ─────────────────────────────────────────────────────────
+// Inline editable input for preservation actuals per week in the Q&T table
+
+function ActualIntakeInput({ weekOf, location, currentValue, onSaved }: {
+  weekOf: string;
+  location: 'Utah' | 'Georgia';
+  currentValue?: number;
+  onSaved: (val: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val,     setVal]     = useState(currentValue ?? 0);
+  const [saving,  setSaving]  = useState(false);
+
+  // Check editable: within 31 days
+  const daysDiff = (Date.now() - new Date(weekOf + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24);
+  const editable = daysDiff <= 31;
+
+  async function save() {
+    setSaving(true);
+    try {
+      await fetch('/api/actuals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'preservation', location, weekOf, received: val }),
+      });
+      onSaved(val);
+      setEditing(false);
+    } catch { /* leave editing open */ }
+    setSaving(false);
+  }
+
+  if (!editable) {
+    return <span className="text-xs text-slate-400">{currentValue ?? '—'}</span>;
+  }
+  if (!editing) {
+    return (
+      <button onClick={() => setEditing(true)}
+        className="text-xs text-green-700 font-medium hover:underline">
+        {currentValue !== undefined ? currentValue : <span className="text-slate-300 italic">+ actual</span>}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <input type="number" value={val} min="0" autoFocus
+        onChange={e => setVal(parseInt(e.target.value) || 0)}
+        onKeyDown={e => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') setEditing(false); }}
+        className="w-16 border border-green-300 rounded px-1.5 py-0.5 text-xs text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-green-400" />
+      <button onClick={() => void save()} disabled={saving}
+        className="text-[10px] px-1.5 py-0.5 bg-green-600 text-white rounded disabled:opacity-50">
+        {saving ? '…' : '✓'}
+      </button>
     </div>
   );
 }
@@ -708,7 +714,7 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
   }
 
   const dayTotals = Array.from({ length: 7 }, (_, di) =>
-    team.reduce((s, m) => s + Math.round((m.hours[di] ?? 0) * m.ratio), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[di] ?? 0) / m.ratio) : 0), 0)
   );
 
   const tagStyle: Record<string, string> = {
@@ -858,7 +864,7 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
                   </td>
                   {sevenDays.map((d, di) => {
                     const h = m.hours[di] ?? 0;
-                    const orders = Math.round(h * m.ratio);
+                    const orders = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
                     return (
                       <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
                         <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
@@ -921,7 +927,7 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
             <tbody>
               {team.map((m, mi) => {
                 const wh = m.hours.reduce((a, b) => a + b, 0);
-                const wo = Math.round(wh * m.ratio);
+                const wo = m.ratio > 0 ? Math.round(wh / m.ratio) : 0;
                 const wc = wh * m.rate;
                 const cpo = wo > 0 && wc > 0 ? wc / wo : null;
                 return (
@@ -937,7 +943,7 @@ function PreservationSection({ location, preservationQueue, countsLoading }: {
               })}
               {(() => {
                 const totH = team.reduce((s, m) => s + m.hours.reduce((a, b) => a + b, 0), 0);
-                const totO = team.reduce((s, m) => s + Math.round(m.hours.reduce((a, b) => a + b, 0) * m.ratio), 0);
+                const totO = team.reduce((s, m) => { const h = m.hours.reduce((a,b)=>a+b,0); return s + (m.ratio > 0 ? Math.round(h / m.ratio) : 0); }, 0);
                 const totC = team.reduce((s, m) => s + m.hours.reduce((a, b) => a + b, 0) * m.rate, 0);
                 const tCPO = totO > 0 && totC > 0 ? totC / totO : null;
                 return (
@@ -978,7 +984,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
     setTeam(prev => prev.map((m, i) => i === mi ? { ...m, rate: val } : m));
   }
 
-  const weekCap  = team.reduce((s, m) => s + Math.round((m.hours[0] ?? 0) * m.ratio), 0);
+  const weekCap  = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[0] ?? 0) / m.ratio) : 0), 0);
   const weekCost = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
   const teamCPO  = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
@@ -1048,7 +1054,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
                   </td>
                   {WEEK_LABELS_8.map((_, wi) => {
                     const h = m.hours[wi] ?? 0;
-                    const o = Math.round(h * m.ratio);
+                    const o = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
                     const cost = h * m.rate;
                     const cpo = o > 0 && cost > 0 ? cost / o : null;
                     return (
@@ -1066,7 +1072,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
               <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                 <td colSpan={3} className="px-3 py-2 text-xs text-slate-600">Week total</td>
                 {WEEK_LABELS_8.map((_, wi) => {
-                  const c = team.reduce((s, m) => s + Math.round((m.hours[wi] ?? 0) * m.ratio), 0);
+                  const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[wi] ?? 0) / m.ratio) : 0), 0);
                   const cost = team.reduce((s, m) => s + (m.hours[wi] ?? 0) * m.rate, 0);
                   const cpo = c > 0 && cost > 0 ? cost / c : null;
                   return (
@@ -1102,7 +1108,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
             <tbody>
               {team.map((m, mi) => {
                 const wh = m.hours[0] ?? 0;
-                const wo = Math.round(wh * m.ratio);
+                const wo = m.ratio > 0 ? Math.round(wh / m.ratio) : 0;
                 const wc = wh * m.rate;
                 const cpo = wo > 0 && wc > 0 ? wc / wo : null;
                 return (
@@ -1118,7 +1124,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading }: {
               })}
               {(() => {
                 const totH = team.reduce((s, m) => s + (m.hours[0] ?? 0), 0);
-                const totO = team.reduce((s, m) => s + Math.round((m.hours[0] ?? 0) * m.ratio), 0);
+                const totO = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[0] ?? 0) / m.ratio) : 0), 0);
                 const totC = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
                 const tCPO = totO > 0 && totC > 0 ? totC / totO : null;
                 return (
@@ -1172,7 +1178,47 @@ export function SchedulePage({
   const [utahSchedule,     setUtahSchedule]     = useState<WeekSchedule[]>(buildDefaultUtahSchedule);
   const [georgiaSchedule,  setGeorgiaSchedule]  = useState<WeekSchedule[]>(buildDefaultGeorgiaSchedule);
 
-  const [avgIntake,   setAvgIntake]   = useState(45);
+  const [avgIntake,   setAvgIntakeRaw] = useState(() => { try { const v = localStorage.getItem('avg-intake'); return v ? parseInt(v) : 45; } catch { return 45; } });
+  function setAvgIntake(v: number) { setAvgIntakeRaw(v); try { localStorage.setItem('avg-intake', String(v)); } catch {} }
+
+  // Preservation actuals from Supabase — keyed by location+weekOf
+  const [presActuals, setPresActuals] = useState<Record<string, number>>({});
+  const [presActualsLoading, setPresActualsLoading] = useState(false);
+
+  useEffect(() => {
+    setPresActualsLoading(true);
+    fetch(`/api/actuals?location=${location}&type=preservation&weeks=52`)
+      .then(r => r.json())
+      .then((d: { preservationActuals?: { week_of: string; received: number }[] }) => {
+        const map: Record<string, number> = {};
+        (d.preservationActuals ?? []).forEach(row => { map[row.week_of] = row.received; });
+        setPresActuals(map);
+      })
+      .catch(() => {})
+      .finally(() => setPresActualsLoading(false));
+  }, [location]);
+
+  // Team actuals from Supabase — for historicals tab
+  const [teamActuals, setTeamActuals] = useState<{
+    department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number;
+  }[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
+      .then(r => r.json())
+      .then((d: { teamActuals?: typeof teamActuals }) => { setTeamActuals(d.teamActuals ?? []); })
+      .catch(() => {});
+  }, [location]);
+  const [weeklyEstimates, setWeeklyEstimatesRaw] = useState<Record<string, number>>(() => {
+    try { const v = localStorage.getItem('weekly-estimates'); return v ? JSON.parse(v) : {}; } catch { return {}; }
+  });
+  function setWeeklyEstimate(weekOf: string, val: number) {
+    setWeeklyEstimatesRaw(prev => {
+      const next = { ...prev, [weekOf]: val };
+      try { localStorage.setItem('weekly-estimates', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
   const [showRoster,  setShowRoster]  = useState(false);
   const [weekOffset,  setWeekOffset]  = useState(0);
   const [showCPO,     setShowCPO]     = useState(true);
@@ -1287,8 +1333,12 @@ export function SchedulePage({
       const graduatingDate = getMondayDate(w - PRESERVATION_WEEKS);
       const graduatingIso  = graduatingDate.toISOString().split('T')[0];
       const intakeData     = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
-      const actual = intakeData.find(h => h.weekOf === graduatingIso);
-      return actual ? actual.actual : avgIntake;
+      // Priority: 1) Supabase actuals, 2) hardcoded historical, 3) per-week estimate, 4) avg
+      if (presActuals[graduatingIso] !== undefined) return presActuals[graduatingIso];
+      const hist = intakeData.find(h => h.weekOf === graduatingIso);
+      if (hist) return hist.actual;
+      if (weeklyEstimates[graduatingIso] !== undefined) return weeklyEstimates[graduatingIso];
+      return avgIntake;
     });
     const queueAtStart: number[] = [designableQueue];
     for (let w = 0; w < WEEKS - 1; w++) {
@@ -1308,11 +1358,17 @@ export function SchedulePage({
       }
       return null;
     });
-  }, [designableQueue, avgIntake, weeklyTotals]);
+  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
-    const historicalIntake = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
+    const hardcoded = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
+    // Merge: presActuals override hardcoded; include any actuals weeks not in hardcoded
+    const allWeeks = new Set([...hardcoded.map(h => h.weekOf), ...Object.keys(presActuals)]);
+    const historicalIntake = [...allWeeks].sort().map(weekOf => ({
+      weekOf,
+      actual: presActuals[weekOf] ?? hardcoded.find(h => h.weekOf === weekOf)?.actual ?? 0,
+    })).filter(h => h.actual > 0);
     if (!historicalIntake.length) return [];
     const today = getMondayDate(0);
     const designableCohorts: { weekOf: string; count: number }[] = [];
@@ -1377,7 +1433,7 @@ export function SchedulePage({
       return { weekOf: c.weekOf, weeksFromNow: designedAtWeek, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft };
     });
     return [...results, ...presResults].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
-  }, [location, designableQueue, weeklyTotals]);
+  }, [location, designableQueue, weeklyTotals, presActuals]);
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates    = designers.some(d =>
@@ -1466,10 +1522,10 @@ export function SchedulePage({
               </div>
             </div>
 
-            {/* Weekly intake avg — still editable for projections */}
+            {/* Est. bouquets delivered — renamed and clarified */}
             <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Weekly intake avg</p>
-              <p className="text-xs text-slate-400 mb-2">new order products/week into design</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Est. bouquets/week delivered</p>
+              <p className="text-xs text-slate-400 mb-2">fallback when no per-week estimate set</p>
               <input type="number" value={avgIntake} onChange={e => setAvgIntake(parseInt(e.target.value) || 0)}
                 className="w-20 border border-slate-200 rounded px-2 py-1 text-xl font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
             </div>
@@ -1632,9 +1688,23 @@ export function SchedulePage({
                     const total       = designWait;
                     const overstaffed = total !== null && total < 8;
                     const { bar, text, label } = turnaroundColors(total, overstaffed);
+                    const weekIso = isoMonday(w);
+                    const estVal  = weeklyEstimates[weekIso] ?? '';
                     return (
                       <div key={w} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-500 w-24 shrink-0">{getWeekLabel(w)}</span>
+                        <span className="text-xs text-slate-500 w-16 shrink-0">{getWeekLabel(w)}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            value={estVal}
+                            placeholder={String(avgIntake)}
+                            min="0"
+                            onChange={e => setWeeklyEstimate(weekIso, parseInt(e.target.value) || 0)}
+                            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                            title="Est. bouquets delivered this week"
+                          />
+                          <span className="text-[10px] text-slate-300">bq</span>
+                        </div>
                         {total !== null ? (
                           <>
                             <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -1675,6 +1745,9 @@ export function SchedulePage({
                         <tr className="bg-slate-50 border-b border-slate-100">
                           <th className="px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap">Intake week</th>
                           <th className="px-3 py-2 text-right font-medium text-slate-500">Received</th>
+                          <th className="px-3 py-2 text-right font-medium text-slate-500 whitespace-nowrap">
+                            <span className="text-green-700">● Actual</span>
+                          </th>
                           <th className="px-3 py-2 text-right font-medium text-slate-500">Status</th>
                           <th className="px-3 py-2 text-left font-medium text-slate-500">Weeks until designed</th>
                           <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Total to design</th>
@@ -1699,6 +1772,14 @@ export function SchedulePage({
                               </td>
                               <td className="px-3 py-2 text-right text-slate-600">
                                 {(location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE).find(h => h.weekOf === row.weekOf)?.actual ?? '—'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <ActualIntakeInput
+                                  weekOf={row.weekOf}
+                                  location={location}
+                                  currentValue={presActuals[row.weekOf]}
+                                  onSaved={val => setPresActuals(prev => ({ ...prev, [row.weekOf]: val }))}
+                                />
                               </td>
                               <td className="px-3 py-2 text-right">
                                 {done ? (
@@ -1857,7 +1938,17 @@ export function SchedulePage({
 
           {/* ── HISTORICALS TAB ─────────────────────────────────────────────── */}
           {activeTab === 'historicals' && (
-            <HistoricalsTab designers={designers} location={location} />
+            <HistoricalsTab
+              designers={designers}
+              location={location}
+              teamActuals={teamActuals}
+              onActualsSaved={() => {
+                fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
+                  .then(r => r.json())
+                  .then((d: { teamActuals?: typeof teamActuals }) => setTeamActuals(d.teamActuals ?? []))
+                  .catch(() => {});
+              }}
+            />
           )}
 
         </>
