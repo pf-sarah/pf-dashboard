@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useScheduleSettings } from './useScheduleSettings';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -539,7 +540,12 @@ const GEORGIA_FULFILLMENT_TEAM = [
 type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; rate: number; hours: number[] };
 type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; rate: number; hours: number[] };
 
-const WEEK_LABELS_8 = ['Apr 7','Apr 14','Apr 21','Apr 28','May 5','May 12','May 19','May 26'];
+// Dynamic week labels — always real Monday dates
+function getWeekLabels8(): string[] {
+  return Array.from({ length: 8 }, (_, i) =>
+    getMondayDate(i).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  );
+}
 
 function parseDateRange(from: string, to: string): Record<string, number> {
   // Returns mock event-date counts for the range — in production this would
@@ -817,17 +823,20 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
 
 // ─── PreservationSection ───────────────────────────────────────────────────────
 
-function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved }: {
-  location:         'Utah' | 'Georgia';
-  preservationQueue: number;
-  countsLoading:    boolean;
-  teamActuals:      { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
-  onActualsSaved:   () => void;
+function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
+  presHours, presRoster, presSettings, onPresHoursChange, onPresRosterChange, onPresSettingsChange }: {
+  location:              'Utah' | 'Georgia';
+  preservationQueue:     number;
+  countsLoading:         boolean;
+  teamActuals:           { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
+  onActualsSaved:        () => void;
+  presHours:             Record<string, number[]>;
+  presRoster:            Record<string, { ratio: number; rate: number; name: string }>;
+  presSettings:          { dayPcts: number[]; utPct: number; gaPct: number; unkPct: number; dateFrom?: string; dateTo?: string };
+  onPresHoursChange:     (h: Record<string, number[]>) => void;
+  onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string }>) => void;
+  onPresSettingsChange:  (s: { dayPcts: number[]; utPct: number; gaPct: number; unkPct: number; dateFrom?: string; dateTo?: string }) => void;
 }) {
-  function loadStored<T>(key: string, fallback: T): T {
-    try { const v = localStorage.getItem(key); return v !== null ? (JSON.parse(v) as T) : fallback; } catch { return fallback; }
-  }
-
   const today    = new Date();
   const monday   = new Date(today);
   monday.setDate(today.getDate() - (today.getDay() === 0 ? 6 : today.getDay() - 1));
@@ -835,34 +844,34 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const sundayIso = addDays(mondayIso, 6);
 
   const [presTab,     setPresTab]     = useState<'schedule' | 'historicals'>('schedule');
-  const [dateFrom,    setDateFromRaw] = useState(() => loadStored('pres-dateFrom', mondayIso));
-  const [dateTo,      setDateToRaw]   = useState(() => loadStored('pres-dateTo',   sundayIso));
-  const [eventCounts, setEventCounts] = useState<Record<string, number>>(() => parseDateRange(loadStored('pres-dateFrom', mondayIso), loadStored('pres-dateTo', sundayIso)));
-  const [eventTotal,  setEventTotal]  = useState(() => Object.values(parseDateRange(loadStored('pres-dateFrom', mondayIso), loadStored('pres-dateTo', sundayIso))).reduce((a,b)=>a+b,0));
-  const [dayPcts,     setDayPctsRaw]  = useState<number[]>(() => loadStored('pres-dayPcts', [10, 30, 20, 15, 5, 15, 5]));
-  const [utPct,       setUtPctRaw]    = useState<number>(() => loadStored('pres-utPct', 50));
-  const [gaPct,       setGaPctRaw]    = useState<number>(() => loadStored('pres-gaPct', 40));
-  const [unkPct,      setUnkPctRaw]   = useState<number>(() => loadStored('pres-unkPct', 10));
   const [showRoster,  setShowRoster]  = useState(false);
-  const [team,        setTeam]        = useState<PresTeamMember[]>(
-    location === 'Utah' ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-                        : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-  );
+  const [eventCounts, setEventCounts] = useState<Record<string, number>>(() => parseDateRange(mondayIso, sundayIso));
+  const [eventTotal,  setEventTotal]  = useState(() => Object.values(parseDateRange(mondayIso, sundayIso)).reduce((a,b)=>a+b,0));
 
-  function setDateFrom(v: string) { setDateFromRaw(v); try { localStorage.setItem('pres-dateFrom', JSON.stringify(v)); } catch {} }
-  function setDateTo(v: string)   { setDateToRaw(v);   try { localStorage.setItem('pres-dateTo',   JSON.stringify(v)); } catch {} }
+  // Use persisted settings
+  const dayPcts  = presSettings.dayPcts ?? [10,30,20,15,5,15,5];
+  const utPct    = presSettings.utPct   ?? 50;
+  const gaPct    = presSettings.gaPct   ?? 40;
+  const unkPct   = presSettings.unkPct  ?? 10;
+  const dateFrom = presSettings.dateFrom ?? mondayIso;
+  const dateTo   = presSettings.dateTo   ?? sundayIso;
+
+  function setDateFrom(v: string) { onPresSettingsChange({ ...presSettings, dateFrom: v }); }
+  function setDateTo(v: string)   { onPresSettingsChange({ ...presSettings, dateTo: v }); }
   function setDayPcts(fn: (prev: number[]) => number[]) {
-    setDayPctsRaw(prev => { const next = fn(prev); try { localStorage.setItem('pres-dayPcts', JSON.stringify(next)); } catch {} return next; });
+    onPresSettingsChange({ ...presSettings, dayPcts: fn(dayPcts) });
   }
-  function setUtPct(v: number)  { setUtPctRaw(v);  try { localStorage.setItem('pres-utPct',  JSON.stringify(v)); } catch {} }
-  function setGaPct(v: number)  { setGaPctRaw(v);  try { localStorage.setItem('pres-gaPct',  JSON.stringify(v)); } catch {} }
-  function setUnkPct(v: number) { setUnkPctRaw(v); try { localStorage.setItem('pres-unkPct', JSON.stringify(v)); } catch {} }
+  function setUtPct(v: number)  { onPresSettingsChange({ ...presSettings, utPct: v }); }
+  function setGaPct(v: number)  { onPresSettingsChange({ ...presSettings, gaPct: v }); }
+  function setUnkPct(v: number) { onPresSettingsChange({ ...presSettings, unkPct: v }); }
 
-  useEffect(() => {
-    setTeam(location === 'Utah'
-      ? UTAH_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-      : GEORGIA_PRESERVATION_TEAM.map(m => ({ ...m, hours: [...m.hours] })));
-  }, [location]);
+  // Merge persisted roster + hours over defaults
+  const defaultTeam = location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM;
+  const team: PresTeamMember[] = defaultTeam.map((m, mi) => {
+    const roster = presRoster[m.id];
+    const hours  = presHours[m.id] ?? Array(7).fill(m.hours[0] ?? 0);
+    return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, hours };
+  });
 
   function loadRange(from: string, to: string) {
     const counts = parseDateRange(from, to);
@@ -894,10 +903,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   });
 
   function updateHours(mi: number, di: number, val: number) {
-    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, hours: m.hours.map((h, j) => j === di ? val : h) } : m));
+    const id = defaultTeam[mi].id;
+    const newHours = { ...presHours, [id]: team[mi].hours.map((h, j) => j === di ? val : h) };
+    onPresHoursChange(newHours);
   }
   function updateRoster(mi: number, field: 'ratio' | 'rate', val: number) {
-    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, [field]: val } : m));
+    const id = defaultTeam[mi].id;
+    const existing = presRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name };
+    onPresRosterChange({ ...presRoster, [id]: { ...existing, [field]: val } });
   }
 
   const dayTotals = Array.from({ length: 7 }, (_, di) =>
@@ -1148,31 +1161,38 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
 // ─── FulfillmentSection ────────────────────────────────────────────────────────
 
-function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved }: {
+function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
+  ffHours, ffRoster, onFfHoursChange, onFfRosterChange }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
+  ffHours:         Record<string, number[]>;
+  ffRoster:        Record<string, { ratio: number; rate: number; name: string }>;
+  onFfHoursChange: (h: Record<string, number[]>) => void;
+  onFfRosterChange:(r: Record<string, { ratio: number; rate: number; name: string }>) => void;
 }) {
   const [ffTab,      setFfTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster, setShowRoster] = useState(false);
-  const [team,       setTeam]       = useState<FfTeamMember[]>(
-    location === 'Utah' ? UTAH_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-                        : GEORGIA_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-  );
 
-  useEffect(() => {
-    setTeam(location === 'Utah'
-      ? UTAH_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] }))
-      : GEORGIA_FULFILLMENT_TEAM.map(m => ({ ...m, hours: [...m.hours] })));
-  }, [location]);
+  // Merge persisted roster + hours over defaults
+  const defaultTeam = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
+  const team: FfTeamMember[] = defaultTeam.map((m) => {
+    const roster = ffRoster[m.id];
+    const hours  = ffHours[m.id] ?? [...m.hours];
+    return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, hours };
+  });
 
   function updateHours(mi: number, wi: number, val: number) {
-    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, hours: m.hours.map((h, j) => j === wi ? val : h) } : m));
+    const id = defaultTeam[mi].id;
+    const newHours = { ...ffHours, [id]: team[mi].hours.map((h, j) => j === wi ? val : h) };
+    onFfHoursChange(newHours);
   }
   function updateRoster(mi: number, field: 'ratio' | 'rate', val: number) {
-    setTeam(prev => prev.map((m, i) => i === mi ? { ...m, [field]: val } : m));
+    const id = defaultTeam[mi].id;
+    const existing = ffRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name };
+    onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
   }
 
   const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[0] ?? 0) / m.ratio) : 0), 0);
@@ -1261,7 +1281,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
                     <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
-                    {WEEK_LABELS_8.map((w, i) => (
+                    {getWeekLabels8().map((w, i) => (
                       <th key={i} className={`px-2 py-2 text-center font-medium min-w-[80px] ${i === 0 ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}>
                         {w}{i === 0 && <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 rounded px-1">now</span>}
                       </th>
@@ -1275,7 +1295,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         <div className="font-medium text-slate-700">{m.name}</div>
                         <div className="text-slate-400">{m.ratio} h/ord</div>
                       </td>
-                      {WEEK_LABELS_8.map((_, wi) => {
+                      {getWeekLabels8().map((_, wi) => {
                         const h = m.hours[wi] ?? 0;
                         const o = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
                         const cost = h * m.rate;
@@ -1294,7 +1314,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   ))}
                   <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
-                    {WEEK_LABELS_8.map((_, wi) => {
+                    {getWeekLabels8().map((_, wi) => {
                       const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[wi] ?? 0) / m.ratio) : 0), 0);
                       const cost = team.reduce((s, m) => s + (m.hours[wi] ?? 0) * m.rate, 0);
                       const cpo = c > 0 && cost > 0 ? cost / c : null;
@@ -1355,15 +1375,30 @@ export function SchedulePage({
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
   const [dept,     setDept]     = useState<'design' | 'preservation' | 'fulfillment'>('design');
 
-  const [utahDesigners,    setUtahDesigners]    = useState<Designer[]>(DEFAULT_UTAH_DESIGNERS);
-  const [georgiaDesigners, setGeorgiaDesigners] = useState<Designer[]>(DEFAULT_GEORGIA_DESIGNERS);
-  const [utahSchedule,     setUtahSchedule]     = useState<WeekSchedule[]>(buildDefaultUtahSchedule);
-  const [georgiaSchedule,  setGeorgiaSchedule]  = useState<WeekSchedule[]>(buildDefaultGeorgiaSchedule);
+  // ── Supabase-persisted settings ───────────────────────────────────────────────
+  const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
 
-  const [avgIntake,   setAvgIntakeRaw] = useState(() => { try { const v = localStorage.getItem('avg-intake'); return v ? parseInt(v) : 45; } catch { return 45; } });
-  function setAvgIntake(v: number) { setAvgIntakeRaw(v); try { localStorage.setItem('avg-intake', String(v)); } catch {} }
+  // Derive designers and schedule from persisted settings + defaults
+  const defaultDesigners = location === 'Utah' ? DEFAULT_UTAH_DESIGNERS : DEFAULT_GEORGIA_DESIGNERS;
+  const defaultSchedule  = location === 'Utah' ? buildDefaultUtahSchedule() : buildDefaultGeorgiaSchedule();
 
-  // Preservation actuals from Supabase — keyed by location+weekOf
+  // Merge persisted roster over defaults
+  const designers: Designer[] = defaultDesigners.map(d => {
+    const persisted = settings.designRoster[d.id];
+    if (!persisted) return d;
+    return { ...d, ratio: persisted.ratio, payType: persisted.payType, hourlyRate: persisted.hourlyRate, annualSalary: persisted.annualSalary };
+  });
+
+  // Merge persisted hours over defaults — schedule is array of WeekSchedule
+  const schedule: WeekSchedule[] = Array.from({ length: WEEKS }, (_, w) => {
+    const weekObj: WeekSchedule = {};
+    designers.forEach(d => {
+      weekObj[d.id] = settings.designHours[d.id]?.[w] ?? defaultSchedule[w]?.[d.id] ?? 0;
+    });
+    return weekObj;
+  });
+
+  // Preservation actuals from Supabase
   const [presActuals, setPresActuals] = useState<Record<string, number>>({});
   const [presActualsLoading, setPresActualsLoading] = useState(false);
 
@@ -1380,7 +1415,7 @@ export function SchedulePage({
       .finally(() => setPresActualsLoading(false));
   }, [location]);
 
-  // Team actuals from Supabase — for historicals tab
+  // Team actuals from Supabase
   const [teamActuals, setTeamActuals] = useState<{
     department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number;
   }[]>([]);
@@ -1391,26 +1426,20 @@ export function SchedulePage({
       .then((d: { teamActuals?: typeof teamActuals }) => { setTeamActuals(d.teamActuals ?? []); })
       .catch(() => {});
   }, [location]);
-  const [weeklyEstimates, setWeeklyEstimatesRaw] = useState<Record<string, number>>(() => {
-    try { const v = localStorage.getItem('weekly-estimates'); return v ? JSON.parse(v) : {}; } catch { return {}; }
-  });
-  function setWeeklyEstimate(weekOf: string, val: number) {
-    setWeeklyEstimatesRaw(prev => {
-      const next = { ...prev, [weekOf]: val };
-      try { localStorage.setItem('weekly-estimates', JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }
-  const [showRoster,  setShowRoster]  = useState(false);
-  const [weekOffset,  setWeekOffset]  = useState(0);
-  const [showCPO,     setShowCPO]     = useState(true);
-  const [activeTab,   setActiveTab]   = useState<'schedule' | 'monthly' | 'queue' | 'historicals'>('schedule');
-  const [deletedStack, setDeletedStack] = useState<{designer: Designer; schedule: WeekSchedule[]}[]>([]);
 
-  const designers    = location === 'Utah' ? utahDesigners    : georgiaDesigners;
-  const schedule     = location === 'Utah' ? utahSchedule     : georgiaSchedule;
-  const setDesigners = location === 'Utah' ? setUtahDesigners : setGeorgiaDesigners;
-  const setSchedule  = location === 'Utah' ? setUtahSchedule  : setGeorgiaSchedule;
+  const weeklyEstimates = settings.weeklyEstimates;
+  function setWeeklyEstimate(weekOf: string, val: number) {
+    update('weeklyEstimates', { ...weeklyEstimates, [weekOf]: val });
+  }
+
+  const avgIntake = settings.avgIntake;
+  function setAvgIntake(v: number) { update('avgIntake', v); }
+
+  const [showRoster,   setShowRoster]  = useState(false);
+  const [weekOffset,   setWeekOffset]  = useState(0);
+  const [showCPO,      setShowCPO]     = useState(true);
+  const [activeTab,    setActiveTab]   = useState<'schedule' | 'monthly' | 'queue' | 'historicals'>('schedule');
+  const [deletedStack, setDeletedStack] = useState<{designer: Designer; schedule: WeekSchedule[]}[]>([]);
 
   // Live queue counts from parent (no more manual inputs)
   const designableQueue   = location === 'Utah' ? utahDesignable    : georgiaDesignable;
@@ -1419,43 +1448,54 @@ export function SchedulePage({
 
   // ── Roster handlers ──────────────────────────────────────────────────────────
   function handleDesignerChange(id: string, field: keyof Designer, value: string) {
-    setDesigners(prev => prev.map(d => {
-      if (d.id !== id) return d;
-      if (field === 'name')    return { ...d, name: value };
-      if (field === 'payType') return { ...d, payType: value as PayType };
-      return { ...d, [field]: parseFloat(value) || 0 };
-    }));
+    const currentRoster = { ...settings.designRoster };
+    const existing = currentRoster[id] ?? designers.find(d => d.id === id) ?? {};
+    if (field === 'name')    currentRoster[id] = { ...existing, name: value } as typeof currentRoster[string];
+    else if (field === 'payType') currentRoster[id] = { ...existing, payType: value as PayType } as typeof currentRoster[string];
+    else currentRoster[id] = { ...existing, [field]: parseFloat(value) || 0 } as typeof currentRoster[string];
+    update('designRoster', currentRoster);
   }
   function handleAddDesigner() {
     const id = `${location.toLowerCase()}-${Date.now()}`;
-    const d: Designer = { id, name: 'New Designer', ratio: 1.5, payType: 'hourly', hourlyRate: 0, annualSalary: 0 };
-    setDesigners(prev => [...prev, d]);
-    setSchedule(prev => prev.map(week => ({ ...week, [id]: 0 })));
+    const newRoster = { ...settings.designRoster, [id]: { id, name: 'New Designer', ratio: 1.5, payType: 'hourly' as PayType, hourlyRate: 0, annualSalary: 0 } };
+    update('designRoster', newRoster);
+    // Add empty hours for new designer
+    const newHours = { ...settings.designHours, [id]: Array(WEEKS).fill(0) };
+    update('designHours', newHours);
   }
   function handleRemoveDesigner(id: string) {
     const designer = designers.find(d => d.id === id);
     if (designer) setDeletedStack(prev => [...prev, { designer, schedule: schedule.map(w => ({ ...w })) }]);
-    setDesigners(prev => prev.filter(d => d.id !== id));
-    setSchedule(prev => prev.map(week => { const n = { ...week }; delete n[id]; return n; }));
+    const newRoster = { ...settings.designRoster };
+    delete newRoster[id];
+    update('designRoster', newRoster);
+    const newHours = { ...settings.designHours };
+    delete newHours[id];
+    update('designHours', newHours);
   }
   function handleUndo() {
     const last = deletedStack[deletedStack.length - 1];
     if (!last) return;
-    setDesigners(prev => [...prev, last.designer]);
-    setSchedule(last.schedule);
+    // Restore roster entry
+    const newRoster = { ...settings.designRoster, [last.designer.id]: last.designer as unknown as typeof settings.designRoster[string] };
+    update('designRoster', newRoster);
     setDeletedStack(prev => prev.slice(0, -1));
   }
 
   // ── Schedule handlers ─────────────────────────────────────────────────────────
   function handleHoursChange(weekIdx: number, designerId: string, value: string) {
-    setSchedule(prev => {
-      const next = [...prev];
-      next[weekIdx] = { ...next[weekIdx], [designerId]: parseFloat(value) || 0 };
-      return next;
-    });
+    const newHours = { ...settings.designHours };
+    if (!newHours[designerId]) {
+      const def = location === 'Utah' ? buildDefaultUtahSchedule() : buildDefaultGeorgiaSchedule();
+      newHours[designerId] = Array.from({ length: WEEKS }, (_, w) => def[w]?.[designerId] ?? 0);
+    }
+    newHours[designerId] = [...newHours[designerId]];
+    newHours[designerId][weekIdx] = parseFloat(value) || 0;
+    update('designHours', newHours);
   }
   function applyToAllWeeks(designerId: string, hours: number) {
-    setSchedule(prev => prev.map(week => ({ ...week, [designerId]: hours })));
+    const newHours = { ...settings.designHours, [designerId]: Array(WEEKS).fill(hours) };
+    update('designHours', newHours);
   }
 
   // ── Per-designer stats ────────────────────────────────────────────────────────
@@ -1626,23 +1666,38 @@ export function SchedulePage({
   return (
     <div className="space-y-6">
 
-      {/* ── Dept tabs + Location toggle ─────────────────────────────────────── */}
+      {/* ── Dept tabs + Location toggle + Save indicator ────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-1">
-          {([
-            ['design',       'Design'],
-            ['preservation', 'Preservation'],
-            ['fulfillment',  'Fulfillment'],
-          ] as const).map(([id, label]) => (
-            <button key={id} onClick={() => setDept(id)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                dept === id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}>
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex gap-1">
+            {([
+              ['design',       'Design'],
+              ['preservation', 'Preservation'],
+              ['fulfillment',  'Fulfillment'],
+            ] as const).map(([id, label]) => (
+              <button key={id} onClick={() => setDept(id)}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                  dept === id
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* Save state indicator */}
+          {settingsLoading && (
+            <span className="text-xs text-slate-400 italic">Loading saved settings…</span>
+          )}
+          {saveState === 'saving' && (
+            <span className="text-xs text-slate-400">Saving…</span>
+          )}
+          {saveState === 'saved' && (
+            <span className="text-xs text-green-600">✓ Saved</span>
+          )}
+          {saveState === 'error' && (
+            <span className="text-xs text-red-500">Save failed — check connection</span>
+          )}
         </div>
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           {(['Utah', 'Georgia'] as const).map(loc => (
@@ -1663,6 +1718,12 @@ export function SchedulePage({
           preservationQueue={preservationQueue}
           countsLoading={countsLoading}
           teamActuals={teamActuals}
+          presHours={settings.presHours}
+          presRoster={settings.presRoster}
+          presSettings={settings.presSettings}
+          onPresHoursChange={(h) => update('presHours', h)}
+          onPresRosterChange={(r) => update('presRoster', r)}
+          onPresSettingsChange={(s) => update('presSettings', s)}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=all&weeks=52`)
               .then(r => r.json())
@@ -1684,6 +1745,10 @@ export function SchedulePage({
           fulfillmentQueue={fulfillmentQueue}
           countsLoading={countsLoading}
           teamActuals={teamActuals}
+          ffHours={settings.ffHours}
+          ffRoster={settings.ffRoster}
+          onFfHoursChange={(h) => update('ffHours', h)}
+          onFfRosterChange={(r) => update('ffRoster', r)}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
               .then(r => r.json())
