@@ -135,7 +135,7 @@ function buildDefaultUtahSchedule(): WeekSchedule[] {
 
 function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
   return Array.from({ length: WEEKS }, () => ({
-    'ga-1': 0, 'ga-2': 0, 'ga-3': 0, 'ga-4': 0, 'ga-5': 0,
+    'ga-1': 35, 'ga-2': 35, 'ga-3': 35, 'ga-4': 35, 'ga-5': 0,
   }));
 }
 
