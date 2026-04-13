@@ -1427,11 +1427,12 @@ function getWeekdays(weekOffset: number): { iso: string; label: string; dateStr:
 // ─── MasterScheduleSection ────────────────────────────────────────────────────
 
 function MasterScheduleSection({ location, masterAvailability, onAvailabilityChange,
-  designHours, presHours, ffHours, designRoster, presRoster, ffRoster }: {
+  designHours, designSchedule, presHours, ffHours, designRoster, presRoster, ffRoster }: {
   location:             'Utah' | 'Georgia';
   masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number> }>;
   onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number> }>) => void;
   designHours:          Record<string, number[]>;
+  designSchedule:       WeekSchedule[];
   presHours:            Record<string, number[]>;
   ffHours:              Record<string, number[]>;
   designRoster:         Record<string, { ratio: number; name: string }>;
@@ -1446,19 +1447,15 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   const weekIdx = weekOffset;
 
   // ── Weekly totals per person ──────────────────────────────────────────────
-  // Fall back to hardcoded defaults when nothing has been persisted yet
-  const defaultUtahSched    = buildDefaultUtahSchedule();
-  const defaultGeorgiaSched = buildDefaultGeorgiaSchedule();
-  const defaultSched = location === 'Utah' ? defaultUtahSched : defaultGeorgiaSched;
-
+  // designSchedule is already merged (persisted + defaults) — use it directly
   function getWeeklyScheduled(person: StaffMember): {
     design: number; preservation: number; fulfillment: number; total: number;
   } {
-    // Design: use persisted hours if available, else fall back to default schedule
-    const dHrs = designHours[person.id]?.[weekIdx] ?? defaultSched[weekIdx]?.[person.id] ?? 0;
-    // Preservation: daily hours summed
+    // Design: read from the already-merged schedule array
+    const dHrs = designSchedule[weekIdx]?.[person.id] ?? 0;
+    // Preservation: sum of daily hours
     const pHrs = (presHours[person.id] ?? []).reduce((a, b) => a + b, 0);
-    // Fulfillment: use persisted hours if available, else fall back to default (0)
+    // Fulfillment: persisted weekly hours
     const fHrs = ffHours[person.id]?.[weekIdx] ?? 0;
     return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
   }
@@ -2589,6 +2586,7 @@ export function SchedulePage({
           masterAvailability={settings.masterAvailability}
           onAvailabilityChange={(a) => update('masterAvailability', a)}
           designHours={settings.designHours}
+          designSchedule={schedule}
           presHours={settings.presHours}
           ffHours={settings.ffHours}
           designRoster={settings.designRoster}
