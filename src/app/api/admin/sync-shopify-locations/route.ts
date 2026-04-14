@@ -63,8 +63,10 @@ export async function POST(req: Request) {
 
   const allOrders = Array.from(orderMap.entries());
   const totalOrders = allOrders.length;
+  const searchParams = new URL(req.url).searchParams;
   const limit = 50;
-  const offset = parseInt(new URL(req.url).searchParams.get("offset") ?? "0");
+  const offset = parseInt(searchParams.get("offset") ?? "0");
+  const dryRun = searchParams.get("dryRun") === "true";
   const batch = allOrders.slice(offset, offset + limit);
   const nextOffset = offset + limit < totalOrders ? offset + limit : null;
 
@@ -101,15 +103,16 @@ export async function POST(req: Request) {
           continue;
         }
 
-        await shopifyFetch(`/fulfillment_orders/${fo.id}/move.json`, {
-          method: "POST",
-          body: JSON.stringify({
-            fulfillment_order: {
-              new_location_id: targetLocationId,
-            },
-          }),
-        });
-
+        if (!dryRun) {
+          await shopifyFetch(`/fulfillment_orders/${fo.id}/move.json`, {
+            method: "POST",
+            body: JSON.stringify({
+              fulfillment_order: {
+                new_location_id: targetLocationId,
+              },
+            }),
+          });
+        }
         results.updated++;
       }
     } catch (err: unknown) {
@@ -119,6 +122,7 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
+    dryRun,
     totalOrders,
     offset,
     limit,
