@@ -61,10 +61,16 @@ export async function POST(req: Request) {
     }
   }
 
+  const allOrders = Array.from(orderMap.entries());
+  const totalOrders = allOrders.length;
+  const limit = 50;
+  const offset = parseInt(new URL(req.url).searchParams.get("offset") ?? "0");
+  const batch = allOrders.slice(offset, offset + limit);
+  const nextOffset = offset + limit < totalOrders ? offset + limit : null;
+
   const results = { updated: 0, skipped: 0, errors: [] as string[] };
 
-  // 3. For each order, fetch fulfillment orders and move to correct location
-  for (const [orderNum, location] of orderMap.entries()) {
+  for (const [orderNum, location] of batch) {
     const targetLocationId = locationIdMap[location];
 
     try {
@@ -113,9 +119,11 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({
-    utahLocationId: utahLocation.id,
-    georgiaLocationId: georgiaLocation.id,
-    totalOrders: orderMap.size,
+    totalOrders,
+    offset,
+    limit,
+    batchSize: batch.length,
+    nextOffset,
     ...results,
   });
 }
