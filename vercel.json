@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/sync-shopify-tags",
-      "schedule": "0 */4 * * *"
+      "schedule": "30 9 * * *"
     }
   ]
 }
