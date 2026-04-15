@@ -44,10 +44,18 @@ export async function POST(req: Request) {
   };
 
   // 2. Pull all resolved orders from uuid_location_cache
+  const PIPELINE_STATUSES = [
+    "bouquetReceived", "checkedOn", "inProgress", "almostReadyToFrame",
+    "readyToFrame", "frameCompleted", "glued", "readyToSeal",
+    "readyToPackage", "readyToFulfill", "preparingToShip",
+    "approved", "disapproved"
+  ];
+
   const { data: cacheRows, error: dbError } = await supabase
     .from("uuid_location_cache")
     .select("order_num, location")
-    .in("location", ["Utah", "Georgia"]);
+    .in("location", ["Utah", "Georgia"])
+    .in("status", PIPELINE_STATUSES);
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
