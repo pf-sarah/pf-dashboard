@@ -44,17 +44,18 @@ export async function GET(req: Request) {
   const offset = parseInt(searchParams.get("offset") ?? "0");
   const dryRun = searchParams.get("dryRun") === "true";
 
-  // Pull pipeline orders from uuid_location_cache
+  // Pull pipeline orders from order_status_history (source of truth from PF API)
   const { data: cacheRows, error: dbError } = await supabase
-    .from("uuid_location_cache")
-    .select("order_num, status")
-    .in("status", PIPELINE_STATUSES);
+    .from("order_status_history")
+    .select("order_num, status, entered_at")
+    .in("status", PIPELINE_STATUSES)
+    .order("entered_at", { ascending: false });
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // Dedupe to one row per order_num (use first encountered status)
+  // Dedupe to one row per order_num (most recent entered_at wins)
   const orderMap = new Map<string, string>();
   for (const row of cacheRows ?? []) {
     if (row.order_num && row.status && !orderMap.has(row.order_num)) {
