@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const maxDuration = 300;
+
 const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN!;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN!;
 const SHOPIFY_API = `https://${SHOPIFY_DOMAIN}/admin/api/2024-01`;
@@ -40,11 +42,8 @@ export async function GET(req: Request) {
   }
 
   const searchParams = new URL(req.url).searchParams;
-  const limit = Math.min(parseInt(searchParams.get("limit") ?? "50"), 100);
-  const offset = parseInt(searchParams.get("offset") ?? "0");
   const dryRun = searchParams.get("dryRun") === "true";
 
-  // Pull pipeline orders from order_status_history (source of truth from PF API)
   const { data: cacheRows, error: dbError } = await supabase
     .from("order_status_history")
     .select("order_num, status, entered_at")
@@ -55,7 +54,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // Dedupe to one row per order_num (most recent entered_at wins)
   const orderMap = new Map<string, string>();
   for (const row of cacheRows ?? []) {
     if (row.order_num && row.status && !orderMap.has(row.order_num)) {
@@ -64,9 +62,6 @@ export async function GET(req: Request) {
   }
 
   const allOrders = Array.from(orderMap.entries());
-  const totalOrders = allOrders.length;
-  const batch = allOrders.slice(offset, offset + limit);
-  const nextOffset = offset + limit < totalOrders ? offset + limit : null;
 
   const results = {
     updated: 0,
@@ -75,9 +70,8 @@ export async function GET(req: Request) {
     updatedOrders: [] as string[],
   };
 
-  for (const [orderNum, status] of batch) {
+  for (const [orderNum, status] of allOrders) {
     try {
-      // Look up Shopify order by name
       const orderName = encodeURIComponent(`#${orderNum}`);
       const { orders } = await shopifyFetch(
         `/orders.json?name=${orderName}&status=any&fields=id,name,tags`
@@ -93,18 +87,15 @@ export async function GET(req: Request) {
         ? shopifyOrder.tags.split(", ").map((t: string) => t.trim()).filter(Boolean)
         : [];
 
-      // Remove any existing pipeline status tags
       const filteredTags = currentTags.filter(
         (tag) => !PIPELINE_STATUSES.includes(tag)
       );
 
-      // Check if tag already correct
       if (currentTags.includes(status) && filteredTags.length === currentTags.length - 1) {
         results.skipped++;
         continue;
       }
 
-      // Add current status
       filteredTags.push(status);
       const newTags = filteredTags.join(", ");
 
@@ -125,11 +116,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     dryRun,
-    totalOrders,
-    offset,
-    limit,
-    batchSize: batch.length,
-    nextOffset,
+    totalOrders: allOrders.length,
     ...results,
   });
 }
