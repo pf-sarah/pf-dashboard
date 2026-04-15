@@ -25,30 +25,12 @@ interface ShopifyOrder {
   tags: string;
 }
 
-async function shopifyFetch(path: string, options: RequestInit = {}) {
-  const res = await fetch(`${SHOPIFY_API}${path}`, {
-    ...options,
-    headers: {
-      "X-Shopify-Access-Token": SHOPIFY_TOKEN,
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Shopify ${path} -> ${res.status}: ${text}`);
-  }
-  return res.json();
-}
-
-async function fetchAllShopifyOrders(): Promise<Map<string, ShopifyOrder>> {
-  // Fetch all Shopify orders in bulk pages of 250
-  // Returns a map of order number (e.g. "43904") -> ShopifyOrder
+async function fetchShopifyOrdersSince(date: string): Promise<Map<string, ShopifyOrder>> {
   const orderMap = new Map<string, ShopifyOrder>();
-  let url = `/orders.json?status=any&fields=id,name,tags&limit=250`;
+  let pageUrl = `/orders.json?status=any&fields=id,name,tags&limit=250&created_at_min=${date}`;
 
-  while (url) {
-    const res = await fetch(`${SHOPIFY_API}${url}`, {
+  while (pageUrl) {
+    const res = await fetch(`${SHOPIFY_API}${pageUrl}`, {
       headers: {
         "X-Shopify-Access-Token": SHOPIFY_TOKEN,
         "Content-Type": "application/json",
@@ -58,26 +40,38 @@ async function fetchAllShopifyOrders(): Promise<Map<string, ShopifyOrder>> {
 
     const data = await res.json();
     const orders: ShopifyOrder[] = data.orders ?? [];
-
     for (const order of orders) {
-      // order.name is like "#43904" — strip the #
       const num = order.name.replace(/^#/, "");
       orderMap.set(num, order);
     }
 
-    // Check for next page via Link header
     const linkHeader = res.headers.get("link") ?? "";
     const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
     if (nextMatch) {
-      // Extract just the path+query from the full URL
       const nextUrl = new URL(nextMatch[1]);
-      url = nextUrl.pathname.replace(`/admin/api/2024-01`, "") + nextUrl.search;
+      pageUrl = nextUrl.pathname.replace(`/admin/api/2024-01`, "") + nextUrl.search;
     } else {
-      url = "";
+      pageUrl = "";
     }
   }
 
   return orderMap;
+}
+
+async function shopifyPut(path: string, body: unknown) {
+  const res = await fetch(`${SHOPIFY_API}${path}`, {
+    method: "PUT",
+    headers: {
+      "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Shopify PUT ${path} -> ${res.status}: ${text}`);
+  }
+  return res.json();
 }
 
 export async function GET(req: Request) {
@@ -89,7 +83,12 @@ export async function GET(req: Request) {
   const searchParams = new URL(req.url).searchParams;
   const dryRun = searchParams.get("dryRun") === "true";
 
-  // 1. Pull all pipeline orders from order_status_history
+  // Only fetch Shopify orders from the last 18 months
+  const since = new Date();
+  since.setMonth(since.getMonth() - 18);
+  const sinceStr = since.toISOString();
+
+  // 1. Pull pipeline orders from order_status_history
   const { data: cacheRows, error: dbError } = await supabase
     .from("order_status_history")
     .select("order_num, status")
@@ -99,7 +98,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // Build map: orderNum -> Set of current statuses
+  // Build map: orderNum -> Set of statuses
   const orderStatuses = new Map<string, Set<string>>();
   for (const row of cacheRows ?? []) {
     if (!row.order_num || !row.status) continue;
@@ -107,16 +106,16 @@ export async function GET(req: Request) {
     orderStatuses.get(row.order_num)!.add(row.status);
   }
 
-  // 2. Fetch ALL Shopify orders in bulk (~10 API calls instead of 2,486)
+  // 2. Bulk fetch Shopify orders from last 18 months
   let shopifyOrders: Map<string, ShopifyOrder>;
   try {
-    shopifyOrders = await fetchAllShopifyOrders();
+    shopifyOrders = await fetchShopifyOrdersSince(sinceStr);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `Failed to fetch Shopify orders: ${message}` }, { status: 500 });
+    return NextResponse.json({ error: `Shopify fetch failed: ${message}` }, { status: 500 });
   }
 
-  // 3. Loop through pipeline orders and update tags where needed
+  // 3. Update tags for orders that need it
   const results = {
     updated: 0,
     skipped: 0,
@@ -136,33 +135,23 @@ export async function GET(req: Request) {
       ? shopifyOrder.tags.split(", ").map((t: string) => t.trim()).filter(Boolean)
       : [];
 
-    // Remove all existing pipeline status tags
-    const filteredTags = currentTags.filter(
-      (tag) => !PIPELINE_STATUSES.includes(tag)
-    );
-
-    // Add all current statuses for this order
+    const filteredTags = currentTags.filter(tag => !PIPELINE_STATUSES.includes(tag));
     const newStatuses = Array.from(statusSet);
-    const tagsToWrite = [...filteredTags, ...newStatuses];
 
-    // Skip if pipeline tags unchanged
-    const existingPipelineTags = currentTags
-      .filter(t => PIPELINE_STATUSES.includes(t))
-      .sort()
-      .join(",");
-    const incomingPipelineTags = newStatuses.sort().join(",");
+    const existingPipelineTags = currentTags.filter(t => PIPELINE_STATUSES.includes(t)).sort().join(",");
+    const incomingPipelineTags = [...newStatuses].sort().join(",");
+
     if (existingPipelineTags === incomingPipelineTags) {
       results.skipped++;
       continue;
     }
 
-    const newTags = tagsToWrite.join(", ");
+    const newTags = [...filteredTags, ...newStatuses].join(", ");
 
     if (!dryRun) {
       try {
-        await shopifyFetch(`/orders/${shopifyOrder.id}.json`, {
-          method: "PUT",
-          body: JSON.stringify({ order: { id: shopifyOrder.id, tags: newTags } }),
+        await shopifyPut(`/orders/${shopifyOrder.id}.json`, {
+          order: { id: shopifyOrder.id, tags: newTags },
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -177,8 +166,8 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     dryRun,
+    shopifyOrdersFetched: shopifyOrders.size,
     totalPipelineOrders: orderStatuses.size,
-    totalShopifyOrders: shopifyOrders.size,
     ...results,
   });
 }
