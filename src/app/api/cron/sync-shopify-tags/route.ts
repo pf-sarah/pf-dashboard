@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { pfGetAll, fmtDate } from "@/lib/pf-api";
+import { createClient } from "@supabase/supabase-js";
 
 export const maxDuration = 300;
 
 const SHOPIFY_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN!;
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN!;
 const SHOPIFY_API = `https://${SHOPIFY_DOMAIN}/admin/api/2024-01`;
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 const PIPELINE_STATUSES = [
   "bouquetReceived", "checkedOn", "progress", "almostReadyToFrame",
@@ -14,11 +19,10 @@ const PIPELINE_STATUSES = [
   "preparingToBeShipped", "shipped", "waitingForResponse"
 ];
 
-interface WeeklyReportItem {
-  orderNumber?:        string | number;
-  shopifyOrderNumber?: string | number;
-  status?:             string;
-  variantTitle?:       string;
+interface ShopifyOrder {
+  id: number;
+  name: string;
+  tags: string;
 }
 
 async function shopifyFetch(path: string, options: RequestInit = {}) {
@@ -37,6 +41,45 @@ async function shopifyFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+async function fetchAllShopifyOrders(): Promise<Map<string, ShopifyOrder>> {
+  // Fetch all Shopify orders in bulk pages of 250
+  // Returns a map of order number (e.g. "43904") -> ShopifyOrder
+  const orderMap = new Map<string, ShopifyOrder>();
+  let url = `/orders.json?status=any&fields=id,name,tags&limit=250`;
+
+  while (url) {
+    const res = await fetch(`${SHOPIFY_API}${url}`, {
+      headers: {
+        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!res.ok) throw new Error(`Shopify bulk fetch failed: ${res.status}`);
+
+    const data = await res.json();
+    const orders: ShopifyOrder[] = data.orders ?? [];
+
+    for (const order of orders) {
+      // order.name is like "#43904" — strip the #
+      const num = order.name.replace(/^#/, "");
+      orderMap.set(num, order);
+    }
+
+    // Check for next page via Link header
+    const linkHeader = res.headers.get("link") ?? "";
+    const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+    if (nextMatch) {
+      // Extract just the path+query from the full URL
+      const nextUrl = new URL(nextMatch[1]);
+      url = nextUrl.pathname.replace(`/admin/api/2024-01`, "") + nextUrl.search;
+    } else {
+      url = "";
+    }
+  }
+
+  return orderMap;
+}
+
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -46,98 +89,96 @@ export async function GET(req: Request) {
   const searchParams = new URL(req.url).searchParams;
   const dryRun = searchParams.get("dryRun") === "true";
 
-  // Build 12 months of WeeklyReport paths (same as status-snapshot)
-  const paths: string[] = [];
-  const today = new Date();
-  for (let m = 0; m < 12; m++) {
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth() - m, 1);
-    const lastOfMonth  = m === 0 ? today : new Date(today.getFullYear(), today.getMonth() - m + 1, 0);
-    paths.push(
-      `/OrderProducts/WeeklyReport?startDate=${fmtDate(firstOfMonth)}&endDate=${fmtDate(lastOfMonth)}&pageSize=1000`
-    );
+  // 1. Pull all pipeline orders from order_status_history
+  const { data: cacheRows, error: dbError } = await supabase
+    .from("order_status_history")
+    .select("order_num, status")
+    .in("status", PIPELINE_STATUSES);
+
+  if (dbError) {
+    return NextResponse.json({ error: dbError.message }, { status: 500 });
   }
 
-  // Fetch all months in parallel batches of 6
-  // Map: orderNum -> Set of statuses (an order can have multiple products at different statuses)
+  // Build map: orderNum -> Set of current statuses
   const orderStatuses = new Map<string, Set<string>>();
-
-  for (let i = 0; i < paths.length; i += 6) {
-    const results = await pfGetAll<WeeklyReportItem[]>(paths.slice(i, i + 6));
-    results.forEach(items => {
-      if (!items) return;
-      items.forEach(item => {
-        if (!item.status || !PIPELINE_STATUSES.includes(item.status)) return;
-        const num = String(item.orderNumber ?? item.shopifyOrderNumber ?? "");
-        if (!num) return;
-        if (!orderStatuses.has(num)) orderStatuses.set(num, new Set());
-        orderStatuses.get(num)!.add(item.status);
-      });
-    });
+  for (const row of cacheRows ?? []) {
+    if (!row.order_num || !row.status) continue;
+    if (!orderStatuses.has(row.order_num)) orderStatuses.set(row.order_num, new Set());
+    orderStatuses.get(row.order_num)!.add(row.status);
   }
 
-  const allOrders = Array.from(orderStatuses.entries());
+  // 2. Fetch ALL Shopify orders in bulk (~10 API calls instead of 2,486)
+  let shopifyOrders: Map<string, ShopifyOrder>;
+  try {
+    shopifyOrders = await fetchAllShopifyOrders();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: `Failed to fetch Shopify orders: ${message}` }, { status: 500 });
+  }
 
+  // 3. Loop through pipeline orders and update tags where needed
   const results = {
     updated: 0,
     skipped: 0,
+    notFound: 0,
     errors: [] as string[],
     updatedOrders: [] as string[],
   };
 
-  for (const [orderNum, statusSet] of allOrders) {
-    try {
-      const orderName = encodeURIComponent(`#${orderNum}`);
-      const { orders } = await shopifyFetch(
-        `/orders.json?name=${orderName}&status=any&fields=id,name,tags`
-      );
+  for (const [orderNum, statusSet] of orderStatuses.entries()) {
+    const shopifyOrder = shopifyOrders.get(orderNum);
+    if (!shopifyOrder) {
+      results.notFound++;
+      continue;
+    }
 
-      if (!orders || orders.length === 0) {
-        results.skipped++;
-        continue;
-      }
+    const currentTags: string[] = shopifyOrder.tags
+      ? shopifyOrder.tags.split(", ").map((t: string) => t.trim()).filter(Boolean)
+      : [];
 
-      const shopifyOrder = orders[0];
-      const currentTags: string[] = shopifyOrder.tags
-        ? shopifyOrder.tags.split(", ").map((t: string) => t.trim()).filter(Boolean)
-        : [];
+    // Remove all existing pipeline status tags
+    const filteredTags = currentTags.filter(
+      (tag) => !PIPELINE_STATUSES.includes(tag)
+    );
 
-      // Remove all existing pipeline status tags
-      const filteredTags = currentTags.filter(
-        (tag) => !PIPELINE_STATUSES.includes(tag)
-      );
+    // Add all current statuses for this order
+    const newStatuses = Array.from(statusSet);
+    const tagsToWrite = [...filteredTags, ...newStatuses];
 
-      // Add all current statuses for this order (handles multiple order products)
-      const newStatuses = Array.from(statusSet);
-      const tagsToWrite = [...filteredTags, ...newStatuses];
+    // Skip if pipeline tags unchanged
+    const existingPipelineTags = currentTags
+      .filter(t => PIPELINE_STATUSES.includes(t))
+      .sort()
+      .join(",");
+    const incomingPipelineTags = newStatuses.sort().join(",");
+    if (existingPipelineTags === incomingPipelineTags) {
+      results.skipped++;
+      continue;
+    }
 
-      // Skip if nothing changed
-      const existingPipelineTags = currentTags.filter(t => PIPELINE_STATUSES.includes(t)).sort();
-      const incomingPipelineTags = newStatuses.sort();
-      if (JSON.stringify(existingPipelineTags) === JSON.stringify(incomingPipelineTags)) {
-        results.skipped++;
-        continue;
-      }
+    const newTags = tagsToWrite.join(", ");
 
-      const newTags = tagsToWrite.join(", ");
-
-      if (!dryRun) {
+    if (!dryRun) {
+      try {
         await shopifyFetch(`/orders/${shopifyOrder.id}.json`, {
           method: "PUT",
           body: JSON.stringify({ order: { id: shopifyOrder.id, tags: newTags } }),
         });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        results.errors.push(`Order ${orderNum}: ${message}`);
+        continue;
       }
-
-      results.updated++;
-      results.updatedOrders.push(`${orderNum} -> ${newStatuses.join(", ")}`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      results.errors.push(`Order ${orderNum}: ${message}`);
     }
+
+    results.updated++;
+    results.updatedOrders.push(`${orderNum} -> ${newStatuses.join(", ")}`);
   }
 
   return NextResponse.json({
     dryRun,
-    totalOrders: allOrders.length,
+    totalPipelineOrders: orderStatuses.size,
+    totalShopifyOrders: shopifyOrders.size,
     ...results,
   });
 }
