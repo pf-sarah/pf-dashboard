@@ -58,20 +58,38 @@ async function fetchShopifyOrdersSince(date: string): Promise<Map<string, Shopif
   return orderMap;
 }
 
-async function shopifyPut(path: string, body: unknown) {
-  const res = await fetch(`${SHOPIFY_API}${path}`, {
+async function shopifyPut(orderId: number, tags: string): Promise<void> {
+  const res = await fetch(`${SHOPIFY_API}/orders/${orderId}.json`, {
     method: "PUT",
     headers: {
       "X-Shopify-Access-Token": SHOPIFY_TOKEN,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ order: { id: orderId, tags } }),
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Shopify PUT ${path} -> ${res.status}: ${text}`);
+    throw new Error(`${res.status}: ${text}`);
   }
-  return res.json();
+}
+
+async function batchRun<T>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<void>
+): Promise<{ errors: string[] }> {
+  const errors: string[] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(item =>
+        fn(item).catch(err => {
+          errors.push(err instanceof Error ? err.message : String(err));
+        })
+      )
+    );
+  }
+  return { errors };
 }
 
 export async function GET(req: Request) {
@@ -115,19 +133,16 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: `Shopify fetch failed: ${message}` }, { status: 500 });
   }
 
-  // 3. Update tags for orders that need it
-  const results = {
-    updated: 0,
-    skipped: 0,
-    notFound: 0,
-    errors: [] as string[],
-    updatedOrders: [] as string[],
-  };
+  // 3. Build list of updates needed
+  type UpdateJob = { orderId: number; orderNum: string; newTags: string; newStatuses: string[] };
+  const updates: UpdateJob[] = [];
+  let skipped = 0;
+  let notFound = 0;
 
   for (const [orderNum, statusSet] of orderStatuses.entries()) {
     const shopifyOrder = shopifyOrders.get(orderNum);
     if (!shopifyOrder) {
-      results.notFound++;
+      notFound++;
       continue;
     }
 
@@ -142,32 +157,49 @@ export async function GET(req: Request) {
     const incomingPipelineTags = [...newStatuses].sort().join(",");
 
     if (existingPipelineTags === incomingPipelineTags) {
-      results.skipped++;
+      skipped++;
       continue;
     }
 
-    const newTags = [...filteredTags, ...newStatuses].join(", ");
-
-    if (!dryRun) {
-      try {
-        await shopifyPut(`/orders/${shopifyOrder.id}.json`, {
-          order: { id: shopifyOrder.id, tags: newTags },
-        });
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        results.errors.push(`Order ${orderNum}: ${message}`);
-        continue;
-      }
-    }
-
-    results.updated++;
-    results.updatedOrders.push(`${orderNum} -> ${newStatuses.join(", ")}`);
+    updates.push({
+      orderId: shopifyOrder.id,
+      orderNum,
+      newTags: [...filteredTags, ...newStatuses].join(", "),
+      newStatuses,
+    });
   }
 
+  if (dryRun) {
+    return NextResponse.json({
+      dryRun: true,
+      shopifyOrdersFetched: shopifyOrders.size,
+      totalPipelineOrders: orderStatuses.size,
+      updated: updates.length,
+      skipped,
+      notFound,
+      errors: [],
+      updatedOrders: updates.map(u => `${u.orderNum} -> ${u.newStatuses.join(", ")}`),
+    });
+  }
+
+  // 4. Write updates in parallel batches of 10
+  const errors: string[] = [];
+  const updatedOrders: string[] = [];
+
+  const { errors: writeErrors } = await batchRun(updates, 10, async (job) => {
+    await shopifyPut(job.orderId, job.newTags);
+    updatedOrders.push(`${job.orderNum} -> ${job.newStatuses.join(", ")}`);
+  });
+  errors.push(...writeErrors);
+
   return NextResponse.json({
-    dryRun,
+    dryRun: false,
     shopifyOrdersFetched: shopifyOrders.size,
     totalPipelineOrders: orderStatuses.size,
-    ...results,
+    updated: updatedOrders.length,
+    skipped,
+    notFound,
+    errors,
+    updatedOrders,
   });
 }
