@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/status-snapshot",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/sync-shopify-tags",
+      "schedule": "0 */4 * * *"
     }
   ]
 }
