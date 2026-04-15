@@ -78,7 +78,7 @@ export async function POST(req: Request) {
   const batch = allOrders.slice(offset, offset + limit);
   const nextOffset = offset + limit < totalOrders ? offset + limit : null;
 
-  const results = { updated: 0, skipped: 0, errors: [] as string[] };
+  const results = { updated: 0, skipped: 0, errors: [] as string[], updatedOrders: [] as string[] };
 
   for (const [orderNum, location] of batch) {
     const targetLocationId = locationIdMap[location];
@@ -122,6 +122,7 @@ export async function POST(req: Request) {
           });
         }
         results.updated++;
+        results.updatedOrders.push(orderNum);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
