@@ -823,6 +823,32 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
 
 // ─── PreservationSection ───────────────────────────────────────────────────────
 
+// ─── useDraggableOrder ────────────────────────────────────────────────────────
+function useDraggableOrder<T extends { id: string }>(
+  items: T[],
+  onReorder: (newOrder: string[]) => void
+) {
+  const dragId = useRef<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  function handleDragStart(id: string) { dragId.current = id; }
+  function handleDragOver(e: React.DragEvent, id: string) { e.preventDefault(); setDragOverId(id); }
+  function handleDrop(targetId: string) {
+    if (!dragId.current || dragId.current === targetId) { setDragOverId(null); return; }
+    const ids = items.map(i => i.id);
+    const fromIdx = ids.indexOf(dragId.current);
+    const toIdx   = ids.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) { setDragOverId(null); return; }
+    const next = [...ids];
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, dragId.current);
+    dragId.current = null;
+    setDragOverId(null);
+    onReorder(next);
+  }
+  function handleDragEnd() { dragId.current = null; setDragOverId(null); }
+  return { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd };
+}
+
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
 function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder }: {
   team: PresTeamMember[];
