@@ -510,35 +510,35 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
 
 // ─── Preservation team data ────────────────────────────────────────────────────
 
-const UTAH_PRESERVATION_TEAM = [
-  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
-  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
-  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, rate: 0, hours: Array(5).fill(0) },
-  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, rate: 0, hours: Array(5).fill(0) },
+const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
+  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
+  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
-const GEORGIA_PRESERVATION_TEAM = [
-  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
-  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(5).fill(8) },
-  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, rate: 0, hours: Array(5).fill(0) },
-  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, rate: 0, hours: Array(5).fill(0) },
+const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
+  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
+  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
-const UTAH_FULFILLMENT_TEAM = [
-  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
-  { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
-  { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
-  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
+  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
 ];
 
-const GEORGIA_FULFILLMENT_TEAM = [
-  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
-  { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
-  { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, rate: 0, hours: Array(8).fill(8) },
+const GEORGIA_FULFILLMENT_TEAM: FfTeamMember[] = [
+  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
 ];
 
-type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; rate: number; hours: number[] };
-type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; rate: number; hours: number[] };
+type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[] };
+type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[] };
 
 // Dynamic week labels — always real Monday dates
 function getWeekLabels8(): string[] {
@@ -831,10 +831,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   teamActuals:           { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
-  presRoster:            Record<string, { ratio: number; rate: number; name: string }>;
+  presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
   onPresHoursChange:     (h: Record<string, number[]>) => void;
-  onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string }>) => void;
+  onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
 }) {
   const today    = new Date();
@@ -994,8 +994,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         base.push({
           id, name: r.name, ratio: r.ratio, rate: r.rate,
           pay: 'hourly' as const,
+          payType: (r.payType ?? 'hourly') as 'hourly' | 'salary',
+          annualSalary: r.annualSalary ?? 0,
           hours: presHours[id] ?? Array(WEEKS).fill(0),
-        });
+        } as PresTeamMember);
       }
     });
     return base;
@@ -1012,8 +1014,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresHoursChange(newHours);
   }
 
-  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name', val: string | number) {
-    const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member' };
+  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary', val: string | number) {
+    const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member', payType: 'hourly' as const, annualSalary: 0 };
     onPresRosterChange({ ...presRoster, [memberId]: { ...existing, [field]: val } });
   }
 
@@ -1283,6 +1285,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const cap = dayTotals[di];
                         const est = location === 'Utah' ? d.utahEst : d.gaEst;
                         const diff = cap - est;
+                        const dayCost = team.reduce((s, m) => {
+                          const h = m.hours[di] ?? 0;
+                          const dailySalary = m.payType === 'salary' ? m.annualSalary / 260 : 0;
+                          return s + (m.payType === 'salary' ? dailySalary : h * m.rate);
+                        }, 0);
+                        const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
                             <div className="text-indigo-700">{cap} ord</div>
@@ -1291,6 +1299,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 {diff > 0 ? '+' : ''}{diff} vs est.
                               </div>
                             )}
+                            {dayCPO !== null && <div className="text-[10px] text-amber-600">{fmt$(dayCPO)}</div>}
                           </td>
                         );
                       })}
@@ -1350,6 +1359,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           {windowWeeks.map(w => {
                             const h = m.hours[w] ?? 0;
                             const orders = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
+                            const cost = m.payType === 'salary' ? (m.annualSalary / 52) : h * m.rate;
+                            const cpo = orders > 0 && cost > 0 ? cost / orders : null;
                             return (
                               <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                                 <input
@@ -1360,6 +1371,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                   className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
                                 />
                                 {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                                {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                               </td>
                             );
                           })}
@@ -1368,11 +1380,19 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                       {/* Week totals row */}
                       <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                         <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
-                        {windowWeeks.map(w => (
-                          <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/50' : ''}`}>
-                            <div className="text-indigo-700">{weeklyTotals[w]} ord</div>
-                          </td>
-                        ))}
+                        {windowWeeks.map(w => {
+                          const totalCost = team.reduce((s, m) => {
+                            const h = m.hours[w] ?? 0;
+                            return s + (m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate);
+                          }, 0);
+                          const totalCPO = weeklyTotals[w] > 0 && totalCost > 0 ? totalCost / weeklyTotals[w] : null;
+                          return (
+                            <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/50' : ''}`}>
+                              <div className="text-indigo-700">{weeklyTotals[w]} ord</div>
+                              {totalCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(totalCPO)}</div>}
+                            </td>
+                          );
+                        })}
                       </tr>
                       {/* Shopify default estimates row */}
                       <tr className="bg-slate-50/50">
@@ -1459,9 +1479,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
   ffHours:         Record<string, number[]>;
-  ffRoster:        Record<string, { ratio: number; rate: number; name: string }>;
+  ffRoster:        Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   onFfHoursChange: (h: Record<string, number[]>) => void;
-  onFfRosterChange:(r: Record<string, { ratio: number; rate: number; name: string }>) => void;
+  onFfRosterChange:(r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
 }) {
   const [ffTab,      setFfTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster, setShowRoster] = useState(false);
@@ -1472,12 +1492,16 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const base = defaultTeam.map(m => {
       const roster = ffRoster[m.id];
       const hours  = ffHours[m.id] ?? [...m.hours];
-      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, name: roster?.name ?? m.name, hours };
+      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, name: roster?.name ?? m.name,
+        payType: roster?.payType ?? 'hourly' as const,
+        annualSalary: roster?.annualSalary ?? 0, hours };
     });
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(ffRoster).forEach(([id, r]) => {
       if (!defaultIds.has(id)) {
-        base.push({ id, name: r.name ?? 'New Member', ratio: r.ratio ?? 1.0, pay: 'hourly' as const, rate: r.rate ?? 0, hours: ffHours[id] ?? Array(8).fill(0) });
+        base.push({ id, name: r.name ?? 'New Member', ratio: r.ratio ?? 1.0, pay: 'hourly' as const,
+          payType: r.payType ?? 'hourly' as const, annualSalary: r.annualSalary ?? 0,
+          rate: r.rate ?? 0, hours: ffHours[id] ?? Array(8).fill(0) });
       }
     });
     return base;
