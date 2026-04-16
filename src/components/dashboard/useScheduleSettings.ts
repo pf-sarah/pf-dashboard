@@ -10,12 +10,10 @@ export interface DesignerRoster {
 }
 
 export interface PresSettings {
-  dayPcts:  number[];   // [Mon, Tue, Wed, Thu, Fri]
-  utPct:    number;
-  gaPct:    number;
-  unkPct:   number;
   dateFrom?: string;
   dateTo?:   string;
+  // Per-week manual overrides: weekOf ISO → { ut, ga }
+  weekOverrides?: Record<string, { ut: number; ga: number }>;
 }
 
 export interface TeamRoster {
@@ -55,7 +53,7 @@ export interface ScheduleSettings {
 const DEFAULTS: ScheduleSettings = {
   designHours: {}, designRoster: {},
   presHours: {}, presRoster: {},
-  presSettings: { dayPcts: [20,25,25,20,10], utPct: 50, gaPct: 40, unkPct: 10 },
+  presSettings: { weekOverrides: {} },
   ffHours: {}, ffRoster: {},
   masterAvailability: {},
   flexRows: {},

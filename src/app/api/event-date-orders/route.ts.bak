@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
+
 export const maxDuration = 60;
+
 interface ShopifyOrder {
   id: number;
   name: string;
   tags: string;
   customer?: { first_name?: string; last_name?: string };
 }
+
 function fmtDate(d: Date): string {
   return d.toISOString().split('T')[0];
 }
+
 function datesInRange(start: string, end: string): string[] {
   const dates: string[] = [];
   const cur = new Date(start + 'T00:00:00');
@@ -20,6 +24,7 @@ function datesInRange(start: string, end: string): string[] {
   }
   return dates;
 }
+
 async function fetchOrdersWithTag(
   domain: string,
   token: string,
@@ -29,6 +34,7 @@ async function fetchOrdersWithTag(
   let url: string | null =
     `https://${domain}/admin/api/2024-10/orders.json?status=any&tag=${encodeURIComponent(tag)}` +
     `&limit=250&fields=id,name,tags,customer`;
+
   while (url) {
     const res: Response = await fetch(url, {
       headers: { 'X-Shopify-Access-Token': token },
@@ -43,24 +49,26 @@ async function fetchOrdersWithTag(
   }
   return all;
 }
+
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
   const domain = process.env.SHOPIFY_STORE_DOMAIN?.trim();
   const token  = process.env.SHOPIFY_ADMIN_TOKEN?.trim();
   if (!domain || !token) return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
+
   const startDate = req.nextUrl.searchParams.get('start');
   const endDate   = req.nextUrl.searchParams.get('end');
   if (!startDate || !endDate) return NextResponse.json({ error: 'start and end required' }, { status: 400 });
+
   try {
     const dates = datesInRange(startDate, endDate);
     if (dates.length > 60) return NextResponse.json({ error: 'Date range too large (max 60 days)' }, { status: 400 });
-    const byDate: Record<string, {
-      count: number;
-      gaCount: number;
-      utahCount: number;
-      orders: { name: string; customer: string; isGa: boolean }[];
-    }> = {};
+
+    // Fetch all dates in parallel batches of 10
+    const byDate: Record<string, { count: number; orders: { name: string; customer: string }[] }> = {};
+
     const BATCH = 10;
     for (let i = 0; i < dates.length; i += BATCH) {
       const batch = dates.slice(i, i + BATCH);
@@ -69,21 +77,18 @@ export async function GET(req: NextRequest) {
       );
       results.forEach((orders, j) => {
         const date = batch[j];
-        const mapped = orders.map(o => ({
-          name: o.name,
-          customer: [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || '—',
-          // ga tag: check for standalone "ga" in comma-separated tags (case-insensitive)
-          isGa: o.tags.split(',').map(t => t.trim().toLowerCase()).includes('ga'),
-        }));
-        const gaCount   = mapped.filter(o => o.isGa).length;
-        const utahCount = mapped.filter(o => !o.isGa).length;
-        byDate[date] = { count: orders.length, gaCount, utahCount, orders: mapped };
+        byDate[date] = {
+          count: orders.length,
+          orders: orders.map(o => ({
+            name: o.name,
+            customer: [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || '—',
+          })),
+        };
       });
     }
-    const total      = Object.values(byDate).reduce((s, d) => s + d.count,      0);
-    const totalGa    = Object.values(byDate).reduce((s, d) => s + d.gaCount,    0);
-    const totalUtah  = Object.values(byDate).reduce((s, d) => s + d.utahCount,  0);
-    return NextResponse.json({ byDate, total, totalGa, totalUtah, startDate, endDate });
+
+    const total = Object.values(byDate).reduce((s, d) => s + d.count, 0);
+    return NextResponse.json({ byDate, total, startDate, endDate });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
