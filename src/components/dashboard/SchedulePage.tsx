@@ -823,6 +823,125 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
 
 // ─── PreservationSection ───────────────────────────────────────────────────────
 
+// ─── PresRosterEditor ─────────────────────────────────────────────────────────
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder }: {
+  team: PresTeamMember[];
+  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary', val: string | number) => void;
+  onRemove: (id: string) => void;
+  onReorder: (newOrder: string[]) => void;
+}) {
+  const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
+    useDraggableOrder(team, onReorder);
+  return (
+    <div>
+      <div className="grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      </div>
+      <div className="space-y-2">
+        {team.map((m) => (
+          <div key={m.id}
+            draggable
+            onDragStart={() => handleDragStart(m.id)}
+            onDragOver={e => handleDragOver(e, m.id)}
+            onDrop={() => handleDrop(m.id)}
+            onDragEnd={handleDragEnd}
+            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}>
+            <span className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none">⠿</span>
+            <input type="text" value={m.name}
+              onChange={e => onUpdateRoster(m.id, 'name', e.target.value)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <input type="number" value={m.ratio} step="0.05" min="0.05"
+              onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(m.id, 'payType', e.target.value)}
+              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="hourly">Hourly</option>
+              <option value="salary">Salary</option>
+            </select>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
+              <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
+                disabled={m.payType === 'salary'}
+                onChange={e => onUpdateRoster(m.id, 'rate', parseFloat(e.target.value) || 0)}
+                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
+            </div>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
+              <input type="number" value={m.annualSalary || ''} step="1000" min="0" placeholder="e.g. 40000"
+                disabled={m.payType !== 'salary'}
+                onChange={e => onUpdateRoster(m.id, 'annualSalary', parseFloat(e.target.value) || 0)}
+                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
+            </div>
+            <button onClick={() => onRemove(m.id)}
+              className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── FfRosterEditor ────────────────────────────────────────────────────────────
+function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder }: {
+  team: FfTeamMember[];
+  ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  onUpdateName: (id: string, name: string) => void;
+  onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary', val: number | string) => void;
+  onRemove: (id: string) => void;
+  onReorder: (newOrder: string[]) => void;
+}) {
+  const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
+    useDraggableOrder(team, onReorder);
+  return (
+    <div>
+      <div className="grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      </div>
+      <div className="space-y-2">
+        {team.map((m, mi) => (
+          <div key={m.id}
+            draggable
+            onDragStart={() => handleDragStart(m.id)}
+            onDragOver={e => handleDragOver(e, m.id)}
+            onDrop={() => handleDrop(m.id)}
+            onDragEnd={handleDragEnd}
+            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}>
+            <span className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none">⠿</span>
+            <input type="text" value={m.name}
+              onChange={e => onUpdateName(m.id, e.target.value)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <input type="number" value={m.ratio} step="0.05" min="0.05"
+              onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(mi, 'payType', e.target.value)}
+              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="hourly">Hourly</option>
+              <option value="salary">Salary</option>
+            </select>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
+              <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
+                disabled={m.payType === 'salary'}
+                onChange={e => onUpdateRoster(mi, 'rate', parseFloat(e.target.value) || 0)}
+                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
+            </div>
+            <div className="relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
+              <input type="number" value={m.annualSalary || ''} step="1000" min="0" placeholder="e.g. 40000"
+                disabled={m.payType !== 'salary'}
+                onChange={e => onUpdateRoster(mi, 'annualSalary', parseFloat(e.target.value) || 0)}
+                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
+            </div>
+            <button onClick={() => onRemove(m.id)}
+              className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
   presHours, presRoster, presSettings, onPresHoursChange, onPresRosterChange, onPresSettingsChange }: {
   location:              'Utah' | 'Georgia';
