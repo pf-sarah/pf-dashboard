@@ -1190,31 +1190,21 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
             </button>
             {showRoster && (
               <div className="mt-3 bg-white border border-slate-100 rounded-xl p-5">
-                <div className="grid grid-cols-[1fr_80px_110px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-                  <span>Name</span><span className="text-center">Ratio</span><span className="text-center">Hourly rate</span><span />
-                </div>
-                <div className="space-y-2">
-                  {team.map((m) => (
-                    <div key={m.id} className="grid grid-cols-[1fr_80px_110px_20px] gap-2 items-center">
-                      <input type="text" value={m.name}
-                        onChange={e => updateRoster(m.id, 'name', e.target.value)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" value={m.ratio} step="0.05" min="0.05"
-                        onChange={e => updateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-                        <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
-                          onChange={e => updateRoster(m.id, 'rate', parseFloat(e.target.value) || 0)}
-                          className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      </div>
-                      <button onClick={() => handleRemoveMember(m.id)}
-                        className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
-                    </div>
-                  ))}
-                </div>
+                <PresRosterEditor
+                  team={team}
+                  presRoster={presRoster}
+                  onUpdateRoster={updateRoster}
+                  onRemove={handleRemoveMember}
+                  onReorder={(newOrder) => {
+                    const newRoster = { ...presRoster };
+                    newOrder.forEach((id, i) => {
+                      newRoster[id] = { ...(newRoster[id] ?? { ratio: 1, rate: 0, name: '' }), _order: i } as typeof newRoster[string];
+                    });
+                    onPresRosterChange(newRoster);
+                  }}
+                />
                 <button onClick={handleAddMember}
-                  className="mt-3 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
+                  className="mt-4 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
                   + Add team member
                 </button>
                 <p className="mt-3 text-xs text-slate-400"><strong>Ratio:</strong> hours per order. e.g. 0.7 = 1 order takes 0.7 hrs.</p>
