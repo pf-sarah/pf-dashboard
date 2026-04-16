@@ -13,8 +13,8 @@ const supabase = createClient(
 );
 
 const PIPELINE_STATUSES = [
-  "bouquetReceived", "checkedOn", "progress", "almostReadyToFrame",
-  "readyToFrame", "noResponse", "disapproved", "approved",
+  "orderReceived", "bouquetReceived", "checkedOn", "progress", "almostReadyToFrame",
+  "readyToFrame", "frameCompleted", "noResponse", "disapproved", "approved",
   "glued", "readyToSeal", "readyToPackage", "readyToFulfill",
   "preparingToBeShipped", "shipped", "waitingForResponse"
 ];
