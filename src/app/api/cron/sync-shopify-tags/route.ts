@@ -110,7 +110,8 @@ export async function GET(req: Request) {
   const { data: cacheRows, error: dbError } = await supabase
     .from("order_status_history")
     .select("order_num, status")
-    .in("status", PIPELINE_STATUSES);
+    .in("status", PIPELINE_STATUSES)
+    .limit(50000);
 
   if (dbError) {
     return NextResponse.json({ error: dbError.message }, { status: 500 });
