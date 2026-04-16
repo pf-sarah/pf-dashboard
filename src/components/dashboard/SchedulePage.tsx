@@ -1197,7 +1197,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                       <input type="text" value={m.name}
                         onChange={e => updateRoster(m.id, 'name', e.target.value)}
                         className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" value={m.ratio} step="0.01" min="0.01"
+                      <input type="number" value={m.ratio} step="0.05" min="0.05"
                         onChange={e => updateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
                         className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                       <div className="relative">
@@ -1570,7 +1570,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       <input type="text" value={m.name}
                         onChange={e => updateFfRosterName(m.id, e.target.value)}
                         className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" value={m.ratio} step="0.01" min="0.01"
+                      <input type="number" value={m.ratio} step="0.05" min="0.05"
                         onChange={e => updateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
                         className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                       <div className="relative">
