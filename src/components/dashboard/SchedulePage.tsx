@@ -832,10 +832,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
   presRoster:            Record<string, { ratio: number; rate: number; name: string }>;
-  presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }> };
+  presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
   onPresHoursChange:     (h: Record<string, number[]>) => void;
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string }>) => void;
-  onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }> }) => void;
+  onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -852,6 +852,26 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const dateFrom = presSettings.dateFrom ?? mondayIso;
   const dateTo   = presSettings.dateTo   ?? sundayIso;
   const weekOverrides = presSettings.weekOverrides ?? {};
+  const dayPcts = presSettings.dayPcts ?? [20, 25, 25, 20, 10];
+  const dayOverrides = presSettings.dayOverrides ?? {};
+  const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+
+  function setDayPct(i: number, val: number) {
+    const next = [...dayPcts]; next[i] = val;
+    onPresSettingsChange({ ...presSettings, dayPcts: next });
+  }
+  function setDayOverride(iso: string, locKey: 'ut' | 'ga', val: number | null) {
+    const next = { ...dayOverrides };
+    if (val === null) {
+      const existing = next[iso];
+      if (existing) {
+        next[iso] = { ...existing, [locKey]: 0 };
+      }
+    } else {
+      next[iso] = { ut: next[iso]?.ut ?? 0, ga: next[iso]?.ga ?? 0, [locKey]: val };
+    }
+    onPresSettingsChange({ ...presSettings, dayOverrides: next });
+  }
 
   function setDateFrom(v: string) { onPresSettingsChange({ ...presSettings, dateFrom: v }); }
   function setDateTo(v: string)   { onPresSettingsChange({ ...presSettings, dateTo: v }); }
@@ -891,22 +911,33 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     setDateFrom(f); setDateTo(t); loadRange(f, t);
   }
 
-  // Compute per-day estimates for the 5-day grid from Shopify data
+  // Total Utah/Georgia from loaded Shopify range
+  const totalUtahLoaded = Object.values(shopifyByDate).reduce((s, d) => s + d.utahCount, 0);
+  const totalGaLoaded   = Object.values(shopifyByDate).reduce((s, d) => s + d.gaCount,   0);
+
+  // Build 5 weekdays starting from the loaded dateFrom
   const fiveDays = (() => {
-    const days: { iso: string; utahEst: number; gaEst: number; label: string; dateStr: string }[] = [];
-    const d = new Date();
+    const days: { iso: string; utahEst: number; gaEst: number; utahDefault: number; gaDefault: number; label: string; dateStr: string }[] = [];
+    const d = new Date((dateFrom || new Date().toISOString().split('T')[0]) + 'T12:00:00');
+    let dayIdx = 0;
     while (days.length < 5) {
       const dow = d.getDay();
       if (dow !== 0 && dow !== 6) {
         const iso = d.toISOString().split('T')[0];
-        const data = shopifyByDate[iso];
+        const pct = (dayPcts[dayIdx] ?? 0) / 100;
+        const utahDefault = Math.round(totalUtahLoaded * pct);
+        const gaDefault   = Math.round(totalGaLoaded   * pct);
+        const override    = dayOverrides[iso];
         days.push({
           iso,
-          utahEst: data?.utahCount ?? 0,
-          gaEst:   data?.gaCount   ?? 0,
+          utahEst:     override?.ut !== undefined ? override.ut : utahDefault,
+          gaEst:       override?.ga !== undefined ? override.ga : gaDefault,
+          utahDefault,
+          gaDefault,
           label:   d.toLocaleDateString('en-US', { weekday: 'short' }),
           dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         });
+        dayIdx++;
       }
       d.setDate(d.getDate() + 1);
     }
@@ -1096,27 +1127,59 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
             )}
           </div>
 
-          {/* 5-day delivery grid */}
-          {shopifyTotal > 0 && (
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-2">
-                Est. deliveries — next 5 days ({location})
+          {/* Day % distribution + 5-day editable grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white border border-slate-100 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Arrival % by day of week</h3>
+              <p className="text-xs text-slate-400 mb-3">% of orders arriving each day. Should total 100%.</p>
+              <div className="space-y-2">
+                {dayNames.map((name, i) => (
+                  <div key={name} className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 w-20">{name}</span>
+                    <input type="number" value={dayPcts[i]} min="0" max="100"
+                      onChange={e => setDayPct(i, parseFloat(e.target.value) || 0)}
+                      className="w-14 border border-slate-200 rounded px-2 py-1 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                    <span className="text-xs text-slate-400">%</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-xs text-slate-400">Total:</span>
+                <span className={`text-xs font-semibold ${dayPcts.reduce((a,b)=>a+b,0) === 100 ? 'text-green-700' : 'text-red-600'}`}>{dayPcts.reduce((a,b)=>a+b,0)}%</span>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-100 rounded-xl p-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Est. deliveries — {location}</h3>
+              <p className="text-xs text-slate-400 mb-3">
+                {shopifyTotal > 0
+                  ? `${location === 'Utah' ? totalUtahLoaded : totalGaLoaded} ${location} orders in range · edit any day to override`
+                  : 'Load an event date range above first.'}
               </p>
-              <div className="grid grid-cols-5 gap-2">
-                {fiveDays.map((d, i) => {
-                  const est = location === 'Utah' ? d.utahEst : d.gaEst;
+              <div className="space-y-2">
+                {fiveDays.map((d) => {
+                  const locKey = location === 'Utah' ? 'ut' : 'ga';
+                  const def = location === 'Utah' ? d.utahDefault : d.gaDefault;
+                  const est = location === 'Utah' ? d.utahEst     : d.gaEst;
+                  const isOverridden = dayOverrides[d.iso]?.[locKey] !== undefined;
                   return (
-                    <div key={i} className="bg-white border border-slate-100 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-slate-400">{d.dateStr}</p>
-                      <p className="text-xs font-medium mb-1 text-slate-600">{d.label}</p>
-                      <p className={`text-xl font-semibold ${est === 0 ? 'text-slate-300' : 'text-green-700'}`}>{est}</p>
-                      <p className="text-[10px] text-slate-400">est.</p>
+                    <div key={d.iso} className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 w-24">{d.label} <span className="text-slate-300 text-[10px]">{d.dateStr}</span></span>
+                      <input
+                        type="number" min="0"
+                        value={est}
+                        onChange={e => setDayOverride(d.iso, locKey, parseInt(e.target.value) || 0)}
+                        className="w-16 border border-slate-200 rounded px-2 py-1 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                      />
+                      {isOverridden && (
+                        <span className="text-[10px] text-slate-300">def: {def}</span>
+                      )}
                     </div>
                   );
                 })}
               </div>
             </div>
-          )}
+          </div>
 
           {/* Roster editor */}
           <div>
