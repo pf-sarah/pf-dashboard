@@ -1712,9 +1712,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const est = location === 'Utah' ? d.utahEst : d.gaEst;
                         const diff = cap - est;
                         const dayCost = team.reduce((s, m) => {
-                          const h = m.hours[di] ?? 0;
-                          const dailySalary = m.payType === 'salary' ? m.annualSalary / 260 : 0;
-                          return s + (m.payType === 'salary' ? dailySalary : h * m.rate);
+                          const prodH = m.hours[di] ?? 0;
+                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
+                          return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
                         return (
@@ -1821,8 +1821,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
                         {windowWeeks.map(w => {
                           const totalCost = team.reduce((s, m) => {
-                            const h = m.hours[w] ?? 0;
-                            return s + (m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate);
+                            const prodH = m.hours[w] ?? 0;
+                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                            return s + (m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate);
                           }, 0);
                           const totalCPO = weeklyTotals[w] > 0 && totalCost > 0 ? totalCost / weeklyTotals[w] : null;
                           return (
@@ -2119,8 +2120,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                     {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
                       const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round(((ffHours[m.id] ?? [])[w] ?? 0) / m.ratio) : 0), 0);
                       const cost = team.reduce((s, m) => {
-                        const h = (ffHours[m.id] ?? [])[w] ?? 0;
-                        return s + (m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate);
+                        const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
+                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                        return s + (m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate);
                       }, 0);
                       const cpo = c > 0 && cost > 0 ? cost / c : null;
                       return (
@@ -2772,8 +2774,10 @@ export function SchedulePage({
   function weekStats(weekIdx: number, d: Designer) {
     const hrs    = schedule[weekIdx]?.[d.id] ?? 0;
     const frames = d.ratio > 0 ? hrs / d.ratio : 0;
-    const cost   = d.payType === 'salary' ? d.annualSalary / 52 : hrs * d.hourlyRate;
-    const cpo    = frames > 0 && cost > 0 ? cost / frames : null;
+    const isDesignMgr = !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager);
+    const totalHrs = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[weekIdx] ?? hrs) : hrs;
+    const cost   = d.payType === 'salary' ? d.annualSalary / 52 : totalHrs * d.hourlyRate;
+    const cpo    = !isDesignMgr && frames > 0 && cost > 0 ? cost / frames : null;
     return { hrs, frames, cost, cpo };
   }
 
