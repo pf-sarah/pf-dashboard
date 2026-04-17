@@ -2550,15 +2550,27 @@ function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
   const uniqueMissing = [...new Set(allMissing)];
   const gRatio = goalMetrics?.combinedGoalRatio ?? metrics.combinedGoalRatio ?? null;
   const gCPO   = goalMetrics?.combinedGoalCPO   ?? metrics.combinedGoalCPO   ?? null;
+  const actual = metrics.combinedRatio;
+  const ratioColor = actual !== null && gRatio !== null
+    ? actual <= gRatio ? 'text-green-600' : 'text-red-500'
+    : 'text-slate-800';
   return (
     <div className="flex flex-col gap-1 px-4 border-r border-slate-200 last:border-0">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-      <div className="flex gap-3 flex-wrap">
-        <MetricCell label="Ratio" value={metrics.combinedRatio !== null ? `${metrics.combinedRatio.toFixed(2)}` : null} sub="actual" />
-        {gRatio !== null && <MetricCell label="Goal ratio" value={`${gRatio.toFixed(2)}`} sub="target" />}
-        {showCPO && <MetricCell label="CPO" value={metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : null} sub="actual"
-          warn={uniqueMissing.length > 0 && metrics.combinedCPO === null ? `Need rates: ${uniqueMissing.slice(0,2).join(', ')}` : undefined} />}
-        {showCPO && gCPO !== null && <MetricCell label="Goal CPO" value={fmt$(gCPO)} sub="target" />}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-[10px] text-slate-400 uppercase tracking-wide w-8">Ratio</span>
+          <span className={`text-sm font-semibold ${ratioColor}`}>{actual !== null ? actual.toFixed(2) : '—'}</span>
+          {gRatio !== null && <span className="text-[10px] text-slate-400">/ <span className="text-green-600 font-medium">{gRatio.toFixed(2)}</span> goal</span>}
+        </div>
+        {showCPO && (
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] text-slate-400 uppercase tracking-wide w-8">CPO</span>
+            <span className="text-sm font-semibold text-slate-800">{metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : '—'}</span>
+            {gCPO !== null && <span className="text-[10px] text-slate-400">/ <span className="text-green-600 font-medium">{fmt$(gCPO)}</span> goal</span>}
+            {uniqueMissing.length > 0 && metrics.combinedCPO === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2583,36 +2595,45 @@ function DeptKPIBar({ dept, location, metrics, showCPO }: {
         <p className="text-[10px] text-slate-400">Rolling KPIs</p>
       </div>
       {[
-        { label: 'This month', d: tm },
-        { label: 'Last month', d: lm },
-        { label: 'Last week',  d: lw },
-      ].map(({ label, d }) => (
-        <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-          <div className="flex gap-3">
-            <MetricCell label="Ratio" value={d.ratio !== null ? d.ratio.toFixed(2) : null} sub="actual" />
-            {d.goalRatio !== null && <MetricCell label="Goal" value={d.goalRatio.toFixed(2)} sub="target" />}
-            {showCPO && <MetricCell label="CPO" value={d.cpo !== null ? fmt$(d.cpo) : null} sub="actual"
-              warn={d.cpo === null && d.missingRates.length > 0 ? `Need rates: ${d.missingRates.slice(0,2).join(', ')}` : undefined} />}
-            {showCPO && d.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(d.goalCPO)} sub="target" />}
-            <MetricCell label="Orders" value={d.orders > 0 ? String(d.orders) : null} />
+        { label: 'This month', d: tm, g: tg },
+        { label: 'Last month', d: lm, g: null },
+        { label: 'Last week',  d: lw, g: null },
+        { label: 'Next month goal', d: ng, g: ng },
+      ].map(({ label, d, g }) => {
+        const ratioColor = d.ratio !== null && d.goalRatio !== null
+          ? d.ratio <= d.goalRatio ? 'text-green-600' : 'text-red-500'
+          : 'text-slate-800';
+        const isGoalOnly = d.orders === 0 && d.goalRatio !== null;
+        return (
+          <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[10px] text-slate-400 w-8">Ratio</span>
+                {!isGoalOnly && <span className={`text-sm font-semibold ${ratioColor}`}>{d.ratio !== null ? d.ratio.toFixed(2) : '—'}</span>}
+                {(g ?? d).goalRatio !== null && (
+                  <span className="text-[10px] text-slate-400">
+                    {!isGoalOnly && '/ '}<span className="text-green-600 font-medium">{(g ?? d).goalRatio!.toFixed(2)}</span> goal
+                  </span>
+                )}
+              </div>
+              {showCPO && (
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-[10px] text-slate-400 w-8">CPO</span>
+                  {!isGoalOnly && <span className="text-sm font-semibold text-slate-800">{d.cpo !== null ? fmt$(d.cpo) : '—'}</span>}
+                  {(g ?? d).goalCPO !== null && (
+                    <span className="text-[10px] text-slate-400">
+                      {!isGoalOnly && '/ '}<span className="text-green-600 font-medium">{fmt$((g ?? d).goalCPO!)}</span> goal
+                    </span>
+                  )}
+                  {d.missingRates.length > 0 && d.cpo === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
+                </div>
+              )}
+              {!isGoalOnly && d.orders > 0 && <span className="text-[10px] text-slate-400">{d.orders} orders</span>}
+            </div>
           </div>
-        </div>
-      ))}
-      <div className="flex flex-col gap-0.5 px-4 border-r border-slate-100">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-green-500">This month goal</span>
-        <div className="flex gap-3">
-          {tg.goalRatio !== null && <MetricCell label="Goal ratio" value={tg.goalRatio.toFixed(2)} />}
-          {showCPO && tg.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(tg.goalCPO)} />}
-        </div>
-      </div>
-      <div className="flex flex-col gap-0.5 px-4">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-400">Next month goal</span>
-        <div className="flex gap-3">
-          {ng.goalRatio !== null && <MetricCell label="Goal ratio" value={ng.goalRatio.toFixed(2)} />}
-          {showCPO && ng.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(ng.goalCPO)} />}
-        </div>
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -2997,10 +3018,9 @@ export function SchedulePage({
             <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Company · {location}</p>
             <p className="text-[10px] text-slate-400">All departments combined</p>
           </div>
-          <PeriodBlock label="This month" metrics={historicalMetrics.thisMonth} showCPO={hasAnyRates} />
+          <PeriodBlock label="This month" metrics={historicalMetrics.thisMonth} goalMetrics={historicalMetrics.thisMonthGoal} showCPO={hasAnyRates} />
           <PeriodBlock label="Last month" metrics={historicalMetrics.lastMonth} showCPO={hasAnyRates} />
           <PeriodBlock label="Last week"  metrics={historicalMetrics.lastWeek}  showCPO={hasAnyRates} />
-          <PeriodBlock label="This month goal" metrics={historicalMetrics.thisMonthGoal} goalMetrics={historicalMetrics.thisMonthGoal} showCPO={hasAnyRates} />
           <PeriodBlock label="Next month goal" metrics={historicalMetrics.nextMonthGoal} goalMetrics={historicalMetrics.nextMonthGoal} showCPO={hasAnyRates} />
         </div>
       )}
