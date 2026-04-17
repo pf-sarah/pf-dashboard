@@ -15,6 +15,7 @@ interface Designer {
   payType:      PayType;
   hourlyRate:   number;
   annualSalary: number;
+  isManager?:   boolean;
 }
 
 interface WeekSchedule {
@@ -93,7 +94,7 @@ const GEORGIA_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
 // ─── Default designers ────────────────────────────────────────────────────────
 
 const DEFAULT_UTAH_DESIGNERS: Designer[] = [
-  { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0 },
+  { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true },
   { id: 'ut-1',   name: 'Deanna L Brown',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
   { id: 'ut-2',   name: 'Sarah Glissmeyer', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
   { id: 'ut-3',   name: 'Kathryn Hill',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
@@ -512,34 +513,34 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
 // ─── Preservation team data ────────────────────────────────────────────────────
 
 const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
-  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true },
   { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
   { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
   { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
 const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
-  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true },
   { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
   { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
   { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
 const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
-  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true },
   { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
   { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
   { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
 ];
 
 const GEORGIA_FULFILLMENT_TEAM: FfTeamMember[] = [
-  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true },
   { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
   { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
 ];
 
-type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[] };
-type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[] };
+type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean };
+type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean };
 
 // Dynamic week labels — always real Monday dates
 function getWeekLabels8(): string[] {
@@ -1868,7 +1869,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         <HistoricalsSection
           department="preservation"
           location={location}
-          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0 }))}
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="bouquets"
         />
       )}
@@ -2101,7 +2102,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         <HistoricalsSection
           department="fulfillment"
           location={location}
-          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0 }))}
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="orders"
         />
       )}

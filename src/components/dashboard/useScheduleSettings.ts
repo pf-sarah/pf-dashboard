@@ -6,6 +6,7 @@ export interface DesignerRoster {
   [designerId: string]: {
     ratio: number; payType: 'hourly' | 'salary';
     hourlyRate: number; annualSalary: number; name: string;
+    isManager?: boolean;
   };
 }
 
@@ -17,7 +18,7 @@ export interface PresSettings {
 }
 
 export interface TeamRoster {
-  [memberId: string]: { ratio: number; rate: number; name: string };
+  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean };
 }
 
 export type HoursMap = Record<string, number[]>;
