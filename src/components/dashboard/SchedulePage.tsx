@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
+import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings } from './useScheduleSettings';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -2463,6 +2464,87 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   );
 }
 
+// ─── CompanyMetricsBar ────────────────────────────────────────────────────────
+
+
+function MetricCell({ label, value, sub, warn }: { label: string; value: string | null; sub?: string; warn?: string }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</span>
+      <span className={`text-sm font-semibold ${value ? 'text-slate-800' : 'text-slate-300'}`}>
+        {value ?? '—'}
+      </span>
+      {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
+      {warn && <span className="text-[10px] text-amber-500">⚠ {warn}</span>}
+    </div>
+  );
+}
+
+function PeriodBlock({ label, metrics, showCPO }: {
+  label: string;
+  metrics: { combinedRatio: number | null; combinedCPO: number | null; design: { missingRates: string[] }; preservation: { missingRates: string[] }; fulfillment: { missingRates: string[] } };
+  showCPO: boolean;
+}) {
+  const allMissing = [...metrics.design.missingRates, ...metrics.preservation.missingRates, ...metrics.fulfillment.missingRates];
+  const uniqueMissing = [...new Set(allMissing)];
+  return (
+    <div className="flex flex-col gap-1 px-4 border-r border-slate-200 last:border-0">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
+      <div className="flex gap-4">
+        <MetricCell
+          label="Combined ratio"
+          value={metrics.combinedRatio !== null ? `${metrics.combinedRatio.toFixed(2)} h/ord` : null}
+        />
+        {showCPO && (
+          <MetricCell
+            label="Combined CPO"
+            value={metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : null}
+            warn={uniqueMissing.length > 0 && metrics.combinedCPO === null ? `Need rates: ${uniqueMissing.slice(0,2).join(', ')}${uniqueMissing.length > 2 ? ` +${uniqueMissing.length-2}` : ''}` : undefined}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DeptKPIBar({ dept, location, metrics, showCPO }: {
+  dept: 'design' | 'preservation' | 'fulfillment';
+  location: string;
+  metrics: ReturnType<typeof import('./useHistoricalMetrics').useHistoricalMetrics>;
+  showCPO: boolean;
+}) {
+  if (metrics.loading) return null;
+  const tm = metrics.thisMonth[dept];
+  const lm = metrics.lastMonth[dept];
+  const lw = metrics.lastWeek[dept];
+  return (
+    <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap">
+      <div className="pr-4 mr-4 border-r border-slate-200">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{dept} · {location}</p>
+        <p className="text-[10px] text-slate-400">Rolling KPIs</p>
+      </div>
+      {[
+        { label: 'This month', d: tm },
+        { label: 'Last month', d: lm },
+        { label: 'Last week',  d: lw },
+      ].map(({ label, d }) => (
+        <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
+          <div className="flex gap-4">
+            <MetricCell label="Ratio" value={d.ratio !== null ? `${d.ratio.toFixed(2)} h/ord` : null} />
+            {showCPO && <MetricCell
+              label="CPO"
+              value={d.cpo !== null ? fmt$(d.cpo) : null}
+              warn={d.cpo === null && d.missingRates.length > 0 ? `Need rates: ${d.missingRates.slice(0,2).join(', ')}` : undefined}
+            />}
+            <MetricCell label="Orders" value={d.orders > 0 ? String(d.orders) : null} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Props from DashboardClient ────────────────────────────────────────────────
 
 interface SchedulePageProps {
@@ -2552,6 +2634,23 @@ export function SchedulePage({
   }, [location]);
 
   const weeklyEstimates = settings.weeklyEstimates;
+
+  // ── Historical metrics for KPI bars ─────────────────────────────────────────
+  const historicalMetrics = useHistoricalMetrics(location, {
+    design: designers.map(d => ({ name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, isManager: (settings.designRoster[d.id] as {isManager?:boolean})?.isManager ?? (d as {isManager?:boolean}).isManager })),
+    preservation: (location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM).map(m => {
+      const r = settings.presRoster[m.id];
+      return { name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const, hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0, isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager };
+    }),
+    fulfillment: (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).map(m => {
+      const r = settings.ffRoster[m.id];
+      return { name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const, hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0, isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager };
+    }),
+  });
+  const hasAnyRates = [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
+    const anyM = m as {rate?: number; hourlyRate?: number; annualSalary?: number; payType?: string};
+    return (anyM.rate ?? anyM.hourlyRate ?? 0) > 0 || (anyM.annualSalary ?? 0) > 0;
+  });
   function setWeeklyEstimate(weekOf: string, val: number) {
     update('weeklyEstimates', { ...weeklyEstimates, [weekOf]: val });
   }
@@ -2790,6 +2889,19 @@ export function SchedulePage({
   return (
     <div className="space-y-6">
 
+      {/* ── Company KPI bar ─────────────────────────────────────────────────── */}
+      {!historicalMetrics.loading && (
+        <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap">
+          <div className="pr-4 mr-2 border-r border-slate-200">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Company · {location}</p>
+            <p className="text-[10px] text-slate-400">All departments combined</p>
+          </div>
+          <PeriodBlock label="This month" metrics={historicalMetrics.thisMonth} showCPO={hasAnyRates} />
+          <PeriodBlock label="Last month" metrics={historicalMetrics.lastMonth} showCPO={hasAnyRates} />
+          <PeriodBlock label="Last week"  metrics={historicalMetrics.lastWeek}  showCPO={hasAnyRates} />
+        </div>
+      )}
+
       {/* ── Dept tabs + Location toggle + Save indicator ────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -2838,6 +2950,8 @@ export function SchedulePage({
 
       {/* ── PRESERVATION dept ───────────────────────────────────────────────── */}
       {dept === 'preservation' && (
+        <>
+        <DeptKPIBar dept="preservation" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
         <PreservationSection
           location={location}
           preservationQueue={preservationQueue}
@@ -2861,10 +2975,13 @@ export function SchedulePage({
               .catch(() => {});
           }}
         />
+        </>
       )}
 
       {/* ── FULFILLMENT dept ────────────────────────────────────────────────── */}
       {dept === 'fulfillment' && (
+        <>
+        <DeptKPIBar dept="fulfillment" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
         <FulfillmentSection
           location={location}
           fulfillmentQueue={fulfillmentQueue}
@@ -2881,11 +2998,13 @@ export function SchedulePage({
               .catch(() => {});
           }}
         />
+        </>
       )}
 
       {/* ── DESIGN dept ─────────────────────────────────────────────────────── */}
       {dept === 'design' && (
         <>
+          <DeptKPIBar dept="design" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
