@@ -1914,8 +1914,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="bouquets"
           onRatioUpdate={(id, ratio) => {
-            const existing = settings.presRoster[id];
-            onPresRosterChange({ ...settings.presRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
+            const existing = presRoster[id];
+            onPresRosterChange({ ...presRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
           }}
         />
       )}
@@ -2170,8 +2170,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="orders"
           onRatioUpdate={(id, ratio) => {
-            const existing = settings.ffRoster[id];
-            onFfRosterChange({ ...settings.ffRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
+            const existing = ffRoster[id];
+            onFfRosterChange({ ...ffRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
           }}
         />
       )}
