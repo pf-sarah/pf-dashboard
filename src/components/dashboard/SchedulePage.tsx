@@ -569,6 +569,296 @@ function parseDateRange(from: string, to: string): Record<string, number> {
   return result;
 }
 
+// ─── Per-week CSV historical data — Utah ─────────────────────────────────────
+const UTAH_HISTORICALS_BY_WEEK: Record<string, { weekOf: string; members: Record<string, { hours: number; orders: number }> }[]> = {
+  fulfillment: [
+  { weekOf: '2025-12-29', members: {
+    'Owen Shaw': { hours: 6.25, orders: 15 },
+    'Emma Swenson': { hours: 0, orders: 0 },
+    'Warner Neuenschwander': { hours: 0, orders: 0 },
+    'Izabella DePrima': { hours: 2.59, orders: 0 }
+  } },
+  { weekOf: '2026-01-05', members: {
+    'Owen Shaw': { hours: 10.41, orders: 23 },
+    'Emma Swenson': { hours: 9.77, orders: 21 },
+    'Warner Neuenschwander': { hours: 3.73, orders: 16 },
+    'Izabella DePrima': { hours: 40.06, orders: 10 }
+  } },
+  { weekOf: '2026-01-12', members: {
+    'Owen Shaw': { hours: 19.8, orders: 44 },
+    'Emma Swenson': { hours: 6.67, orders: 25 },
+    'Warner Neuenschwander': { hours: 5.73, orders: 18 },
+    'Izabella DePrima': { hours: 33.2, orders: 8 }
+  } },
+  { weekOf: '2026-01-19', members: {
+    'Owen Shaw': { hours: 14.12, orders: 40 },
+    'Emma Swenson': { hours: 12.09, orders: 31 },
+    'Warner Neuenschwander': { hours: 1.12, orders: 8 },
+    'Izabella DePrima': { hours: 39.95, orders: 21 }
+  } },
+  { weekOf: '2026-01-26', members: {
+    'Owen Shaw': { hours: 13.85, orders: 31 },
+    'Emma Swenson': { hours: 6.1, orders: 17 },
+    'Warner Neuenschwander': { hours: 2.07, orders: 5 },
+    'Izabella DePrima': { hours: 28.11, orders: 12 }
+  } },
+  { weekOf: '2026-02-02', members: {
+    'Owen Shaw': { hours: 7.41, orders: 21 },
+    'Emma Swenson': { hours: 6.86, orders: 15 },
+    'Warner Neuenschwander': { hours: 7.17, orders: 13 },
+    'Izabella DePrima': { hours: 6.53, orders: 0 }
+  } },
+  { weekOf: '2026-02-09', members: {
+    'Owen Shaw': { hours: 22.71, orders: 55 },
+    'Emma Swenson': { hours: 4.65, orders: 9 },
+    'Warner Neuenschwander': { hours: 7.21, orders: 9 },
+    'Izabella DePrima': { hours: 39.6, orders: 22 }
+  } },
+  { weekOf: '2026-02-16', members: {
+    'Owen Shaw': { hours: 17.19, orders: 55 },
+    'Emma Swenson': { hours: 6.43, orders: 14 },
+    'Warner Neuenschwander': { hours: 3.86, orders: 23 },
+    'Izabella DePrima': { hours: 38.67, orders: 26 }
+  } },
+  { weekOf: '2026-02-23', members: {
+    'Owen Shaw': { hours: 9.04, orders: 29 },
+    'Emma Swenson': { hours: 10.73, orders: 35 },
+    'Warner Neuenschwander': { hours: 2.21, orders: 7 },
+    'Izabella DePrima': { hours: 39.99, orders: 18 }
+  } },
+  { weekOf: '2026-03-02', members: {
+    'Owen Shaw': { hours: 20.24, orders: 90 },
+    'Emma Swenson': { hours: 4.4, orders: 10 },
+    'Warner Neuenschwander': { hours: 3.48, orders: 7 },
+    'Izabella DePrima': { hours: 39.83, orders: 10 }
+  } },
+  { weekOf: '2026-03-09', members: {
+    'Owen Shaw': { hours: 12.22, orders: 35 },
+    'Emma Swenson': { hours: 7.02, orders: 18 },
+    'Warner Neuenschwander': { hours: 0, orders: 0 },
+    'Izabella DePrima': { hours: 28.76, orders: 3 }
+  } },
+  { weekOf: '2026-03-16', members: {
+    'Owen Shaw': { hours: 23.19, orders: 67 },
+    'Emma Swenson': { hours: 2.44, orders: 10 },
+    'Warner Neuenschwander': { hours: 0, orders: 0 },
+    'Izabella DePrima': { hours: 36.95, orders: 6 }
+  } },
+  { weekOf: '2026-03-23', members: {
+    'Owen Shaw': { hours: 16.06, orders: 30 },
+    'Emma Swenson': { hours: 6.25, orders: 26 },
+    'Warner Neuenschwander': { hours: 0, orders: 0 },
+    'Izabella DePrima': { hours: 37.66, orders: 14 }
+  } },
+  { weekOf: '2026-03-30', members: {
+    'Owen Shaw': { hours: 26.25, orders: 78 },
+    'Emma Swenson': { hours: 2.04, orders: 0 },
+    'Warner Neuenschwander': { hours: 0, orders: 0 },
+    'Izabella DePrima': { hours: 31.54, orders: 22 }
+  } },
+],
+  design: [
+  { weekOf: '2025-12-29', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 8.15, orders: 6 },
+    'Sloane James': { hours: 0, orders: 0 },
+    'Mia Legas': { hours: 2.91, orders: 3 },
+    'Sarah Glissmeyer': { hours: 4.79, orders: 3 },
+    'Jennika Merrill': { hours: 0, orders: 0 },
+    'Audrey Brown': { hours: 0, orders: 0 },
+    'Deanna L Brown': { hours: 15.2, orders: 9 }
+  } },
+  { weekOf: '2026-01-05', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 22.5, orders: 14 },
+    'Sloane James': { hours: 6.22, orders: 0 },
+    'Mia Legas': { hours: 13.75, orders: 9 },
+    'Sarah Glissmeyer': { hours: 14.82, orders: 4 },
+    'Jennika Merrill': { hours: 0, orders: 3 },
+    'Audrey Brown': { hours: 0, orders: 0 },
+    'Deanna L Brown': { hours: 18.94, orders: 10 }
+  } },
+  { weekOf: '2026-01-12', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 21.73, orders: 15 },
+    'Sloane James': { hours: 0, orders: 0 },
+    'Mia Legas': { hours: 16.2, orders: 11 },
+    'Sarah Glissmeyer': { hours: 13.95, orders: 0 },
+    'Jennika Merrill': { hours: 0, orders: 3 },
+    'Audrey Brown': { hours: 0, orders: 0 },
+    'Deanna L Brown': { hours: 26.29, orders: 12 }
+  } },
+  { weekOf: '2026-01-19', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 21.86, orders: 14 },
+    'Sloane James': { hours: 0, orders: 0 },
+    'Mia Legas': { hours: 7.77, orders: 3 },
+    'Sarah Glissmeyer': { hours: 18.43, orders: 7 },
+    'Jennika Merrill': { hours: 0, orders: 2 },
+    'Audrey Brown': { hours: 1.33, orders: 0 },
+    'Deanna L Brown': { hours: 27.85, orders: 19 }
+  } },
+  { weekOf: '2026-01-26', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 0, orders: 0 },
+    'Sloane James': { hours: 21.53, orders: 15 },
+    'Mia Legas': { hours: 11.26, orders: 15 },
+    'Sarah Glissmeyer': { hours: 18.11, orders: 5 },
+    'Jennika Merrill': { hours: 0, orders: 22 },
+    'Audrey Brown': { hours: 13.64, orders: 10 },
+    'Deanna L Brown': { hours: 24.37, orders: 18 }
+  } },
+  { weekOf: '2026-02-02', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 24.1, orders: 23 },
+    'Sloane James': { hours: 0, orders: 0 },
+    'Mia Legas': { hours: 18.38, orders: 26 },
+    'Sarah Glissmeyer': { hours: 16.66, orders: 9 },
+    'Jennika Merrill': { hours: 0, orders: 20 },
+    'Audrey Brown': { hours: 11.51, orders: 10 },
+    'Deanna L Brown': { hours: 21.31, orders: 12 }
+  } },
+  { weekOf: '2026-02-09', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 23.33, orders: 15 },
+    'Sloane James': { hours: 19.53, orders: 14 },
+    'Mia Legas': { hours: 11.07, orders: 14 },
+    'Sarah Glissmeyer': { hours: 16.11, orders: 8 },
+    'Jennika Merrill': { hours: 0, orders: 12 },
+    'Audrey Brown': { hours: 9.32, orders: 3 },
+    'Deanna L Brown': { hours: 28.02, orders: 18 }
+  } },
+  { weekOf: '2026-02-16', members: {
+    'Chloe Leonard': { hours: 5.12, orders: 11 },
+    'Kathryn Hill': { hours: 19.92, orders: 15 },
+    'Sloane James': { hours: 14.91, orders: 11 },
+    'Mia Legas': { hours: 20.22, orders: 27 },
+    'Sarah Glissmeyer': { hours: 9.86, orders: 0 },
+    'Jennika Merrill': { hours: 0, orders: 5 },
+    'Audrey Brown': { hours: 5.76, orders: 3 },
+    'Deanna L Brown': { hours: 27.3, orders: 25 }
+  } },
+  { weekOf: '2026-02-23', members: {
+    'Chloe Leonard': { hours: 8.17, orders: 4 },
+    'Kathryn Hill': { hours: 9.01, orders: 11 },
+    'Sloane James': { hours: 23.01, orders: 22 },
+    'Mia Legas': { hours: 6.27, orders: 6 },
+    'Sarah Glissmeyer': { hours: 0, orders: 0 },
+    'Jennika Merrill': { hours: 0, orders: 10 },
+    'Audrey Brown': { hours: 9.06, orders: 12 },
+    'Deanna L Brown': { hours: 27.3, orders: 26 }
+  } },
+  { weekOf: '2026-03-02', members: {
+    'Chloe Leonard': { hours: 7.6, orders: 9 },
+    'Kathryn Hill': { hours: 13.87, orders: 7 },
+    'Sloane James': { hours: 16.57, orders: 16 },
+    'Mia Legas': { hours: 0, orders: 0 },
+    'Sarah Glissmeyer': { hours: 9.41, orders: 6 },
+    'Jennika Merrill': { hours: 0, orders: 14 },
+    'Audrey Brown': { hours: 9.62, orders: 7 },
+    'Deanna L Brown': { hours: 19.78, orders: 17 }
+  } },
+  { weekOf: '2026-03-09', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 26.81, orders: 15 },
+    'Sloane James': { hours: 20.75, orders: 26 },
+    'Mia Legas': { hours: 10.86, orders: 18 },
+    'Sarah Glissmeyer': { hours: 15.46, orders: 8 },
+    'Jennika Merrill': { hours: 0, orders: 10 },
+    'Audrey Brown': { hours: 0, orders: 0 },
+    'Deanna L Brown': { hours: 20.25, orders: 19 }
+  } },
+  { weekOf: '2026-03-16', members: {
+    'Chloe Leonard': { hours: 0, orders: 0 },
+    'Kathryn Hill': { hours: 4.72, orders: 11 },
+    'Sloane James': { hours: 19.85, orders: 20 },
+    'Mia Legas': { hours: 18.55, orders: 13 },
+    'Sarah Glissmeyer': { hours: 14.76, orders: 9 },
+    'Jennika Merrill': { hours: 0, orders: 18 },
+    'Audrey Brown': { hours: 8.14, orders: 8 },
+    'Deanna L Brown': { hours: 24.64, orders: 21 }
+  } },
+  { weekOf: '2026-03-23', members: {
+    'Chloe Leonard': { hours: 3.9, orders: 4 },
+    'Kathryn Hill': { hours: 20.11, orders: 14 },
+    'Sloane James': { hours: 19.28, orders: 19 },
+    'Mia Legas': { hours: 16.03, orders: 21 },
+    'Sarah Glissmeyer': { hours: 16.16, orders: 8 },
+    'Jennika Merrill': { hours: 0, orders: 11 },
+    'Audrey Brown': { hours: 8.92, orders: 8 },
+    'Deanna L Brown': { hours: 23.49, orders: 23 }
+  } },
+  { weekOf: '2026-03-30', members: {
+    'Chloe Leonard': { hours: 4.06, orders: 9 },
+    'Kathryn Hill': { hours: 20.19, orders: 12 },
+    'Sloane James': { hours: 20.18, orders: 24 },
+    'Mia Legas': { hours: 18.56, orders: 18 },
+    'Sarah Glissmeyer': { hours: 17.18, orders: 8 },
+    'Jennika Merrill': { hours: 0, orders: 15 },
+    'Audrey Brown': { hours: 7.39, orders: 8 },
+    'Deanna L Brown': { hours: 19.06, orders: 18 }
+  } },
+],
+  preservation: [
+  { weekOf: '2025-12-29', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 20.22, orders: 24 }
+  } },
+  { weekOf: '2026-01-05', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 29.68, orders: 20 }
+  } },
+  { weekOf: '2026-01-12', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 21.16, orders: 16 }
+  } },
+  { weekOf: '2026-01-19', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 13.52, orders: 21 }
+  } },
+  { weekOf: '2026-01-26', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 9.1, orders: 12 }
+  } },
+  { weekOf: '2026-02-02', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 8.44, orders: 10 }
+  } },
+  { weekOf: '2026-02-09', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 15.15, orders: 25 }
+  } },
+  { weekOf: '2026-02-16', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 15.55, orders: 27 }
+  } },
+  { weekOf: '2026-02-23', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 15.88, orders: 24 }
+  } },
+  { weekOf: '2026-03-02', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 10.88, orders: 11 }
+  } },
+  { weekOf: '2026-03-09', members: {
+    'Emma Dunakey': { hours: 10.69, orders: 19 },
+    'Katelyn Wilson': { hours: 0, orders: 0 }
+  } },
+  { weekOf: '2026-03-16', members: {
+    'Emma Dunakey': { hours: 0, orders: 0 },
+    'Katelyn Wilson': { hours: 25.37, orders: 46 }
+  } },
+  { weekOf: '2026-03-23', members: {
+    'Emma Dunakey': { hours: 1.14, orders: 5 },
+    'Katelyn Wilson': { hours: 21.87, orders: 33 }
+  } },
+  { weekOf: '2026-03-30', members: {
+    'Emma Dunakey': { hours: 7.75, orders: 15 },
+    'Katelyn Wilson': { hours: 17.33, orders: 22 }
+  } },
+],
+};
+
 // ─── CSV historical data — Utah (pre-loaded from spreadsheet) ────────────────
 const UTAH_HISTORICALS: Record<string, Record<string, { hours: number; orders: number }>> = {
   fulfillment: {
@@ -616,23 +906,26 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   // YTD totals from CSV for Utah — shown as reference
   const ytdData = location === 'Utah' ? (UTAH_HISTORICALS[department] ?? {}) : {};
 
-  // Seed CSV data into Supabase on first load if no actuals exist yet for this dept/location
+  // Seed per-week CSV data into Supabase on first load if no actuals exist yet
   useEffect(() => {
     if (seeded.current || location !== 'Utah') return;
     const existing = teamActuals.filter(r => r.department === department);
     if (existing.length > 0) { seeded.current = true; return; }
-    const ytd = UTAH_HISTORICALS[department] ?? {};
-    if (Object.keys(ytd).length === 0) return;
+    const weeklyData = UTAH_HISTORICALS_BY_WEEK[department];
+    if (!weeklyData || weeklyData.length === 0) return;
     seeded.current = true;
-    // Post YTD totals as a single synthetic week entry (week of Jan 1 2026 = start of year)
-    const weekOf = '2025-12-29'; // week 1 start
-    Promise.all(Object.entries(ytd).map(([name, d]) =>
-      fetch('/api/actuals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: Math.round(d.hours * 10) / 10, actualOrders: Math.round(d.orders) }),
-      })
-    )).then(() => onActualsSaved()).catch(() => {});
+    const posts: Promise<unknown>[] = [];
+    weeklyData.forEach(({ weekOf, members }) => {
+      Object.entries(members).forEach(([name, d]) => {
+        if (d.hours === 0 && d.orders === 0) return;
+        posts.push(fetch('/api/actuals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: d.hours, actualOrders: d.orders }),
+        }));
+      });
+    });
+    Promise.all(posts).then(() => onActualsSaved()).catch(() => {});
   }, [teamActuals, department, location]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function getEntry(weekOf: string, name: string) {
@@ -672,7 +965,7 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   ]);
 
   // All weeks to show: past 20 weeks, sorted newest first
-  const displayWeeks = [...weekOptions].reverse(); // newest week first (leftmost)
+  const displayWeeks = [...weekOptions].reverse(); // oldest left, newest right — scroll right for recent
 
 
   // YTD totals computed from Supabase actuals + CSV seed data
