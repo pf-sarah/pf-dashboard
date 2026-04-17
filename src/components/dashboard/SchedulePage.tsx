@@ -611,9 +611,29 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [totalReceived, setTotalReceived] = useState(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seeded = useRef(false);
 
   // YTD totals from CSV for Utah — shown as reference
   const ytdData = location === 'Utah' ? (UTAH_HISTORICALS[department] ?? {}) : {};
+
+  // Seed CSV data into Supabase on first load if no actuals exist yet for this dept/location
+  useEffect(() => {
+    if (seeded.current || location !== 'Utah') return;
+    const existing = teamActuals.filter(r => r.department === department);
+    if (existing.length > 0) { seeded.current = true; return; }
+    const ytd = UTAH_HISTORICALS[department] ?? {};
+    if (Object.keys(ytd).length === 0) return;
+    seeded.current = true;
+    // Post YTD totals as a single synthetic week entry (week of Jan 1 2026 = start of year)
+    const weekOf = '2025-12-29'; // week 1 start
+    Promise.all(Object.entries(ytd).map(([name, d]) =>
+      fetch('/api/actuals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: Math.round(d.hours * 10) / 10, actualOrders: Math.round(d.orders) }),
+      })
+    )).then(() => onActualsSaved()).catch(() => {});
+  }, [teamActuals, department, location]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function getEntry(weekOf: string, name: string) {
     if (localEdits[weekOf]?.[name]) return localEdits[weekOf][name];
@@ -652,7 +672,7 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   ]);
 
   // All weeks to show: past 20 weeks, sorted newest first
-  const displayWeeks = weekOptions;
+  const displayWeeks = [...weekOptions].reverse(); // newest week first (leftmost)
 
 
   // YTD totals computed from Supabase actuals + CSV seed data
@@ -825,13 +845,14 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
       <div className="space-y-2">
         {team.map((m) => (
           <div key={m.id}
-            draggable
-            onDragStart={() => handleDragStart(m.id)}
+            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
-            onDrop={() => handleDrop(m.id)}
-            onDragEnd={handleDragEnd}
-            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}>
-            <span className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none">⠿</span>
+            onDrop={() => handleDrop(m.id)}>
+            <span
+              draggable
+              onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
+              onDragEnd={handleDragEnd}
+              className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
             <input type="text" value={m.name}
               onChange={e => onUpdateRoster(m.id, 'name', e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
@@ -885,13 +906,14 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
       <div className="space-y-2">
         {team.map((m, mi) => (
           <div key={m.id}
-            draggable
-            onDragStart={() => handleDragStart(m.id)}
+            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
-            onDrop={() => handleDrop(m.id)}
-            onDragEnd={handleDragEnd}
-            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}>
-            <span className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none">⠿</span>
+            onDrop={() => handleDrop(m.id)}>
+            <span
+              draggable
+              onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
+              onDragEnd={handleDragEnd}
+              className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
             <input type="text" value={m.name}
               onChange={e => onUpdateName(m.id, e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
@@ -1135,6 +1157,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     delete newHours[id];
     onPresRosterChange(newRoster);
     onPresHoursChange(newHours);
+    // Also clear from defaultTeam overrides if needed — id is always reliable
   }
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
