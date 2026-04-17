@@ -1245,7 +1245,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presRoster, presSettings, onPresHoursChange, onPresRosterChange, onPresSettingsChange }: {
+  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1254,9 +1254,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   presHours:             Record<string, number[]>;
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
+  mgrTotalHours:         Record<string, number[]>;
   onPresHoursChange:     (h: Record<string, number[]>) => void;
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
+  onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -1675,15 +1677,27 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           </div>
                         </td>
                         {fiveDays.map((_, di) => {
-                          const h = m.hours[di] ?? 0;
-                          const orders = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
-                          const cost = h * m.rate;
-                          const cpo = orders > 0 && cost > 0 ? cost / orders : null;
+                          const prodH = m.hours[di] ?? 0;
+                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
+                          const orders = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                          const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
+                          const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
-                              <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
+                              <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
+                                title={m.isManager ? 'Production hours' : 'Hours'}
                                 onChange={e => updateHours(m.id, di, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                              {m.isManager && (
+                                <input type="number" value={totalH || ''} placeholder="total" min="0" step="0.5"
+                                  title="Total hours (incl. managerial)"
+                                  onChange={e => {
+                                    const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
+                                    newH[m.id][di] = parseFloat(e.target.value) || 0;
+                                    onMgrTotalHoursChange(newH);
+                                  }}
+                                  className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                              )}
                               {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
                               {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
@@ -1769,19 +1783,32 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             <div className="text-slate-400">{m.ratio} h/ord</div>
                           </td>
                           {windowWeeks.map(w => {
-                            const h = m.hours[w] ?? 0;
-                            const orders = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
-                            const cost = m.payType === 'salary' ? (m.annualSalary / 52) : h * m.rate;
-                            const cpo = orders > 0 && cost > 0 ? cost / orders : null;
+                            const prodH = m.hours[w] ?? 0;
+                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                            const orders = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                            const cost = m.payType === 'salary' ? (m.annualSalary / 52) : totalH * m.rate;
+                            const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                             return (
                               <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                                 <input
-                                  type="number" value={h || ''} min="0" step="0.5" placeholder="0"
+                                  type="number" value={prodH || ''} min="0" step="0.5" placeholder="0"
                                   onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
-                                  onDoubleClick={() => applyToAllWeeks(m.id, h)}
-                                  title="Double-click to apply to all weeks"
+                                  onDoubleClick={() => applyToAllWeeks(m.id, prodH)}
+                                  title={m.isManager ? 'Production hours (double-click = all weeks)' : 'Double-click to apply to all weeks'}
                                   className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
                                 />
+                                {m.isManager && (
+                                  <input
+                                    type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
+                                    onChange={e => {
+                                      const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
+                                      newH[m.id][w] = parseFloat(e.target.value) || 0;
+                                      onMgrTotalHoursChange(newH);
+                                    }}
+                                    title="Total hours (production + managerial)"
+                                    className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                                  />
+                                )}
                                 {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
                                 {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                               </td>
@@ -1881,16 +1908,18 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 // ─── FulfillmentSection ────────────────────────────────────────────────────────
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
-  ffHours, ffRoster, onFfHoursChange, onFfRosterChange }: {
+  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
-  ffHours:         Record<string, number[]>;
-  ffRoster:        Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
-  onFfHoursChange: (h: Record<string, number[]>) => void;
-  onFfRosterChange:(r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
+  ffHours:              Record<string, number[]>;
+  ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  mgrTotalHours:        Record<string, number[]>;
+  onFfHoursChange:      (h: Record<string, number[]>) => void;
+  onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
+  onMgrTotalHoursChange:(h: Record<string, number[]>) => void;
 }) {
   const [ffTab,      setFfTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster, setShowRoster] = useState(false);
@@ -2056,17 +2085,28 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         {m.payType === 'salary' && <div className="text-[10px] text-amber-600">salary</div>}
                       </td>
                       {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
-                        const h = (ffHours[m.id] ?? [])[w] ?? 0;
-                        const o = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
-                        const cost = m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate;
-                        const cpo = o > 0 && cost > 0 ? cost / o : null;
+                        const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
+                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                        const o = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                        const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
+                        const cpo = !m.isManager && o > 0 && cost > 0 ? cost / o : null;
                         return (
                           <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
-                            <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
+                            <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
                               onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
-                              onDoubleClick={() => applyToAllWeeks(m.id, h)}
-                              title="Double-click to apply to all weeks"
+                              onDoubleClick={() => applyToAllWeeks(m.id, prodH)}
+                              title={m.isManager ? 'Production hours' : 'Double-click to apply to all weeks'}
                               className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                            {m.isManager && (
+                              <input type="number" value={totalH || ''} placeholder="total h" min="0" step="0.5"
+                                onChange={e => {
+                                  const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
+                                  newH[m.id][w] = parseFloat(e.target.value) || 0;
+                                  onMgrTotalHoursChange(newH);
+                                }}
+                                title="Total hours (production + managerial)"
+                                className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                            )}
                             {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
                             {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                           </td>
@@ -2716,6 +2756,13 @@ export function SchedulePage({
     newHours[designerId][weekIdx] = parseFloat(value) || 0;
     update('designHours', newHours);
   }
+  function handleMgrTotalHoursChange(weekIdx: number, designerId: string, value: string) {
+    const newHours = { ...settings.mgrTotalHours };
+    if (!newHours[designerId]) newHours[designerId] = Array(WEEKS).fill(0);
+    newHours[designerId] = [...newHours[designerId]];
+    newHours[designerId][weekIdx] = parseFloat(value) || 0;
+    update('mgrTotalHours', newHours);
+  }
   function applyToAllWeeks(designerId: string, hours: number) {
     const newHours = { ...settings.designHours, [designerId]: Array(WEEKS).fill(hours) };
     update('designHours', newHours);
@@ -2960,9 +3007,11 @@ export function SchedulePage({
           presHours={settings.presHours}
           presRoster={settings.presRoster}
           presSettings={settings.presSettings}
+          mgrTotalHours={settings.mgrTotalHours}
           onPresHoursChange={(h) => update('presHours', h)}
           onPresRosterChange={(r) => update('presRoster', r)}
           onPresSettingsChange={(s) => update('presSettings', s)}
+          onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=all&weeks=52`)
               .then(r => r.json())
@@ -2989,8 +3038,10 @@ export function SchedulePage({
           teamActuals={teamActuals}
           ffHours={settings.ffHours}
           ffRoster={settings.ffRoster}
+          mgrTotalHours={settings.mgrTotalHours}
           onFfHoursChange={(h) => update('ffHours', h)}
           onFfRosterChange={(r) => update('ffRoster', r)}
+          onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
               .then(r => r.json())
@@ -3142,19 +3193,29 @@ export function SchedulePage({
                         </td>
                         {windowWeeks.map(w => {
                           const { hrs, frames, cpo } = weekStats(w, d);
+                          const isDesignMgr = !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager);
+                          const totalH = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[w] ?? hrs) : hrs;
                           return (
                             <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                               <input
                                 type="number" value={hrs || ''} min="0" step="0.5" placeholder="0"
                                 onChange={e => handleHoursChange(w, d.id, e.target.value)}
                                 onDoubleClick={() => applyToAllWeeks(d.id, hrs)}
-                                title="Double-click to apply to all weeks"
+                                title={isDesignMgr ? 'Production hours' : 'Double-click to apply to all weeks'}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
                               />
+                              {isDesignMgr && (
+                                <input
+                                  type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
+                                  onChange={e => handleMgrTotalHoursChange(w, d.id, e.target.value)}
+                                  title="Total hours (production + managerial)"
+                                  className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                                />
+                              )}
                               {frames > 0 && (
                                 <div className="text-slate-400 mt-0.5">{Math.round(frames)}f</div>
                               )}
-                              {showCPO && cpo !== null && (
+                              {showCPO && !isDesignMgr && cpo !== null && (
                                 <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>
                               )}
                             </td>

@@ -38,17 +38,19 @@ export interface FlexRow {
 }
 
 export interface ScheduleSettings {
-  designHours:   HoursMap;
-  designRoster:  DesignerRoster;
-  presHours:     HoursMap;
-  presRoster:    TeamRoster;
-  presSettings:  PresSettings;
-  ffHours:       HoursMap;
-  ffRoster:      TeamRoster;
+  designHours:        HoursMap;
+  designRoster:       DesignerRoster;
+  presHours:          HoursMap;
+  presRoster:         TeamRoster;
+  presSettings:       PresSettings;
+  ffHours:            HoursMap;
+  ffRoster:           TeamRoster;
   masterAvailability: MasterAvailability;
-  flexRows:           Record<string, FlexRow[]>; // keyed by dept
+  flexRows:           Record<string, FlexRow[]>;
   avgIntake:          number;
   weeklyEstimates:    Record<string, number>;
+  // Manager total hours (production + managerial) — parallel to dept hours maps
+  mgrTotalHours:      HoursMap;
 }
 
 const DEFAULTS: ScheduleSettings = {
@@ -60,11 +62,13 @@ const DEFAULTS: ScheduleSettings = {
   flexRows: {},
   avgIntake: 45,
   weeklyEstimates: {},
+  mgrTotalHours: {},
 };
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
   'ffHours','ffRoster','masterAvailability','flexRows','avgIntake','weeklyEstimates',
+  'mgrTotalHours',
 ];
 
 export function useScheduleSettings(location: 'Utah' | 'Georgia') {
