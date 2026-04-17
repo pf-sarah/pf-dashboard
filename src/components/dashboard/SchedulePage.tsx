@@ -569,189 +569,175 @@ function parseDateRange(from: string, to: string): Record<string, number> {
   return result;
 }
 
-// ─── DeptHistoricalsTab ────────────────────────────────────────────────────────
-// Shared historicals tab used by Preservation and Fulfillment
+// ─── CSV historical data — Utah (pre-loaded from spreadsheet) ────────────────
+const UTAH_HISTORICALS: Record<string, Record<string, { hours: number; orders: number }>> = {
+  fulfillment: {
+    'Izabella DePrima':      { hours: 2.59+40.06+33.20+39.95+28.11+6.53+39.60+38.67+39.99+39.83+28.76+36.95+37.66+31.54, orders: 10+8+21+12+22+26+18+10+3+6+14+22 },
+    'Warner Neuenschwander': { hours: 3.73+5.73+1.12+2.07+7.17+7.21+3.86+2.21+3.48, orders: 16+18+8+5+13+9+23+7+7 },
+    'Owen Shaw':             { hours: 6.25+10.41+19.80+14.12+13.85+7.41+22.71+17.19+9.04+20.24+12.22+23.19+16.06+26.25, orders: 15+23+44+40+31+21+55+55+29+90+35+67+30+78 },
+    'Emma Swenson':          { hours: 9.77+6.67+12.09+6.10+6.86+4.65+6.43+10.73+4.40+7.02+2.44+6.25+2.04, orders: 21+25+31+17+15+9+14+35+10+18+10+26 },
+  },
+  design: {
+    'Deanna L Brown':   { hours: 15.20+18.94+26.29+27.85+24.37+21.31+28.02+27.30+27.30+19.78+20.25+24.64+23.49+19.06, orders: 9+10+12+19+18+12+18+25+26+17+19+21+23+18 },
+    'Sarah Glissmeyer': { hours: 4.79+14.82+13.95+18.43+18.11+16.66+16.11+9.86+9.41+15.46+14.76+16.16+17.18, orders: 3+4+0+7+5+9+8+6+8+9+8+8 },
+    'Kathryn Hill':     { hours: 8.15+22.50+21.73+21.86+24.10+23.33+19.92+9.01+13.87+26.81+4.72+20.11+20.19, orders: 6+14+15+14+23+15+15+11+7+15+11+14+12 },
+    'Mia Legas':        { hours: 2.91+13.75+16.20+7.77+11.26+18.38+11.07+20.22+6.27+10.86+18.55+16.03+18.56, orders: 3+9+11+3+15+26+14+27+6+18+13+21+18 },
+    'Sloane James':     { hours: 6.22+21.53+19.53+14.91+23.01+16.57+20.75+19.85+19.28+20.18, orders: 15+14+11+22+16+26+20+19+24 },
+    'Audrey Brown':     { hours: 1.33+13.64+11.51+9.32+5.76+9.06+9.62+8.14+8.92+7.39, orders: 10+10+3+3+12+7+8+8+8 },
+    'Chloe Leonard':    { hours: 5.12+8.17+7.60+3.90+4.06, orders: 11+4+9+4+9 },
+    'Jennika Merrill':  { hours: 0, orders: 3+3+2+22+20+12+5+10+14+10+18+11+15 },
+  },
+  preservation: {
+    'Katelyn Wilson':  { hours: 20.22+29.68+21.16+13.52+9.10+8.44+15.15+15.55+15.88+10.88+25.37+21.87+17.33, orders: 24+20+16+21+12+10+25+27+24+11+46+33+22 },
+    'Emma Dunakey':    { hours: 10.69+1.14+7.75, orders: 19+5+15 },
+  },
+};
 
+// ─── DeptHistoricalsTab ────────────────────────────────────────────────────────
 function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, onActualsSaved, showReceivedField, ordersLabel, onPresActualsSaved }: {
-  department:          'preservation' | 'fulfillment';
+  department:          'preservation' | 'fulfillment' | 'design';
   location:            'Utah' | 'Georgia';
   teamMembers:         string[];
   teamActuals:         { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:      () => void;
-  showReceivedField:   boolean;  // preservation only — shows total bouquets received field
-  ordersLabel:         string;   // e.g. "bouquets preserved" or "orders sealed"
+  showReceivedField:   boolean;
+  ordersLabel:         string;
   onPresActualsSaved?: (weekOf: string, received: number) => void;
 }) {
-  const HIST_WEEKS  = 12;
+  const HIST_WEEKS  = 20;
   const weekOptions = pastWeeks(HIST_WEEKS);
-  const [selectedWeek, setSelectedWeek] = useState(weekOptions[0]);
-  const [saving,       setSaving]       = useState(false);
-  const [saveMsg,      setSaveMsg]      = useState('');
-  const [localEdits,   setLocalEdits]   = useState<Record<string, { hours: number; orders: number }>>({});
+  const [saving,    setSaving]  = useState(false);
+  const [saveMsg,   setSaveMsg] = useState('');
+  const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [totalReceived, setTotalReceived] = useState(0);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load existing actuals into totalReceived when week changes
-  useEffect(() => {
-    if (!showReceivedField) return;
-    // Look for a preservation week actual for this week from presActuals
-    setTotalReceived(0); // will be overridden by parent presActuals if available
-    setLocalEdits({});
-  }, [selectedWeek, showReceivedField]);
+  // YTD totals from CSV for Utah — shown as reference
+  const ytdData = location === 'Utah' ? (UTAH_HISTORICALS[department] ?? {}) : {};
 
-  function getEntry(name: string) {
-    if (localEdits[name]) return localEdits[name];
-    const row = teamActuals.find(r => r.department === department && r.week_of === selectedWeek && r.member_name === name);
+  function getEntry(weekOf: string, name: string) {
+    if (localEdits[weekOf]?.[name]) return localEdits[weekOf][name];
+    const row = teamActuals.find(r => r.department === department && r.week_of === weekOf && r.member_name === name);
     return { hours: row?.actual_hours ?? 0, orders: row?.actual_orders ?? 0 };
   }
 
-  function setEntry(name: string, field: 'hours' | 'orders', val: number) {
-    setLocalEdits(prev => ({ ...prev, [name]: { ...getEntry(name), [field]: val } }));
-  }
-
-  async function saveWeek() {
-    setSaving(true); setSaveMsg('');
-    try {
-      const saves: Promise<unknown>[] = teamMembers.map(name => {
-        const entry = getEntry(name);
-        if (entry.hours === 0 && entry.orders === 0) return Promise.resolve();
-        return fetch('/api/actuals', {
+  function setEntry(weekOf: string, name: string, field: 'hours' | 'orders', val: number) {
+    setLocalEdits(prev => ({
+      ...prev,
+      [weekOf]: { ...(prev[weekOf] ?? {}), [name]: { ...getEntry(weekOf, name), [field]: val } },
+    }));
+    // Auto-save with debounce
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        const entry = { ...getEntry(weekOf, name), [field]: val };
+        await fetch('/api/actuals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'team', location, weekOf: selectedWeek, department, memberName: name, actualHours: entry.hours, actualOrders: entry.orders }),
+          body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: entry.hours, actualOrders: entry.orders }),
         });
-      });
-      if (showReceivedField && totalReceived > 0) {
-        saves.push(fetch('/api/actuals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'preservation', location, weekOf: selectedWeek, received: totalReceived }),
-        }));
-        onPresActualsSaved?.(selectedWeek, totalReceived);
-      }
-      await Promise.all(saves);
-      setLocalEdits({});
-      setSaveMsg('Saved');
-      onActualsSaved();
-      setTimeout(() => setSaveMsg(''), 2000);
-    } catch { setSaveMsg('Save failed'); }
-    setSaving(false);
+        setSaveMsg('✓');
+        onActualsSaved();
+        setTimeout(() => setSaveMsg(''), 1500);
+      } catch { setSaveMsg('Save failed'); }
+      setSaving(false);
+    }, 800);
   }
 
-  const weekData = teamMembers.map(name => {
-    const entry = getEntry(name);
-    const ratio = entry.hours > 0 && entry.orders > 0 ? entry.hours / entry.orders : null;
-    return { name, hours: entry.hours, orders: entry.orders, ratio };
-  });
+  // Weeks with any data (from Supabase or local edits)
+  const weeksWithData = new Set([
+    ...teamActuals.filter(r => r.department === department).map(r => r.week_of),
+    ...Object.keys(localEdits),
+  ]);
 
-  const teamOrders = weekData.reduce((s, r) => s + r.orders, 0);
-  const teamHours  = weekData.reduce((s, r) => s + r.hours, 0);
-  const teamRatio  = teamOrders > 0 && teamHours > 0 ? teamHours / teamOrders : null;
+  // All weeks to show: past 20 weeks, sorted newest first
+  const displayWeeks = weekOptions;
 
-  // Monthly summary
-  const monthlyByMember = useMemo(() => {
-    const map: Record<string, Record<string, { orders: number; hours: number }>> = {};
+
+  // YTD totals computed from Supabase actuals + CSV seed data
+  const ytdTotals = useMemo(() => {
+    const map: Record<string, { hours: number; orders: number }> = {};
     teamActuals.filter(r => r.department === department).forEach(r => {
-      const monthKey = new Date(r.week_of + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      if (!map[monthKey]) map[monthKey] = {};
-      if (!map[monthKey][r.member_name]) map[monthKey][r.member_name] = { orders: 0, hours: 0 };
-      map[monthKey][r.member_name].orders += r.actual_orders;
-      map[monthKey][r.member_name].hours  += r.actual_hours;
+      if (!map[r.member_name]) map[r.member_name] = { hours: 0, orders: 0 };
+      map[r.member_name].hours  += r.actual_hours;
+      map[r.member_name].orders += r.actual_orders;
+    });
+    Object.entries(ytdData).forEach(([name, d]) => {
+      if (!map[name]) map[name] = { hours: 0, orders: 0 };
+      if (map[name].orders === 0) { map[name].hours = d.hours; map[name].orders = d.orders; }
     });
     return map;
-  }, [teamActuals, department]);
+  }, [teamActuals, department, ytdData]);
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3 flex-wrap">
-        <label className="text-xs font-medium text-slate-500">Week of</label>
-        <select value={selectedWeek} onChange={e => { setSelectedWeek(e.target.value); setLocalEdits({}); }}
-          className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-          {weekOptions.map(w => <option key={w} value={w}>{fmtDate(w)} – {fmtDate(addDays(w, 6))}</option>)}
-        </select>
-        <button onClick={() => void saveWeek()} disabled={saving}
-          className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-          {saving ? 'Saving…' : 'Save week actuals'}
-        </button>
-        {saveMsg && <span className={`text-xs ${saveMsg === 'Saved' ? 'text-green-600' : 'text-red-500'}`}>{saveMsg}</span>}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">Historicals — {department} · {location}</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Edit any cell — saves automatically. Shows last {displayWeeks.length} weeks.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {saving && <span className="text-xs text-slate-400 italic">Saving…</span>}
+          {saveMsg && <span className="text-xs text-green-600">{saveMsg}</span>}
+        </div>
       </div>
 
-      {/* Total received field — preservation only */}
-      {showReceivedField && (
-        <div className="bg-white border border-slate-100 rounded-xl p-4 flex items-center gap-4">
-          <div>
-            <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">Total bouquets received this week</p>
-            <p className="text-xs text-slate-400">This feeds the &quot;Received&quot; column in Queue &amp; Turnaround for the FIFO simulation.</p>
+      {/* YTD summary */}
+      {Object.keys(ytdTotals).length > 0 && (
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Year-to-date totals</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-100">
+                  <th className="px-3 py-1.5 text-left font-medium text-slate-400">Team member</th>
+                  <th className="px-3 py-1.5 text-center font-medium text-slate-400">Total {ordersLabel}</th>
+                  <th className="px-3 py-1.5 text-center font-medium text-slate-400">Total hours</th>
+                  <th className="px-3 py-1.5 text-center font-medium text-slate-400">YTD ratio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teamMembers.map((name, i) => {
+                  const d = ytdTotals[name];
+                  if (!d || (d.hours === 0 && d.orders === 0)) return null;
+                  const ratio = d.hours > 0 && d.orders > 0 ? d.hours / d.orders : null;
+                  return (
+                    <tr key={name} className={i % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                      <td className="px-3 py-1.5 font-medium text-slate-700">{name}</td>
+                      <td className="px-3 py-1.5 text-center text-indigo-700 font-semibold">{Math.round(d.orders)}</td>
+                      <td className="px-3 py-1.5 text-center text-slate-500">{Math.round(d.hours)}h</td>
+                      <td className="px-3 py-1.5 text-center">
+                        {ratio !== null ? (
+                          <span className={`font-semibold ${ratio <= 0.7 ? 'text-green-700' : ratio <= 1.5 ? 'text-amber-700' : 'text-red-700'}`}>
+                            {ratio.toFixed(2)} h/ord
+                          </span>
+                        ) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          <input type="number" value={totalReceived || ''} placeholder="0" min="0"
-            onChange={e => setTotalReceived(parseInt(e.target.value) || 0)}
-            className="w-24 border border-green-300 rounded px-2 py-1.5 text-xl font-semibold text-green-700 text-center bg-white focus:outline-none focus:ring-1 focus:ring-green-400" />
         </div>
       )}
 
-      {/* Per-member table */}
-      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-700">Week of {fmtDate(selectedWeek)}</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Enter actual {ordersLabel} and hours worked. Saved to shared database.</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="px-4 py-2 text-left font-medium text-slate-500">Team member</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500">Actual {ordersLabel}</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500">Actual hours</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500">Actual ratio (h/ord)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {weekData.map((row, i) => (
-                <tr key={row.name} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                  <td className="px-4 py-2 font-medium text-slate-700">{row.name}</td>
-                  <td className="px-3 py-2 text-center">
-                    <input type="number" value={row.orders || ''} min="0" placeholder="0"
-                      onChange={e => setEntry(row.name, 'orders', parseInt(e.target.value) || 0)}
-                      className="w-16 border border-slate-200 rounded px-2 py-1 text-center text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <input type="number" value={row.hours || ''} min="0" step="0.5" placeholder="0"
-                      onChange={e => setEntry(row.name, 'hours', parseFloat(e.target.value) || 0)}
-                      className="w-16 border border-slate-200 rounded px-2 py-1 text-center text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    {row.ratio !== null ? (
-                      <span className={`font-semibold ${row.ratio <= 1.4 ? 'text-green-700' : row.ratio <= 1.8 ? 'text-amber-700' : 'text-red-700'}`}>
-                        {row.ratio.toFixed(2)}
-                      </span>
-                    ) : <span className="text-slate-300">—</span>}
-                  </td>
-                </tr>
-              ))}
-              <tr className="border-t-2 border-slate-200 bg-indigo-50/30 font-semibold">
-                <td className="px-4 py-2 text-slate-700">Team total</td>
-                <td className="px-3 py-2 text-center text-indigo-700">{teamOrders || '—'}</td>
-                <td className="px-3 py-2 text-center text-slate-700">{teamHours || '—'}</td>
-                <td className="px-3 py-2 text-center">
-                  {teamRatio !== null ? <span className={teamRatio <= 1.5 ? 'text-green-700' : teamRatio <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{teamRatio.toFixed(2)}</span> : '—'}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* All-weeks overview */}
+      {/* All weeks inline-editable grid */}
       <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-slate-100">
           <h3 className="text-sm font-semibold text-slate-700">All weeks overview</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Click any number to edit. Top = {ordersLabel}, bottom = hours. Saves automatically.</p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500">Team member</th>
-                {weekOptions.map(w => (
-                  <th key={w} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[100px]">{fmtDate(w).split(',')[0]}</th>
+                <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap min-w-[140px]">Team member</th>
+                {displayWeeks.map(w => (
+                  <th key={w} className="px-2 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[80px]">
+                    {fmtDate(w).split(',')[0]}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -759,15 +745,27 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
               {teamMembers.map((name, ni) => (
                 <tr key={name} className={ni % 2 === 0 ? '' : 'bg-slate-50/40'}>
                   <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{name}</td>
-                  {weekOptions.map(w => {
-                    const row = teamActuals.find(r => r.department === department && r.week_of === w && r.member_name === name);
-                    if (!row || (row.actual_hours === 0 && row.actual_orders === 0)) return <td key={w} className="px-3 py-2 text-center text-slate-200">—</td>;
-                    const r = row.actual_hours > 0 && row.actual_orders > 0 ? row.actual_hours / row.actual_orders : null;
+                  {displayWeeks.map(w => {
+                    const entry = getEntry(w, name);
+                    const ratio = entry.hours > 0 && entry.orders > 0 ? entry.hours / entry.orders : null;
+                    const hasData = entry.hours > 0 || entry.orders > 0;
                     return (
-                      <td key={w} className="px-3 py-2 text-center">
-                        <div className="font-medium text-indigo-700">{row.actual_orders}</div>
-                        <div className="text-slate-400">{row.actual_hours}h</div>
-                        {r !== null && <div className={r <= 1.5 ? 'text-green-700' : r <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{r.toFixed(2)}</div>}
+                      <td key={w} className={`px-1 py-1 text-center ${hasData ? '' : 'opacity-30'}`}>
+                        <div className="flex flex-col gap-0.5 items-center">
+                          <input type="number" min="0" value={entry.orders || ''}
+                            placeholder="0" title="Orders"
+                            onChange={e => setEntry(w, name, 'orders', parseInt(e.target.value) || 0)}
+                            className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center text-indigo-700 font-medium bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                          <input type="number" min="0" step="0.5" value={entry.hours || ''}
+                            placeholder="0h" title="Hours"
+                            onChange={e => setEntry(w, name, 'hours', parseFloat(e.target.value) || 0)}
+                            className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center text-slate-400 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                          {ratio !== null && (
+                            <span className={`text-[9px] font-medium ${ratio <= 0.7 ? 'text-green-700' : ratio <= 1.5 ? 'text-amber-700' : 'text-red-600'}`}>
+                              {ratio.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     );
                   })}
@@ -777,46 +775,6 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
           </table>
         </div>
       </div>
-
-      {/* Monthly summary */}
-      {Object.keys(monthlyByMember).length > 0 && (
-        <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-700">Monthly actuals summary</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500">Team member</th>
-                  {Object.keys(monthlyByMember).sort().map(m => (
-                    <th key={m} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[110px]">{m.split(' ')[0]}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {teamMembers.map((name, ni) => (
-                  <tr key={name} className={ni % 2 === 0 ? '' : 'bg-slate-50/40'}>
-                    <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{name}</td>
-                    {Object.keys(monthlyByMember).sort().map(m => {
-                      const s = monthlyByMember[m]?.[name];
-                      if (!s || s.orders === 0) return <td key={m} className="px-3 py-2 text-center text-slate-200">—</td>;
-                      const r = s.hours > 0 && s.orders > 0 ? s.hours / s.orders : null;
-                      return (
-                        <td key={m} className="px-3 py-2 text-center">
-                          <div className="font-medium text-indigo-700">{s.orders}</div>
-                          <div className="text-slate-400">{s.hours}h</div>
-                          {r !== null && <div className={r <= 1.5 ? 'text-green-700' : r <= 1.8 ? 'text-amber-700' : 'text-red-700'}>{r.toFixed(2)}</div>}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1620,6 +1578,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 }) {
   const [ffTab,      setFfTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster, setShowRoster] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
 
   // Merge persisted roster + hours over defaults
   const defaultTeam = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
@@ -1658,14 +1617,20 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, name } });
   }
 
-  function updateHours(mi: number, wi: number, val: number) {
-    const id = defaultTeam[mi].id;
-    const newHours = { ...ffHours, [id]: team[mi].hours.map((h, j) => j === wi ? val : h) };
+  function updateHours(id: string, wi: number, val: number) {
+    const member = team.find(m => m.id === id);
+    if (!member) return;
+    const currentHours = ffHours[id] ?? Array(WEEKS).fill(0);
+    const newHours = { ...ffHours, [id]: currentHours.map((h: number, j: number) => j === wi ? val : h) };
     onFfHoursChange(newHours);
   }
-  function updateRoster(mi: number, field: 'ratio' | 'rate', val: number) {
-    const id = defaultTeam[mi].id;
-    const existing = ffRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name };
+  function applyToAllWeeks(id: string, hours: number) {
+    onFfHoursChange({ ...ffHours, [id]: Array(WEEKS).fill(hours) });
+  }
+  function updateRoster(mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary', val: number | string) {
+    const id = team[mi]?.id;
+    if (!id) return;
+    const existing = ffRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name, payType: 'hourly' as const, annualSalary: 0 };
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
   }
 
@@ -1716,35 +1681,26 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         <>
           <div>
             <button onClick={() => setShowRoster(r => !r)} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
-              {showRoster ? '\u25b2 Hide' : '\u25bc Edit'} fulfillment roster, ratios &amp; pay rates
+              {showRoster ? '▲ Hide' : '▼ Edit'} fulfillment roster, ratios &amp; pay rates
             </button>
             {showRoster && (
               <div className="mt-3 bg-white border border-slate-100 rounded-xl p-5">
-                <div className="grid grid-cols-[1fr_80px_110px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-                  <span>Name</span><span className="text-center">Ratio</span><span className="text-center">Hourly rate</span><span />
-                </div>
-                <div className="space-y-2">
-                  {team.map((m, mi) => (
-                    <div key={m.id} className="grid grid-cols-[1fr_80px_110px_20px] gap-2 items-center">
-                      <input type="text" value={m.name}
-                        onChange={e => updateFfRosterName(m.id, e.target.value)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" value={m.ratio} step="0.05" min="0.05"
-                        onChange={e => updateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-                        <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
-                          onChange={e => updateRoster(mi, 'rate', parseFloat(e.target.value) || 0)}
-                          className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      </div>
-                      <button onClick={() => handleRemoveFfMember(m.id)}
-                        className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
-                    </div>
-                  ))}
-                </div>
+                <FfRosterEditor
+                  team={team}
+                  ffRoster={ffRoster}
+                  onUpdateName={updateFfRosterName}
+                  onUpdateRoster={updateRoster}
+                  onRemove={handleRemoveFfMember}
+                  onReorder={(newOrder) => {
+                    const newRoster = { ...ffRoster };
+                    newOrder.forEach((id, i) => {
+                      newRoster[id] = { ...(newRoster[id] ?? { ratio: 1, rate: 0, name: '' }), _order: i } as typeof newRoster[string];
+                    });
+                    onFfRosterChange(newRoster);
+                  }}
+                />
                 <button onClick={handleAddFfMember}
-                  className="mt-3 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
+                  className="mt-4 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
                   + Add team member
                 </button>
                 <p className="mt-3 text-xs text-slate-400"><strong>Ratio:</strong> hours per order. e.g. 0.5 = 1 order per 0.5 hrs.</p>
@@ -1753,38 +1709,47 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           </div>
 
           <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-wrap gap-2">
               <h3 className="text-sm font-semibold text-slate-700">Hours per team member per week</h3>
-              {hasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
+              <div className="flex items-center gap-2">
+                <button onClick={() => setWeekOffset(Math.max(0, weekOffset - WINDOW))} disabled={weekOffset === 0}
+                  className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                <span className="text-xs text-slate-400">{getWeekLabel(weekOffset)} – {getWeekLabel(weekOffset + WINDOW - 1)}</span>
+                <button onClick={() => setWeekOffset(Math.min(WEEKS - WINDOW, weekOffset + WINDOW))} disabled={weekOffset + WINDOW >= WEEKS}
+                  className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-100">
                     <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
-                    {getWeekLabels8().map((w, i) => (
-                      <th key={i} className={`px-2 py-2 text-center font-medium min-w-[80px] ${i === 0 ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}>
-                        {w}{i === 0 && <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 rounded px-1">now</span>}
+                    {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => (
+                      <th key={w} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[90px]">
+                        {getWeekLabel(w)}{w === 0 && <span className="ml-1 text-[10px] bg-indigo-100 text-indigo-600 rounded px-1">now</span>}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {team.map((m, mi) => (
-                    <tr key={m.id} className={mi % 2 === 0 ? '' : 'bg-slate-50/40'}>
+                    <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                       <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
                         <div className="font-medium text-slate-700">{m.name}</div>
                         <div className="text-slate-400">{m.ratio} h/ord</div>
+                        {m.payType === 'salary' && <div className="text-[10px] text-amber-600">salary</div>}
                       </td>
-                      {getWeekLabels8().map((_, wi) => {
-                        const h = m.hours[wi] ?? 0;
+                      {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
+                        const h = (ffHours[m.id] ?? [])[w] ?? 0;
                         const o = m.ratio > 0 ? Math.round(h / m.ratio) : 0;
-                        const cost = h * m.rate;
+                        const cost = m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate;
                         const cpo = o > 0 && cost > 0 ? cost / o : null;
                         return (
-                          <td key={wi} className={`px-2 py-1.5 text-center ${wi === 0 ? 'bg-indigo-50/30' : ''}`}>
+                          <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                             <input type="number" value={h || ''} placeholder="0" min="0" step="0.5"
-                              onChange={e => updateHours(mi, wi, parseFloat(e.target.value) || 0)}
+                              onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
+                              onDoubleClick={() => applyToAllWeeks(m.id, h)}
+                              title="Double-click to apply to all weeks"
                               className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                             {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
                             {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
@@ -1795,14 +1760,17 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   ))}
                   <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
-                    {getWeekLabels8().map((_, wi) => {
-                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[wi] ?? 0) / m.ratio) : 0), 0);
-                      const cost = team.reduce((s, m) => s + (m.hours[wi] ?? 0) * m.rate, 0);
+                    {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
+                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round(((ffHours[m.id] ?? [])[w] ?? 0) / m.ratio) : 0), 0);
+                      const cost = team.reduce((s, m) => {
+                        const h = (ffHours[m.id] ?? [])[w] ?? 0;
+                        return s + (m.payType === 'salary' ? m.annualSalary / 52 : h * m.rate);
+                      }, 0);
                       const cpo = c > 0 && cost > 0 ? cost / c : null;
                       return (
-                        <td key={wi} className={`px-2 py-2 text-center ${wi === 0 ? 'bg-indigo-50/50' : ''}`}>
+                        <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/50' : ''}`}>
                           <div className="text-amber-700">{c} ord</div>
-                          {cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
+                          {cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}</div>}
                         </td>
                       );
                     })}
@@ -1811,6 +1779,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
               </table>
             </div>
           </div>
+          <p className="text-xs text-slate-400">Double-click any hours cell to apply that value to all 52 weeks for that team member.</p>
         </>
       )}
 
