@@ -17,6 +17,7 @@ interface Designer {
   hourlyRate:   number;
   annualSalary: number;
   isManager?:   boolean;
+  role?:        'specialist' | 'senior' | 'master';
 }
 
 interface WeekSchedule {
@@ -95,22 +96,22 @@ const GEORGIA_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
 // ─── Default designers ────────────────────────────────────────────────────────
 
 const DEFAULT_UTAH_DESIGNERS: Designer[] = [
-  { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true },
-  { id: 'ut-1',   name: 'Deanna L Brown',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-2',   name: 'Sarah Glissmeyer', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-3',   name: 'Kathryn Hill',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-4',   name: 'Mia Legas',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-5',   name: 'Sloane James',     ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-6',   name: 'Audrey Brown',     ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ut-7',   name: 'Chloe Leonard',    ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
+  { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true, role: 'master' as const },
+  { id: 'ut-1',   name: 'Deanna L Brown',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-2',   name: 'Sarah Glissmeyer', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-3',   name: 'Kathryn Hill',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-4',   name: 'Mia Legas',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-5',   name: 'Sloane James',     ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-6',   name: 'Audrey Brown',     ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
+  { id: 'ut-7',   name: 'Chloe Leonard',    ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
 ];
 
 const DEFAULT_GEORGIA_DESIGNERS: Designer[] = [
-  { id: 'ga-1', name: 'Katherine Piper', ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ga-2', name: 'Allanna Harlan',  ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ga-3', name: 'Erin Webb',       ratio: 2.3, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ga-4', name: 'Rachel Tucker',   ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
-  { id: 'ga-5', name: 'Celt Stewart',    ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
+  { id: 'ga-1', name: 'Katherine Piper', ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ga-2', name: 'Allanna Harlan',  ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ga-3', name: 'Erin Webb',       ratio: 2.3, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ga-4', name: 'Rachel Tucker',   ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
+  { id: 'ga-5', name: 'Celt Stewart',    ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
 ];
 
 function buildDefaultUtahSchedule(): WeekSchedule[] {
@@ -514,34 +515,34 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
 // ─── Preservation team data ────────────────────────────────────────────────────
 
 const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
-  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true },
-  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
+  { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), role: 'senior' as const },
   { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
   { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
 const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
-  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true },
-  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8) },
+  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
+  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), role: 'senior' as const },
   { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
   { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
 const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
-  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true },
-  { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
-  { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
-  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true, role: 'master' as const },
+  { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'specialist' as const },
+  { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'senior' as const },
+  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'senior' as const },
 ];
 
 const GEORGIA_FULFILLMENT_TEAM: FfTeamMember[] = [
-  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true },
-  { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
-  { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8) },
+  { id: 'ga-f1', name: 'Yann Jean-Louis', ratio: 2.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true, role: 'master' as const },
+  { id: 'ga-f2', name: 'Nahid Knight',    ratio: 0.75, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'specialist' as const },
+  { id: 'ga-f3', name: 'Shantel Phifer',  ratio: 0.61, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'specialist' as const },
 ];
 
-type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean };
-type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean };
+type PresTeamMember = { id: string; name: string; ratio: number; pay: 'hourly'|'flex'|'oncall'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean; role?: 'specialist'|'senior'|'master' };
+type FfTeamMember   = { id: string; name: string; ratio: number; pay: 'hourly'; payType: 'hourly'|'salary'; rate: number; annualSalary: number; hours: number[]; isManager?: boolean; role?: 'specialist'|'senior'|'master' };
 
 // Dynamic week labels — always real Monday dates
 function getWeekLabels8(): string[] {
@@ -1126,8 +1127,8 @@ function useDraggableOrder<T extends { id: string }>(
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
 function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder }: {
   team: PresTeamMember[];
-  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
-  onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary', val: string | number) => void;
+  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
+  onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
 }) {
@@ -1135,13 +1136,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
     useDraggableOrder(team, onReorder);
   return (
     <div>
-      <div className="grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-        <span /><span>Name</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      <div className="grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
       </div>
       <div className="space-y-2">
         {team.map((m) => (
           <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+            className={`grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
             onDrop={() => handleDrop(m.id)}>
             <span
@@ -1152,6 +1153,12 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
             <input type="text" value={m.name}
               onChange={e => onUpdateRoster(m.id, 'name', e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
+              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="specialist">Specialist</option>
+              <option value="senior">Senior</option>
+              <option value="master">Master</option>
+            </select>
             <input type="number" value={m.ratio} step="0.05" min="0.05"
               onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
@@ -1188,7 +1195,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
   team: FfTeamMember[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   onUpdateName: (id: string, name: string) => void;
-  onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary', val: number | string) => void;
+  onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
 }) {
@@ -1196,13 +1203,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
     useDraggableOrder(team, onReorder);
   return (
     <div>
-      <div className="grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-        <span /><span>Name</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      <div className="grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
       </div>
       <div className="space-y-2">
         {team.map((m, mi) => (
           <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+            className={`grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
             onDrop={() => handleDrop(m.id)}>
             <span
@@ -1213,6 +1220,12 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
             <input type="text" value={m.name}
               onChange={e => onUpdateName(m.id, e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
+              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="specialist">Specialist</option>
+              <option value="senior">Senior</option>
+              <option value="master">Master</option>
+            </select>
             <input type="number" value={m.ratio} step="0.05" min="0.05"
               onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
@@ -1437,7 +1450,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresHoursChange(newHours);
   }
 
-  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary', val: string | number) {
+  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) {
     const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member', payType: 'hourly' as const, annualSalary: 0 };
     onPresRosterChange({ ...presRoster, [memberId]: { ...existing, [field]: val } });
   }
@@ -1973,7 +1986,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   function applyToAllWeeks(id: string, hours: number) {
     onFfHoursChange({ ...ffHours, [id]: Array(WEEKS).fill(hours) });
   }
-  function updateRoster(mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary', val: number | string) {
+  function updateRoster(mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) {
     const id = team[mi]?.id;
     if (!id) return;
     const existing = ffRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name, payType: 'hourly' as const, annualSalary: 0 };
@@ -2105,7 +2118,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                   newH[m.id][w] = parseFloat(e.target.value) || 0;
                                   onMgrTotalHoursChange(newH);
                                 }}
-                                title="Total hours (production + managerial)"
+                                onDoubleClick={() => {
+                                  const val = mgrTotalHours[m.id]?.[w] ?? prodH;
+                                  const newH = { ...mgrTotalHours, [m.id]: Array(WEEKS).fill(val) };
+                                  onMgrTotalHoursChange(newH);
+                                }}
+                                title="Total hours (production + managerial) — double-click to apply to all weeks"
                                 className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                             )}
                             {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
@@ -2522,28 +2540,25 @@ function MetricCell({ label, value, sub, warn }: { label: string; value: string 
   );
 }
 
-function PeriodBlock({ label, metrics, showCPO }: {
+function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
   label: string;
-  metrics: { combinedRatio: number | null; combinedCPO: number | null; design: { missingRates: string[] }; preservation: { missingRates: string[] }; fulfillment: { missingRates: string[] } };
+  metrics: { combinedRatio: number | null; combinedCPO: number | null; combinedGoalRatio?: number | null; combinedGoalCPO?: number | null; design: { missingRates: string[] }; preservation: { missingRates: string[] }; fulfillment: { missingRates: string[] } };
+  goalMetrics?: { combinedGoalRatio: number | null; combinedGoalCPO: number | null } | null;
   showCPO: boolean;
 }) {
   const allMissing = [...metrics.design.missingRates, ...metrics.preservation.missingRates, ...metrics.fulfillment.missingRates];
   const uniqueMissing = [...new Set(allMissing)];
+  const gRatio = goalMetrics?.combinedGoalRatio ?? metrics.combinedGoalRatio ?? null;
+  const gCPO   = goalMetrics?.combinedGoalCPO   ?? metrics.combinedGoalCPO   ?? null;
   return (
     <div className="flex flex-col gap-1 px-4 border-r border-slate-200 last:border-0">
       <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-      <div className="flex gap-4">
-        <MetricCell
-          label="Combined ratio"
-          value={metrics.combinedRatio !== null ? `${metrics.combinedRatio.toFixed(2)} h/ord` : null}
-        />
-        {showCPO && (
-          <MetricCell
-            label="Combined CPO"
-            value={metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : null}
-            warn={uniqueMissing.length > 0 && metrics.combinedCPO === null ? `Need rates: ${uniqueMissing.slice(0,2).join(', ')}${uniqueMissing.length > 2 ? ` +${uniqueMissing.length-2}` : ''}` : undefined}
-          />
-        )}
+      <div className="flex gap-3 flex-wrap">
+        <MetricCell label="Ratio" value={metrics.combinedRatio !== null ? `${metrics.combinedRatio.toFixed(2)}` : null} sub="actual" />
+        {gRatio !== null && <MetricCell label="Goal ratio" value={`${gRatio.toFixed(2)}`} sub="target" />}
+        {showCPO && <MetricCell label="CPO" value={metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : null} sub="actual"
+          warn={uniqueMissing.length > 0 && metrics.combinedCPO === null ? `Need rates: ${uniqueMissing.slice(0,2).join(', ')}` : undefined} />}
+        {showCPO && gCPO !== null && <MetricCell label="Goal CPO" value={fmt$(gCPO)} sub="target" />}
       </div>
     </div>
   );
@@ -2559,9 +2574,11 @@ function DeptKPIBar({ dept, location, metrics, showCPO }: {
   const tm = metrics.thisMonth[dept];
   const lm = metrics.lastMonth[dept];
   const lw = metrics.lastWeek[dept];
+  const tg = metrics.thisMonthGoal[dept];
+  const ng = metrics.nextMonthGoal[dept];
   return (
-    <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap">
-      <div className="pr-4 mr-4 border-r border-slate-200">
+    <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap gap-y-3">
+      <div className="pr-4 mr-2 border-r border-slate-200 shrink-0">
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{dept} · {location}</p>
         <p className="text-[10px] text-slate-400">Rolling KPIs</p>
       </div>
@@ -2572,17 +2589,30 @@ function DeptKPIBar({ dept, location, metrics, showCPO }: {
       ].map(({ label, d }) => (
         <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
           <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-          <div className="flex gap-4">
-            <MetricCell label="Ratio" value={d.ratio !== null ? `${d.ratio.toFixed(2)} h/ord` : null} />
-            {showCPO && <MetricCell
-              label="CPO"
-              value={d.cpo !== null ? fmt$(d.cpo) : null}
-              warn={d.cpo === null && d.missingRates.length > 0 ? `Need rates: ${d.missingRates.slice(0,2).join(', ')}` : undefined}
-            />}
+          <div className="flex gap-3">
+            <MetricCell label="Ratio" value={d.ratio !== null ? d.ratio.toFixed(2) : null} sub="actual" />
+            {d.goalRatio !== null && <MetricCell label="Goal" value={d.goalRatio.toFixed(2)} sub="target" />}
+            {showCPO && <MetricCell label="CPO" value={d.cpo !== null ? fmt$(d.cpo) : null} sub="actual"
+              warn={d.cpo === null && d.missingRates.length > 0 ? `Need rates: ${d.missingRates.slice(0,2).join(', ')}` : undefined} />}
+            {showCPO && d.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(d.goalCPO)} sub="target" />}
             <MetricCell label="Orders" value={d.orders > 0 ? String(d.orders) : null} />
           </div>
         </div>
       ))}
+      <div className="flex flex-col gap-0.5 px-4 border-r border-slate-100">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-green-500">This month goal</span>
+        <div className="flex gap-3">
+          {tg.goalRatio !== null && <MetricCell label="Goal ratio" value={tg.goalRatio.toFixed(2)} />}
+          {showCPO && tg.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(tg.goalCPO)} />}
+        </div>
+      </div>
+      <div className="flex flex-col gap-0.5 px-4">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-400">Next month goal</span>
+        <div className="flex gap-3">
+          {ng.goalRatio !== null && <MetricCell label="Goal ratio" value={ng.goalRatio.toFixed(2)} />}
+          {showCPO && ng.goalCPO !== null && <MetricCell label="Goal CPO" value={fmt$(ng.goalCPO)} />}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2679,14 +2709,34 @@ export function SchedulePage({
 
   // ── Historical metrics for KPI bars ─────────────────────────────────────────
   const historicalMetrics = useHistoricalMetrics(location, {
-    design: designers.map(d => ({ name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, isManager: (settings.designRoster[d.id] as {isManager?:boolean})?.isManager ?? (d as {isManager?:boolean}).isManager })),
+    design: designers.map(d => ({
+      name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary,
+      isManager: !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager),
+      role: ((settings.designRoster[d.id] as {role?:string})?.role ?? (d as {role?:string}).role ?? 'specialist') as 'specialist'|'senior'|'master',
+      scheduledHours: Array.from({ length: WEEKS }, (_, w) => schedule[w]?.[d.id] ?? 0),
+      mgrTotalHours: settings.mgrTotalHours[d.id],
+    })),
     preservation: (location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM).map(m => {
       const r = settings.presRoster[m.id];
-      return { name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const, hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0, isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager };
+      return {
+        name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
+        hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0,
+        isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
+        role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
+        scheduledHours: settings.presHours[m.id] ?? Array(WEEKS).fill(0),
+        mgrTotalHours: settings.mgrTotalHours[m.id],
+      };
     }),
     fulfillment: (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).map(m => {
       const r = settings.ffRoster[m.id];
-      return { name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const, hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0, isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager };
+      return {
+        name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
+        hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0,
+        isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
+        role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
+        scheduledHours: settings.ffHours[m.id] ?? Array(WEEKS).fill(0),
+        mgrTotalHours: settings.mgrTotalHours[m.id],
+      };
     }),
   });
   const hasAnyRates = [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
@@ -2942,14 +2992,16 @@ export function SchedulePage({
 
       {/* ── Company KPI bar ─────────────────────────────────────────────────── */}
       {!historicalMetrics.loading && (
-        <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap">
-          <div className="pr-4 mr-2 border-r border-slate-200">
+        <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap gap-y-3">
+          <div className="pr-4 mr-2 border-r border-slate-200 shrink-0">
             <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Company · {location}</p>
             <p className="text-[10px] text-slate-400">All departments combined</p>
           </div>
           <PeriodBlock label="This month" metrics={historicalMetrics.thisMonth} showCPO={hasAnyRates} />
           <PeriodBlock label="Last month" metrics={historicalMetrics.lastMonth} showCPO={hasAnyRates} />
           <PeriodBlock label="Last week"  metrics={historicalMetrics.lastWeek}  showCPO={hasAnyRates} />
+          <PeriodBlock label="This month goal" metrics={historicalMetrics.thisMonthGoal} goalMetrics={historicalMetrics.thisMonthGoal} showCPO={hasAnyRates} />
+          <PeriodBlock label="Next month goal" metrics={historicalMetrics.nextMonthGoal} goalMetrics={historicalMetrics.nextMonthGoal} showCPO={hasAnyRates} />
         </div>
       )}
 
