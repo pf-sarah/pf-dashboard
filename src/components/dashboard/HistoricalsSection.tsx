@@ -23,6 +23,7 @@ interface HistoricalsSectionProps {
   location: 'Utah' | 'Georgia';
   members: TeamMember[];
   ordersLabel: string;
+  onRatioUpdate?: (memberId: string, ratio: number) => void;
 }
 
 function fmt$(n: number): string {
@@ -63,7 +64,7 @@ function getAllWeeks(): string[] {
   return weeks;
 }
 
-export function HistoricalsSection({ department, location, members, ordersLabel }: HistoricalsSectionProps) {
+export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate }: HistoricalsSectionProps) {
   const [actuals, setActuals] = useState<ActualRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
@@ -78,11 +79,28 @@ export function HistoricalsSection({ department, location, members, ordersLabel 
     fetch(`/api/actuals?location=${location}&type=team&weeks=100`)
       .then(r => r.json())
       .then((d: { teamActuals?: ActualRow[] }) => {
-        setActuals(d.teamActuals ?? []);
+        const rows = d.teamActuals ?? [];
+        setActuals(rows);
+        // Auto-update roster ratios from last 4 weeks of actuals
+        if (onRatioUpdate) {
+          const today = new Date().toISOString().split('T')[0];
+          members.forEach(m => {
+            const last4 = rows
+              .filter(r => r.week_of < today && r.member_name === m.name)
+              .sort((a, b) => b.week_of.localeCompare(a.week_of))
+              .slice(0, 4);
+            const totalHours  = last4.reduce((s, r) => s + r.actual_hours,  0);
+            const totalOrders = last4.reduce((s, r) => s + r.actual_orders, 0);
+            if (totalOrders > 0 && totalHours > 0) {
+              const ratio = Math.round((totalHours / totalOrders) * 100) / 100;
+              onRatioUpdate(m.id, ratio);
+            }
+          });
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [location, department]);
+  }, [location, department, members, onRatioUpdate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setLoading(true);
