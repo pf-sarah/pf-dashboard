@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
   const type       = req.nextUrl.searchParams.get('type') ?? 'all';
   const weeks      = parseInt(req.nextUrl.searchParams.get('weeks') ?? '52');
   const since      = new Date();
-  since.setDate(since.getDate() - weeks * 7);
-  const sinceIso   = since.toISOString().split('T')[0];
+  since.setDate(since.getDate() - Math.max(weeks, 52) * 7);
+  // Always look back at least to start of 2026 data
+  const hardFloor  = '2025-12-28';
+  const sinceIso   = since.toISOString().split('T')[0] < hardFloor ? since.toISOString().split('T')[0] : hardFloor;
 
   try {
     const result: Record<string, unknown> = {};

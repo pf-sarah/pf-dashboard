@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { HistoricalsSection } from './HistoricalsSection';
 import { useScheduleSettings } from './useScheduleSettings';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -1864,14 +1865,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
       {/* ── HISTORICALS TAB ── */}
       {presTab === 'historicals' && (
-        <DeptHistoricalsTab
+        <HistoricalsSection
           department="preservation"
           location={location}
-          teamMembers={team.map(m => m.name)}
-          teamActuals={teamActuals}
-          onActualsSaved={onActualsSaved}
-          showReceivedField={true}
-          ordersLabel="bouquets preserved"
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0 }))}
+          ordersLabel="bouquets"
         />
       )}
     </div>
@@ -2100,14 +2098,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       )}
 
       {ffTab === 'historicals' && (
-        <DeptHistoricalsTab
+        <HistoricalsSection
           department="fulfillment"
           location={location}
-          teamMembers={team.map(m => m.name)}
-          teamActuals={teamActuals}
-          onActualsSaved={onActualsSaved}
-          showReceivedField={false}
-          ordersLabel="orders sealed"
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0 }))}
+          ordersLabel="orders"
         />
       )}
     </div>
@@ -3328,16 +3323,11 @@ export function SchedulePage({
 
           {/* ── HISTORICALS TAB ─────────────────────────────────────────────── */}
           {activeTab === 'historicals' && (
-            <HistoricalsTab
-              designers={designers}
+            <HistoricalsSection
+              department="design"
               location={location}
-              teamActuals={teamActuals}
-              onActualsSaved={() => {
-                fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
-                  .then(r => r.json())
-                  .then((d: { teamActuals?: typeof teamActuals }) => setTeamActuals(d.teamActuals ?? []))
-                  .catch(() => {});
-              }}
+              members={designers.map(d => ({ id: d.id, name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary }))}
+              ordersLabel="frames"
             />
           )}
 
