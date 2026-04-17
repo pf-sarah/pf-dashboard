@@ -175,13 +175,33 @@ function computeActualDeptMetrics(
   return { ratio, cpo, orders: totalOrders, hours: totalHours, cost: totalCost, missingRates, goalRatio, goalCPO };
 }
 
+// Compute each member's 4-week rolling ratio from actuals
+function getMemberRollingRatio(
+  rows: ActualRow[],
+  dept: string,
+  memberName: string,
+  asOfDate: string
+): number | null {
+  // Get last 4 weeks before asOfDate
+  const memberRows = rows
+    .filter(r => r.department === dept && r.member_name === memberName && r.week_of < asOfDate)
+    .sort((a, b) => b.week_of.localeCompare(a.week_of))
+    .slice(0, 4);
+  if (memberRows.length === 0) return null;
+  const totalHours  = memberRows.reduce((s, r) => s + r.actual_hours,  0);
+  const totalOrders = memberRows.reduce((s, r) => s + r.actual_orders, 0);
+  if (totalOrders === 0) return null;
+  return totalHours / totalOrders;
+}
+
 function computeScheduledDeptGoal(
   dept: string,
   weekStart: string,
   weekEnd: string,
-  roster: RosterMember[]
+  roster: RosterMember[],
+  rows: ActualRow[]
 ): DeptMetrics {
-  // Pure forward-looking goal based on scheduled hours and role ratios
+  // Forward-looking goal: use min(4-week rolling ratio, role expectation)
   const roleRatios = ROLE_RATIOS[dept] ?? {};
   const weeksInRange = getWeeksInRange(weekStart, weekEnd);
   let goalNumerator = 0, goalDenominator = 0;
@@ -189,7 +209,10 @@ function computeScheduledDeptGoal(
   const missingRates: string[] = [];
 
   roster.filter(m => !m.isManager).forEach(m => {
-    const roleExpect = roleRatios[m.role ?? 'specialist'] ?? 999;
+    const roleExpect   = roleRatios[m.role ?? 'specialist'] ?? 999;
+    const rollingRatio = getMemberRollingRatio(rows, dept, m.name, weekStart);
+    // Use whichever is lower: their current 4-week ratio or their role expectation
+    const goalRatio    = rollingRatio !== null ? Math.min(rollingRatio, roleExpect) : roleExpect;
     let scheduledH = 0;
     weeksInRange.forEach(w => {
       const idx = getWeekIndex(w);
@@ -197,9 +220,9 @@ function computeScheduledDeptGoal(
     });
     if (scheduledH === 0) return;
     goalTotalHours += scheduledH;
-    goalNumerator   += roleExpect * scheduledH;
+    goalNumerator   += goalRatio * scheduledH;
     goalDenominator += scheduledH;
-    const expectedOrders = roleExpect > 0 ? scheduledH / roleExpect : 0;
+    const expectedOrders = goalRatio > 0 ? scheduledH / goalRatio : 0;
     goalTotalOrders += expectedOrders;
     const cost = m.payType === 'salary'
       ? (m.annualSalary / 52) * weeksInRange.length
@@ -212,10 +235,11 @@ function computeScheduledDeptGoal(
       const idx = getWeekIndex(w);
       return s + (m.mgrTotalHours?.[idx] ?? m.scheduledHours?.[idx] ?? 0);
     }, 0);
-    // Manager contributes production too
-    const roleExpect = roleRatios['master'] ?? roleRatios[m.role ?? 'master'] ?? 999;
+    const roleExpect   = roleRatios['master'] ?? 999;
+    const rollingRatio = getMemberRollingRatio(rows, dept, m.name, weekStart);
+    const goalRatio    = rollingRatio !== null ? Math.min(rollingRatio, roleExpect) : roleExpect;
     const prodH = weeksInRange.reduce((s, w) => s + (m.scheduledHours?.[getWeekIndex(w)] ?? 0), 0);
-    goalTotalOrders += roleExpect > 0 ? prodH / roleExpect : 0;
+    goalTotalOrders += goalRatio > 0 ? prodH / goalRatio : 0;
     const cost = m.payType === 'salary'
       ? (m.annualSalary / 52) * weeksInRange.length
       : totalH * m.hourlyRate;
@@ -255,11 +279,12 @@ function buildPeriod(
 function buildGoalPeriod(
   weekStart: string,
   weekEnd: string,
-  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] }
+  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] },
+  rows: ActualRow[]
 ): PeriodMetrics {
-  const design       = computeScheduledDeptGoal('design',       weekStart, weekEnd, rosters.design);
-  const preservation = computeScheduledDeptGoal('preservation', weekStart, weekEnd, rosters.preservation);
-  const fulfillment  = computeScheduledDeptGoal('fulfillment',  weekStart, weekEnd, rosters.fulfillment);
+  const design       = computeScheduledDeptGoal('design',       weekStart, weekEnd, rosters.design,       rows);
+  const preservation = computeScheduledDeptGoal('preservation', weekStart, weekEnd, rosters.preservation, rows);
+  const fulfillment  = computeScheduledDeptGoal('fulfillment',  weekStart, weekEnd, rosters.fulfillment,  rows);
 
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
@@ -299,8 +324,8 @@ export function useHistoricalMetrics(
       thisMonth:     buildPeriod(rows, thisMonth.start,  thisMonth.end,  rosters),
       lastMonth:     buildPeriod(rows, lastMonth.start,  lastMonth.end,  rosters),
       lastWeek:      buildPeriod(rows, lastWeekStart,    lastWeekEnd,    rosters),
-      thisMonthGoal: buildGoalPeriod(thisMonth.start, thisMonth.end, rosters),
-      nextMonthGoal: buildGoalPeriod(nextMonth.start, nextMonth.end, rosters),
+      thisMonthGoal: buildGoalPeriod(thisMonth.start, thisMonth.end, rosters, rows),
+      nextMonthGoal: buildGoalPeriod(nextMonth.start, nextMonth.end, rosters, rows),
       loading,
     };
   }, [rows, loading, rosters]); // eslint-disable-line react-hooks/exhaustive-deps
