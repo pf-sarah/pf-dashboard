@@ -1160,7 +1160,7 @@ function useDraggableOrder<T extends { id: string }>(
 }
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
-function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder }: {
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio }: {
   team: PresTeamMember[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
@@ -1231,13 +1231,14 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 }
 
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
-function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder }: {
+function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio }: {
   team: FfTeamMember[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   onUpdateName: (id: string, name: string) => void;
   onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
+  onRefreshRatio: (id: string, name: string) => void;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
