@@ -10,6 +10,7 @@ export interface RosterMember {
   isManager?: boolean;
   role?: 'specialist' | 'senior' | 'master';
   scheduledHours?: number[]; // 52 weeks of scheduled hours
+  ratio?: number;
   mgrTotalHours?: number[];  // 52 weeks of total hours (managers only)
 }
 
