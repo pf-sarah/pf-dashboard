@@ -185,12 +185,33 @@ function turnaroundColors(totalWeeks: number | null, overstaffed: boolean) {
 
 // ─── RosterEditor ──────────────────────────────────────────────────────────────
 
-function RosterEditor({ designers, onChange, onAdd, onRemove }: {
+function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, location }: {
   designers: Designer[];
   onChange:  (id: string, field: keyof Designer, value: string) => void;
   onAdd:     () => void;
   onRemove:  (id: string) => void;
+  onReorder?: (newOrder: string[]) => void;
+  location?: string;
 }) {
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+
+  async function refreshRatio(d: Designer) {
+    setRefreshingId(d.id);
+    try {
+      const res = await fetch(`/api/actuals?location=${location ?? 'Utah'}&type=team&weeks=100`);
+      const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
+      const rows = (data.teamActuals ?? [])
+        .filter(r => r.department === 'design' && r.member_name === d.name)
+        .sort((a, b) => b.week_of.localeCompare(a.week_of))
+        .slice(0, 4);
+      const totalHours  = rows.reduce((s, r) => s + r.actual_hours,  0);
+      const totalOrders = rows.reduce((s, r) => s + r.actual_orders, 0);
+      if (totalOrders > 0 && totalHours > 0) {
+        onChange(d.id, 'ratio', (Math.round(totalHours / totalOrders * 100) / 100).toString());
+      }
+    } catch {}
+    setRefreshingId(null);
+  }
   return (
     <div>
       <div className="grid grid-cols-[1fr_80px_80px_80px_110px_130px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
