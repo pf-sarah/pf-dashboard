@@ -2739,7 +2739,7 @@ export function SchedulePage({
   // ── Historical metrics for KPI bars ─────────────────────────────────────────
   const historicalMetrics = useHistoricalMetrics(location, {
     design: designers.map(d => ({
-      name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary,
+      name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, ratio: d.ratio,
       isManager: !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager),
       role: ((settings.designRoster[d.id] as {role?:string})?.role ?? (d as {role?:string}).role ?? 'specialist') as 'specialist'|'senior'|'master',
       scheduledHours: Array.from({ length: WEEKS }, (_, w) => schedule[w]?.[d.id] ?? 0),
@@ -2749,7 +2749,7 @@ export function SchedulePage({
       const r = settings.presRoster[m.id];
       return {
         name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
-        hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0,
+        hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
         isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
         role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
         scheduledHours: settings.presHours[m.id] ?? Array(WEEKS).fill(0),
@@ -2760,7 +2760,7 @@ export function SchedulePage({
       const r = settings.ffRoster[m.id];
       return {
         name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
-        hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0,
+        hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
         isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
         role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
         scheduledHours: settings.ffHours[m.id] ?? Array(WEEKS).fill(0),
