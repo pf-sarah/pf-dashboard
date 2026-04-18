@@ -193,8 +193,9 @@ function RosterEditor({ designers, onChange, onAdd, onRemove }: {
 }) {
   return (
     <div>
-      <div className="grid grid-cols-[1fr_80px_80px_110px_130px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+      <div className="grid grid-cols-[1fr_80px_80px_80px_110px_130px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
         <span>Name</span>
+        <span className="text-center">Role</span>
         <span className="text-center">Pay type</span>
         <span className="text-center">Ratio</span>
         <span className="text-center">Hourly rate</span>
@@ -203,9 +204,15 @@ function RosterEditor({ designers, onChange, onAdd, onRemove }: {
       </div>
       <div className="space-y-2">
         {designers.map(d => (
-          <div key={d.id} className="grid grid-cols-[1fr_80px_80px_110px_130px_20px] gap-2 items-center">
+          <div key={d.id} className="grid grid-cols-[1fr_80px_80px_80px_110px_130px_20px] gap-2 items-center">
             <input type="text" value={d.name} onChange={e => onChange(d.id, 'name', e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
+              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="specialist">Specialist</option>
+              <option value="senior">Senior</option>
+              <option value="master">Master</option>
+            </select>
             <select value={d.payType} onChange={e => onChange(d.id, 'payType', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="hourly">Hourly</option>
