@@ -218,9 +218,16 @@ function RosterEditor({ designers, onChange, onAdd, onRemove }: {
               <option value="hourly">Hourly</option>
               <option value="salary">Salary</option>
             </select>
-            <input type="number" value={d.ratio} step="0.1" min="0.1"
-              onChange={e => onChange(d.id, 'ratio', e.target.value)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <div className="flex items-center gap-1">
+              <input type="number" value={d.ratio} step="0.1" min="0.1"
+                onChange={e => onChange(d.id, 'ratio', e.target.value)}
+                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+              <button onClick={() => refreshRatio(d)} title="Update ratio from last 4 weeks of historicals"
+                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
+                disabled={refreshingId === d.id}>
+                {refreshingId === d.id ? '…' : '↻'}
+              </button>
+            </div>
             <div className="relative">
               <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
               <input type="number" value={d.hourlyRate || ''} step="0.50" min="0" placeholder="0"
@@ -1138,6 +1145,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
+  onRefreshRatio: (id: string, name: string) => void;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1166,9 +1174,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
               <option value="senior">Senior</option>
               <option value="master">Master</option>
             </select>
-            <input type="number" value={m.ratio} step="0.05" min="0.05"
-              onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <div className="flex items-center gap-1">
+              <input type="number" value={m.ratio} step="0.05" min="0.05"
+                onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
+                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
+            </div>
             <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(m.id, 'payType', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="hourly">Hourly</option>
@@ -1233,9 +1245,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               <option value="senior">Senior</option>
               <option value="master">Master</option>
             </select>
-            <input type="number" value={m.ratio} step="0.05" min="0.05"
-              onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <div className="flex items-center gap-1">
+              <input type="number" value={m.ratio} step="0.05" min="0.05"
+                onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
+                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
+            </div>
             <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(mi, 'payType', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="hourly">Hourly</option>
@@ -1639,6 +1655,16 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   presRoster={presRoster}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveMember}
+                  onRefreshRatio={async (id, name) => {
+                    try {
+                      const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
+                      const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
+                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'preservation' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 4);
+                      const h = rows.reduce((s, r) => s + r.actual_hours, 0);
+                      const o = rows.reduce((s, r) => s + r.actual_orders, 0);
+                      if (o > 0 && h > 0) updateRoster(id, 'ratio', Math.round(h / o * 100) / 100);
+                    } catch {}
+                  }}
                   onReorder={(newOrder) => {
                     const newRoster = { ...presRoster };
                     newOrder.forEach((id, i) => {
@@ -1920,10 +1946,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           location={location}
           members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="bouquets"
-          onRatioUpdate={(id, ratio) => {
-            const existing = presRoster[id];
-            onPresRosterChange({ ...presRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
-          }}
+
         />
       )}
     </div>
@@ -2061,6 +2084,16 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   onUpdateName={updateFfRosterName}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveFfMember}
+                  onRefreshRatio={async (id, name) => {
+                    try {
+                      const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
+                      const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
+                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'fulfillment' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 4);
+                      const h = rows.reduce((s, r) => s + r.actual_hours, 0);
+                      const o = rows.reduce((s, r) => s + r.actual_orders, 0);
+                      if (o > 0 && h > 0) updateRoster(team.findIndex(m => m.id === id), 'ratio', Math.round(h / o * 100) / 100);
+                    } catch {}
+                  }}
                   onReorder={(newOrder) => {
                     const newRoster = { ...ffRoster };
                     newOrder.forEach((id, i) => {
@@ -2176,10 +2209,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           location={location}
           members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager }))}
           ordersLabel="orders"
-          onRatioUpdate={(id, ratio) => {
-            const existing = ffRoster[id];
-            onFfRosterChange({ ...ffRoster, [id]: { ...(existing ?? { ratio, rate: 0, name: '' }), ratio } });
-          }}
+
         />
       )}
     </div>
