@@ -832,10 +832,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
   presRoster:            Record<string, { ratio: number; rate: number; name: string }>;
-  presSettings:          { dayPcts: number[]; utPct: number; gaPct: number; unkPct: number; dateFrom?: string; dateTo?: string };
+  presSettings:          { dayPcts?: number[]; utPct?: number; gaPct?: number; unkPct?: number; dateFrom?: string; dateTo?: string };
   onPresHoursChange:     (h: Record<string, number[]>) => void;
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string }>) => void;
-  onPresSettingsChange:  (s: { dayPcts: number[]; utPct: number; gaPct: number; unkPct: number; dateFrom?: string; dateTo?: string }) => void;
+  onPresSettingsChange:  (s: { dayPcts?: number[]; utPct?: number; gaPct?: number; unkPct?: number; dateFrom?: string; dateTo?: string }) => void;
 }) {
   const today    = new Date();
   const monday   = new Date(today);

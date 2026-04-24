@@ -14,6 +14,10 @@ export interface DesignerRoster {
 export interface PresSettings {
   dateFrom?: string;
   dateTo?:   string;
+  dayPcts?:  number[];
+  utPct?:    number;
+  gaPct?:    number;
+  unkPct?:   number;
   // Per-week manual overrides: weekOf ISO → { ut, ga }
   weekOverrides?: Record<string, { ut: number; ga: number }>;
 }
