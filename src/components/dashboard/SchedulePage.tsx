@@ -1540,7 +1540,39 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   return (
     <div className="space-y-4">
 
-      {/* Tabs: Schedule | Historicals */}
+      {/* Date range picker */}
+      <div className="bg-white border border-slate-100 rounded-xl p-4">
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <span className="text-xs font-medium text-slate-500">Event date range</span>
+          {(['thisweek','nextweek','next2','thismonth'] as const).map((m, i) => (
+            <button key={m} onClick={() => setQuick(m)}
+              className="text-xs px-3 py-1 border border-slate-200 rounded-full text-slate-600 hover:bg-slate-50 transition-colors">
+              {['This week','Next week','Next 2 wks','This month'][i]}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+          <span className="text-xs text-slate-400">to</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+          <button onClick={() => loadRange(dateFrom, dateTo)} disabled={shopifyLoading}
+            className="px-4 py-1.5 text-xs font-medium bg-rose-700 text-white rounded hover:bg-rose-800 disabled:opacity-50 transition-colors">
+            {shopifyLoading ? 'Loading…' : 'Load'}
+          </button>
+          {shopifyError && <span className="text-xs text-red-500">{shopifyError}</span>}
+        </div>
+        {shopifyTotal > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex gap-6 flex-wrap">
+            <div><p className="text-xs text-slate-400">Total</p><p className="text-lg font-semibold text-slate-700">{shopifyTotal}</p></div>
+            <div><p className="text-xs text-slate-400">Utah (no ga tag)</p><p className="text-lg font-semibold text-indigo-700">{Object.values(shopifyByDate).reduce((s,d)=>s+d.utahCount,0)}</p></div>
+            <div><p className="text-xs text-slate-400">Georgia (ga tag)</p><p className="text-lg font-semibold text-indigo-700">{Object.values(shopifyByDate).reduce((s,d)=>s+d.gaCount,0)}</p></div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs: This Week | Schedule | Historicals */}
       <div className="flex border-b border-slate-200">
         {(['thisweek', 'schedule', 'historicals'] as const).map(t => (
           <button key={t} onClick={() => setPresTab(t)}
@@ -1670,38 +1702,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                 {shopifyTotal > 0 && <span className="text-[10px] bg-rose-100 text-rose-600 rounded px-1.5 py-0.5">live</span>}
               </div>
             </div>
-          </div>
-
-          {/* Date range picker */}
-          <div className="bg-white border border-slate-100 rounded-xl p-4">
-            <div className="flex items-center gap-2 flex-wrap mb-3">
-              <span className="text-xs font-medium text-slate-500">Event date range</span>
-              {(['thisweek','nextweek','next2','thismonth'] as const).map((m, i) => (
-                <button key={m} onClick={() => setQuick(m)}
-                  className="text-xs px-3 py-1 border border-slate-200 rounded-full text-slate-600 hover:bg-slate-50 transition-colors">
-                  {['This week','Next week','Next 2 wks','This month'][i]}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <span className="text-xs text-slate-400">to</span>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => loadRange(dateFrom, dateTo)} disabled={shopifyLoading}
-                className="px-4 py-1.5 text-xs font-medium bg-rose-700 text-white rounded hover:bg-rose-800 disabled:opacity-50 transition-colors">
-                {shopifyLoading ? 'Loading…' : 'Load'}
-              </button>
-              {shopifyError && <span className="text-xs text-red-500">{shopifyError}</span>}
-            </div>
-            {shopifyTotal > 0 && (
-              <div className="mt-3 pt-3 border-t border-slate-100 flex gap-6 flex-wrap">
-                <div><p className="text-xs text-slate-400">Total</p><p className="text-lg font-semibold text-slate-700">{shopifyTotal}</p></div>
-                <div><p className="text-xs text-slate-400">Utah (no ga tag)</p><p className="text-lg font-semibold text-indigo-700">{Object.values(shopifyByDate).reduce((s,d)=>s+d.utahCount,0)}</p></div>
-                <div><p className="text-xs text-slate-400">Georgia (ga tag)</p><p className="text-lg font-semibold text-indigo-700">{Object.values(shopifyByDate).reduce((s,d)=>s+d.gaCount,0)}</p></div>
-              </div>
-            )}
           </div>
 
           {/* Day % distribution + 5-day editable grid */}
