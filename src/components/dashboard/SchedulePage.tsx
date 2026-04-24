@@ -894,19 +894,19 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const locPct   = location === 'Utah' ? utPct : gaPct;
   const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
 
-  // Build next 5 weekdays (Mon-Fri only)
+  // Build Mon–Fri of the current week (always fixed to this week's Monday)
   const fiveDays = (() => {
     const days = [];
-    const d = new Date();
-    while (days.length < 5) {
-      const dow = d.getDay();
-      if (dow !== 0 && dow !== 6) {
-        const iso = d.toISOString().split('T')[0];
-        const dayIdx = dow - 1; // Mon=0..Fri=4
-        const est = Math.round(eventTotal * (locPct / 100) * ((dayPcts[dayIdx] ?? 0) / 100));
-        days.push({ iso, est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
-      }
-      d.setDate(d.getDate() + 1);
+    const mon = new Date();
+    const dow = mon.getDay();
+    mon.setDate(mon.getDate() - (dow === 0 ? 6 : dow - 1));
+    mon.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(mon);
+      d.setDate(mon.getDate() + i);
+      const dayIdx = i; // Mon=0..Fri=4
+      const est = Math.round(eventTotal * (locPct / 100) * ((dayPcts[dayIdx] ?? 0) / 100));
+      days.push({ iso: d.toISOString().split('T')[0], est, label: d.toLocaleDateString('en-US', { weekday: 'short' }), dateStr: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
     }
     return days;
   })();
@@ -1256,15 +1256,21 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           const prev = ffDailyHours[id] ?? Array(5).fill(0);
           setFfDailyHours({ ...ffDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) });
         }
+        function ffDailyCost(m: FfTeamMember, di: number) { return getFFH(m.id, di) * m.rate; }
         const teamDailyOrders = (di: number) => team.reduce((s, m) => {
           const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0);
         }, 0);
+        const teamDailyCost = (di: number) => team.reduce((s, m) => s + ffDailyCost(m, di), 0);
         const teamWeekOrders = days.reduce((s, _, di) => s + teamDailyOrders(di), 0);
+        const ffHasRates = team.some(m => m.rate > 0);
         return (
           <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — this week</h3>
-              <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Orders calculated from each member&apos;s ratio.</p>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — this week</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Orders calculated from each member&apos;s ratio.</p>
+              </div>
+              {ffHasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
@@ -1285,6 +1291,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0);
                     }, 0);
                     const weekHrs = days.reduce((s, _, di) => s + getFFH(m.id, di), 0);
+                    const weekCost = days.reduce((s, _, di) => s + ffDailyCost(m, di), 0);
+                    const weekCPO = weekOrders > 0 && weekCost > 0 ? weekCost / weekOrders : null;
                     return (
                       <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                         <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
@@ -1294,29 +1302,39 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         {days.map((_, dayIdx) => {
                           const h = getFFH(m.id, dayIdx);
                           const orders = m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0;
+                          const cost = ffDailyCost(m, dayIdx);
+                          const cpo = orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-amber-50/30' : ''}`}>
                               <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                 onChange={e => setFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                               {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                              {ffHasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
                         })}
                         <td className="px-3 py-2 text-center">
                           <div className="font-medium text-amber-700">{weekOrders} ord</div>
                           <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
+                          {ffHasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                         </td>
                       </tr>
                     );
                   })}
                   <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Daily total</td>
-                    {days.map((_, di) => (
-                      <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
-                        <div className="text-amber-700">{teamDailyOrders(di)} ord</div>
-                      </td>
-                    ))}
+                    {days.map((_, di) => {
+                      const o = teamDailyOrders(di);
+                      const c = teamDailyCost(di);
+                      const cpo = o > 0 && c > 0 ? c / o : null;
+                      return (
+                        <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
+                          <div className="text-amber-700">{o} ord</div>
+                          {ffHasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
+                        </td>
+                      );
+                    })}
                     <td className="px-3 py-2 text-center font-semibold text-amber-700">{teamWeekOrders} ord</td>
                   </tr>
                 </tbody>
@@ -2304,15 +2322,23 @@ export function SchedulePage({
               const prev = designDailyHours[id] ?? Array(5).fill(0);
               setDesignDailyHours({ ...designDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) });
             }
+            function dDailyCost(d: Designer, di: number) {
+              const h = getDH(d.id, di);
+              return d.payType === 'salary' ? d.annualSalary / 260 : h * d.hourlyRate;
+            }
             const teamDailyFrames = (di: number) => designers.reduce((s, d) => {
               const h = getDH(d.id, di); return s + (d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0);
             }, 0);
+            const teamDailyCost = (di: number) => designers.reduce((s, d) => s + dDailyCost(d, di), 0);
             const teamWeekFrames = days.reduce((s, _, di) => s + teamDailyFrames(di), 0);
             return (
               <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100">
-                  <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — this week</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Frames calculated from each designer&apos;s ratio.</p>
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — this week</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Frames calculated from each designer&apos;s ratio.</p>
+                  </div>
+                  {hasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs">
@@ -2333,6 +2359,8 @@ export function SchedulePage({
                           const h = getDH(d.id, dayIdx); return s + (d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0);
                         }, 0);
                         const weekHrs = days.reduce((s, _, dayIdx) => s + getDH(d.id, dayIdx), 0);
+                        const weekCost = days.reduce((s, _, dayIdx) => s + dDailyCost(d, dayIdx), 0);
+                        const weekCPO = weekFrames > 0 && weekCost > 0 ? weekCost / weekFrames : null;
                         return (
                           <tr key={d.id} className={`border-b border-slate-50 ${di % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                             <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
@@ -2343,29 +2371,39 @@ export function SchedulePage({
                             {days.map((_, dayIdx) => {
                               const h = getDH(d.id, dayIdx);
                               const frames = d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0;
+                              const cost = dDailyCost(d, dayIdx);
+                              const cpo = frames > 0 && cost > 0 ? cost / frames : null;
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
                                   <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                     onChange={e => setDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
                                     className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                                   {frames > 0 && <div className="text-slate-400 mt-0.5">{frames}f</div>}
+                                  {hasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                                 </td>
                               );
                             })}
                             <td className="px-3 py-2 text-center">
                               <div className="font-medium text-indigo-700">{weekFrames}f</div>
                               <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
+                              {hasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                             </td>
                           </tr>
                         );
                       })}
                       <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                         <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Daily total</td>
-                        {days.map((_, di) => (
-                          <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
-                            <div className="text-indigo-700">{teamDailyFrames(di)}f</div>
-                          </td>
-                        ))}
+                        {days.map((_, di) => {
+                          const f = teamDailyFrames(di);
+                          const c = teamDailyCost(di);
+                          const cpo = f > 0 && c > 0 ? c / f : null;
+                          return (
+                            <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
+                              <div className="text-indigo-700">{f}f</div>
+                              {hasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}</div>}
+                            </td>
+                          );
+                        })}
                         <td className="px-3 py-2 text-center font-semibold text-indigo-700">{teamWeekFrames}f</td>
                       </tr>
                     </tbody>
