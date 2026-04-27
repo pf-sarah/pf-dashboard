@@ -65,8 +65,9 @@ export async function POST(req: NextRequest) {
       if (!r.employee || r.employee === 'All') continue;
       if (!r.department || r.department === 'All') continue;
       if (!r.location || r.location === 'All') continue;
-      if (!r.periodStart || !r.periodEnd) continue;
       if (r.grossPay <= 0) continue;
+      // Skip rows with no date info at all
+      if (!r.periodStart && !r.periodEnd && !r.checkDateWeek) continue;
 
       const dept = normalizeDept(r.department);
       const loc  = normalizeLocation(r.location);

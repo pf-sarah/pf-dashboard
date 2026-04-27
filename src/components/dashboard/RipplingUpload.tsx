@@ -112,6 +112,21 @@ function parsePayrollXLSX(file: File): Promise<PayrollRow[]> {
             checkDateWeek: String(r['Pay run check date (Year and Week)'] ?? ''),
             payRunStatus:  String(r['Pay run status'] ?? ''),
           }))
+          .map(r => {
+            // Some rows have no start/end date (e.g. bonus-only rows)
+            // Infer a 2-week period from the check date week string if available
+            if (!r.periodStart && r.checkDateWeek) {
+              // checkDateWeek looks like "Jan 26 2026 - Feb 01 2026"
+              // Use it as both start and end as a fallback
+              const parts = r.checkDateWeek.split(' - ');
+              if (parts.length === 2) {
+                const tryParse = (s: string) => { const d = new Date(s); return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0]; };
+                r.periodStart = tryParse(parts[0]) || r.periodStart;
+                r.periodEnd   = tryParse(parts[1]) || r.periodEnd;
+              }
+            }
+            return r;
+          })
           .filter(r => r.grossPay > 0 && r.periodStart && r.periodEnd);
         resolve(parsed);
       } catch (err) { reject(err); }
