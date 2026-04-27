@@ -16,6 +16,8 @@ interface ActualRow {
   member_name: string;
   actual_hours: number;
   actual_orders: number;
+  department: string;
+  hours_source?: string;
 }
 
 interface HistoricalsSectionProps {
@@ -110,7 +112,7 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
 
   function getEntry(weekOf: string, name: string): { hours: number; orders: number } {
     if (localEdits[weekOf]?.[name]) return localEdits[weekOf][name];
-    const match = actuals.find(r => r.week_of === weekOf && r.member_name === name);
+    const match = actuals.find(r => r.week_of === weekOf && r.member_name === name && r.department === department);
     return { hours: match?.actual_hours ?? 0, orders: match?.actual_orders ?? 0 };
   }
 
