@@ -325,7 +325,7 @@ async function fetchPayrollForPeriod(
   to: string
 ): Promise<PayrollMap> {
   try {
-    const res = await fetch(`/api/admin/rippling-upload?location=${location}&department=${department}&from=${from}&to=${to}`);
+    const res = await fetch(`/api/admin/payroll-upload?location=${location}&department=${department}&from=${from}&to=${to}`);
     if (!res.ok) return {};
     const data = await res.json() as { people?: RipplingPerson[] };
     const map: PayrollMap = {};
