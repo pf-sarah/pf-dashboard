@@ -22,6 +22,9 @@ interface ActualRow {
   actual_orders: number;
 }
 
+// Rippling payroll data: personName → total gross pay for the period
+export type PayrollMap = Record<string, number>;
+
 export interface DeptMetrics {
   ratio: number | null;
   cpo: number | null;
@@ -31,6 +34,9 @@ export interface DeptMetrics {
   missingRates: string[];
   goalRatio: number | null;
   goalCPO: number | null;
+  // New: which people had actual Rippling data vs estimated
+  actualPayroll: string[];   // names with real payroll data
+  estimatedPayroll: string[]; // names using rate estimate
 }
 
 export interface PeriodMetrics {
@@ -41,14 +47,18 @@ export interface PeriodMetrics {
   combinedCPO:   number | null;
   combinedGoalRatio: number | null;
   combinedGoalCPO:   number | null;
+  // True if ALL cost data came from Rippling (no estimates)
+  allActual: boolean;
+  // True if ANY cost data came from Rippling
+  anyActual: boolean;
 }
 
 export interface HistoricalMetrics {
   thisMonth:      PeriodMetrics;
   lastMonth:      PeriodMetrics;
   lastWeek:       PeriodMetrics;
-  thisMonthGoal:  PeriodMetrics; // based on scheduled hours this month
-  nextMonthGoal:  PeriodMetrics; // based on scheduled hours next month
+  thisMonthGoal:  PeriodMetrics;
+  nextMonthGoal:  PeriodMetrics;
   loading:        boolean;
 }
 
@@ -78,10 +88,8 @@ function getMonthBounds(offsetMonths: number): { start: string; end: string } {
   return { start: isoDate(first), end: isoDate(last) };
 }
 
-// Get all Monday ISO dates within a date range
 function getWeeksInRange(start: string, end: string): string[] {
   const weeks: string[] = [];
-  // Find first Monday >= start
   const startDate = new Date(start + 'T12:00:00');
   const dow = startDate.getDay();
   const diff = dow === 0 ? -6 : 1 - dow;
@@ -96,7 +104,6 @@ function getWeeksInRange(start: string, end: string): string[] {
   return weeks;
 }
 
-// Week index from the schedule start (2025-12-29 = week 0)
 function getWeekIndex(isoMonday: string): number {
   const start = new Date('2025-12-29T12:00:00');
   const d     = new Date(isoMonday + 'T12:00:00');
@@ -108,7 +115,8 @@ function computeActualDeptMetrics(
   dept: string,
   weekStart: string,
   weekEnd: string,
-  roster: RosterMember[]
+  roster: RosterMember[],
+  payroll: PayrollMap  // gross pay per person for this period from Rippling
 ): DeptMetrics {
   const deptRows = rows.filter(r =>
     r.department === dept && r.week_of >= weekStart && r.week_of <= weekEnd
@@ -122,26 +130,45 @@ function computeActualDeptMetrics(
 
   let totalOrders = 0, totalHours = 0, totalCost = 0;
   const missingRates: string[] = [];
+  const actualPayroll: string[] = [];
+  const estimatedPayroll: string[] = [];
   const weeksInPeriod = new Set(deptRows.map(r => r.week_of)).size || 1;
 
   roster.forEach(m => {
     const data = byMember[m.name] ?? { hours: 0, orders: 0 };
     totalOrders += data.orders;
     totalHours  += data.hours;
-    if (m.payType === 'salary') {
-      if (m.annualSalary > 0) totalCost += (m.annualSalary / 52) * weeksInPeriod;
-      else missingRates.push(m.name);
+
+    // Check if we have actual Rippling data for this person
+    const ripplingGross = payroll[m.name];
+    if (ripplingGross !== undefined && ripplingGross > 0) {
+      // Use actual gross pay from Rippling
+      totalCost += ripplingGross;
+      actualPayroll.push(m.name);
+    } else if (m.payType === 'salary') {
+      if (m.annualSalary > 0) {
+        totalCost += (m.annualSalary / 52) * weeksInPeriod;
+        estimatedPayroll.push(m.name);
+      } else {
+        missingRates.push(m.name);
+      }
     } else {
-      const totalH = m.isManager ? (data.hours + (m.mgrTotalHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0)) : data.hours;
-      if (m.hourlyRate > 0) totalCost += totalH * m.hourlyRate;
-      else if (data.hours > 0) missingRates.push(m.name);
+      const totalH = m.isManager
+        ? (data.hours + (m.mgrTotalHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0))
+        : data.hours;
+      if (m.hourlyRate > 0) {
+        totalCost += totalH * m.hourlyRate;
+        estimatedPayroll.push(m.name);
+      } else if (data.hours > 0) {
+        missingRates.push(m.name);
+      }
     }
   });
 
   const ratio = totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null;
   const cpo   = totalOrders > 0 && totalCost  > 0 ? totalCost  / totalOrders : null;
 
-  // Goal: weighted average of min(current ratio, role expectation) weighted by scheduled hours
+  // Goal calculation (unchanged)
   const roleRatios = ROLE_RATIOS[dept] ?? {};
   let goalNumerator = 0, goalDenominator = 0;
   let goalTotalOrders = 0, goalTotalCost = 0;
@@ -162,7 +189,6 @@ function computeActualDeptMetrics(
       goalTotalCost += cost;
     }
   });
-  // Add manager cost to goal CPO
   roster.filter(m => m.isManager).forEach(m => {
     const cost = m.payType === 'salary' ? (m.annualSalary / 52) * weeksInPeriod
       : ((m.mgrTotalHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0) +
@@ -173,7 +199,7 @@ function computeActualDeptMetrics(
   const goalRatio = goalDenominator > 0 ? goalNumerator / goalDenominator : null;
   const goalCPO   = goalTotalOrders > 0 && goalTotalCost > 0 ? goalTotalCost / goalTotalOrders : null;
 
-  return { ratio, cpo, orders: totalOrders, hours: totalHours, cost: totalCost, missingRates, goalRatio, goalCPO };
+  return { ratio, cpo, orders: totalOrders, hours: totalHours, cost: totalCost, missingRates, goalRatio, goalCPO, actualPayroll, estimatedPayroll };
 }
 
 function computeScheduledDeptGoal(
@@ -182,7 +208,6 @@ function computeScheduledDeptGoal(
   weekEnd: string,
   roster: RosterMember[]
 ): DeptMetrics {
-  // Forward-looking goal: use min(roster ratio, role expectation)
   const roleRatios = ROLE_RATIOS[dept] ?? {};
   const weeksInRange = getWeeksInRange(weekStart, weekEnd);
   let goalNumerator = 0, goalDenominator = 0;
@@ -191,7 +216,6 @@ function computeScheduledDeptGoal(
 
   roster.filter(m => !m.isManager).forEach(m => {
     const roleExpect = roleRatios[m.role ?? 'specialist'] ?? 999;
-    // Use whichever is lower: their roster ratio or their role expectation
     const goalRatio  = Math.min(m.ratio ?? roleExpect, roleExpect);
     let scheduledH = 0;
     weeksInRange.forEach(w => {
@@ -215,9 +239,9 @@ function computeScheduledDeptGoal(
       const idx = getWeekIndex(w);
       return s + (m.mgrTotalHours?.[idx] ?? m.scheduledHours?.[idx] ?? 0);
     }, 0);
-    const roleExpect = roleRatios['master'] ?? 999;
-    const goalRatio  = Math.min(m.ratio ?? roleExpect, roleExpect);
     const prodH = weeksInRange.reduce((s, w) => s + (m.scheduledHours?.[getWeekIndex(w)] ?? 0), 0);
+    const roleRatiosLocal = ROLE_RATIOS[dept] ?? {};
+    const goalRatio  = Math.min(m.ratio ?? (roleRatiosLocal['master'] ?? 999), roleRatiosLocal['master'] ?? 999);
     goalTotalOrders += goalRatio > 0 ? prodH / goalRatio : 0;
     const cost = m.payType === 'salary'
       ? (m.annualSalary / 52) * weeksInRange.length
@@ -228,23 +252,30 @@ function computeScheduledDeptGoal(
   const goalRatio = goalDenominator > 0 ? goalNumerator / goalDenominator : null;
   const goalCPO   = goalTotalOrders > 0 && goalTotalCost > 0 ? goalTotalCost / goalTotalOrders : null;
 
-  return { ratio: null, cpo: null, orders: 0, hours: goalTotalHours, cost: goalTotalCost, missingRates, goalRatio, goalCPO };
+  return { ratio: null, cpo: null, orders: 0, hours: goalTotalHours, cost: goalTotalCost, missingRates, goalRatio, goalCPO, actualPayroll: [], estimatedPayroll: [] };
 }
 
 function buildPeriod(
   rows: ActualRow[],
   weekStart: string,
   weekEnd: string,
-  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] }
+  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] },
+  payrollByDept: { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap }
 ): PeriodMetrics {
-  const design       = computeActualDeptMetrics(rows, 'design',       weekStart, weekEnd, rosters.design);
-  const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation);
-  const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment);
+  const design       = computeActualDeptMetrics(rows, 'design',       weekStart, weekEnd, rosters.design,       payrollByDept.design);
+  const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation, payrollByDept.preservation);
+  const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment,  payrollByDept.fulfillment);
 
   const ratios = [design.ratio, preservation.ratio, fulfillment.ratio].filter(r => r !== null) as number[];
   const cpos   = [design.cpo,   preservation.cpo,   fulfillment.cpo  ].filter(c => c !== null) as number[];
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
+
+  const allActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0
+    && [...design.estimatedPayroll, ...preservation.estimatedPayroll, ...fulfillment.estimatedPayroll].length === 0
+    && [...design.missingRates, ...preservation.missingRates, ...fulfillment.missingRates].length === 0;
+
+  const anyActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0;
 
   return {
     design, preservation, fulfillment,
@@ -252,6 +283,8 @@ function buildPeriod(
     combinedCPO:       cpos.length    > 0 ? cpos.reduce((a, b) => a + b, 0)    : null,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) : null,
     combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   : null,
+    allActual,
+    anyActual,
   };
 }
 
@@ -272,7 +305,32 @@ function buildGoalPeriod(
     combinedRatio: null, combinedCPO: null,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) : null,
     combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   : null,
+    allActual: false,
+    anyActual: false,
   };
+}
+
+interface RipplingPerson {
+  fullName: string;
+  totalGross: number;
+}
+
+async function fetchPayrollForPeriod(
+  location: string,
+  department: string,
+  from: string,
+  to: string
+): Promise<PayrollMap> {
+  try {
+    const res = await fetch(`/api/admin/rippling-upload?location=${location}&department=${department}&from=${from}&to=${to}`);
+    if (!res.ok) return {};
+    const data = await res.json() as { people?: RipplingPerson[] };
+    const map: PayrollMap = {};
+    (data.people ?? []).forEach(p => { map[p.fullName] = p.totalGross; });
+    return map;
+  } catch {
+    return {};
+  }
 }
 
 export function useHistoricalMetrics(
@@ -281,6 +339,17 @@ export function useHistoricalMetrics(
 ): HistoricalMetrics {
   const [rows,    setRows]    = useState<ActualRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Payroll maps per dept per period
+  const [payroll, setPayroll] = useState<{
+    thisMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
+    lastMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
+    lastWeek:   { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
+  }>({
+    thisMonth:  { design: {}, preservation: {}, fulfillment: {} },
+    lastMonth:  { design: {}, preservation: {}, fulfillment: {} },
+    lastWeek:   { design: {}, preservation: {}, fulfillment: {} },
+  });
 
   useEffect(() => {
     setLoading(true);
@@ -291,6 +360,35 @@ export function useHistoricalMetrics(
       .finally(() => setLoading(false));
   }, [location]);
 
+  // Fetch Rippling payroll data for all periods and depts
+  useEffect(() => {
+    const thisMonth = getMonthBounds(0);
+    const lastMonth = getMonthBounds(-1);
+    const lastWeekStart = isoDate(getMondayDate(-1));
+    const lastWeekEnd   = isoDate(new Date(new Date(lastWeekStart + 'T12:00:00').getTime() + 6 * 86400000));
+    const depts = ['Design', 'Preservation', 'Fulfillment'] as const;
+    const deptKeys = ['design', 'preservation', 'fulfillment'] as const;
+
+    Promise.all([
+      // thisMonth
+      ...depts.map((d, i) => fetchPayrollForPeriod(location, d, thisMonth.start, thisMonth.end).then(m => ({ period: 'thisMonth', dept: deptKeys[i], map: m }))),
+      // lastMonth
+      ...depts.map((d, i) => fetchPayrollForPeriod(location, d, lastMonth.start, lastMonth.end).then(m => ({ period: 'lastMonth', dept: deptKeys[i], map: m }))),
+      // lastWeek
+      ...depts.map((d, i) => fetchPayrollForPeriod(location, d, lastWeekStart, lastWeekEnd).then(m => ({ period: 'lastWeek', dept: deptKeys[i], map: m }))),
+    ]).then(results => {
+      const next = {
+        thisMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
+        lastMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
+        lastWeek:   { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
+      };
+      results.forEach(r => {
+        (next[r.period as keyof typeof next] as Record<string, PayrollMap>)[r.dept] = r.map;
+      });
+      setPayroll(next);
+    }).catch(() => {});
+  }, [location]);
+
   const metrics = useMemo(() => {
     const thisMonth  = getMonthBounds(0);
     const lastMonth  = getMonthBounds(-1);
@@ -299,14 +397,14 @@ export function useHistoricalMetrics(
     const nextMonth  = getMonthBounds(1);
 
     return {
-      thisMonth:     buildPeriod(rows, thisMonth.start,  thisMonth.end,  rosters),
-      lastMonth:     buildPeriod(rows, lastMonth.start,  lastMonth.end,  rosters),
-      lastWeek:      buildPeriod(rows, lastWeekStart,    lastWeekEnd,    rosters),
+      thisMonth:     buildPeriod(rows, thisMonth.start,  thisMonth.end,  rosters, payroll.thisMonth),
+      lastMonth:     buildPeriod(rows, lastMonth.start,  lastMonth.end,  rosters, payroll.lastMonth),
+      lastWeek:      buildPeriod(rows, lastWeekStart,    lastWeekEnd,    rosters, payroll.lastWeek),
       thisMonthGoal: buildGoalPeriod(thisMonth.start, thisMonth.end, rosters),
       nextMonthGoal: buildGoalPeriod(nextMonth.start, nextMonth.end, rosters),
       loading,
     };
-  }, [rows, loading, rosters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, loading, rosters, payroll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return metrics;
 }

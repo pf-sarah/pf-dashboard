@@ -2738,7 +2738,7 @@ function MetricCell({ label, value, sub, warn }: { label: string; value: string 
 
 function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
   label: string;
-  metrics: { combinedRatio: number | null; combinedCPO: number | null; combinedGoalRatio?: number | null; combinedGoalCPO?: number | null; design: { missingRates: string[] }; preservation: { missingRates: string[] }; fulfillment: { missingRates: string[] } };
+  metrics: { combinedRatio: number | null; combinedCPO: number | null; combinedGoalRatio?: number | null; combinedGoalCPO?: number | null; allActual?: boolean; anyActual?: boolean; design: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] }; preservation: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] }; fulfillment: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] } };
   goalMetrics?: { combinedGoalRatio: number | null; combinedGoalCPO: number | null } | null;
   showCPO: boolean;
 }) {
@@ -2763,6 +2763,9 @@ function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
           <div className="flex items-baseline gap-1.5">
             <span className="text-[10px] text-slate-400 uppercase tracking-wide w-8">CPO</span>
             <span className="text-sm font-semibold text-slate-800">{metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : '—'}</span>
+            {metrics.combinedCPO !== null && metrics.allActual && <span className="text-[9px] text-green-600 bg-green-50 rounded px-1 py-px">actual</span>}
+            {metrics.combinedCPO !== null && !metrics.allActual && metrics.anyActual && <span className="text-[9px] text-amber-600 bg-amber-50 rounded px-1 py-px">partial</span>}
+            {metrics.combinedCPO !== null && !metrics.anyActual && <span className="text-[9px] text-slate-400 bg-slate-100 rounded px-1 py-px">est.</span>}
             {gCPO !== null && <span className="text-[10px] text-slate-400">/ <span className="text-green-600 font-medium">{fmt$(gCPO)}</span> goal</span>}
             {uniqueMissing.length > 0 && metrics.combinedCPO === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
           </div>
