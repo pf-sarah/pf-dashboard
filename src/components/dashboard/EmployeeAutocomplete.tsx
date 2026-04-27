@@ -56,7 +56,7 @@ export function EmployeeAutocomplete({ value, location, department, onChange, on
       try {
         const params = new URLSearchParams({ search: val });
         if (location)   params.set('location', location);
-        if (department) params.set('department', department);
+        // Search across all departments so flex workers can be added anywhere
         const res  = await fetch(`/api/admin/employees-upload?${params}`);
         const data = await res.json() as { employees?: RipplingEmployee[] };
         setSuggestions(data.employees ?? []);
@@ -117,13 +117,13 @@ export function EmployeeAutocomplete({ value, location, department, onChange, on
             </button>
           ))}
           {suggestions.length === 0 && !loading && query.length >= 2 && (
-            <div className="px-3 py-2 text-xs text-slate-400">No matches in {department} · {location}</div>
+            <div className="px-3 py-2 text-xs text-slate-400">No matches in {location}</div>
           )}
         </div>
       )}
       {open && suggestions.length === 0 && !loading && query.length >= 2 && (
         <div className="absolute z-50 top-full left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs text-slate-400">
-          No matches in {department} · {location}
+          No matches in {location}
         </div>
       )}
     </div>
