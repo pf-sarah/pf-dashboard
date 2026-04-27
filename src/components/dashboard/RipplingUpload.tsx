@@ -181,7 +181,7 @@ function UploadCard({ type, title, description, frequency, accentColor }: Upload
         body: JSON.stringify({ [bodyKey]: preview }),
       });
       const data = await res.json() as Record<string, unknown>;
-      if (!res.ok || data.error) throw new Error(String(data.error ?? 'Upload failed'));
+      if (!res.ok || data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error) ?? 'Upload failed');
       setResult(data);
       setPreview(null);
       setStatus('done');
