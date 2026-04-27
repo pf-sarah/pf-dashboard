@@ -266,10 +266,13 @@ function buildPeriod(
   const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation, payrollByDept.preservation);
   const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment,  payrollByDept.fulfillment);
 
-  const ratios = [design.ratio, preservation.ratio, fulfillment.ratio].filter(r => r !== null) as number[];
-  const cpos   = [design.cpo,   preservation.cpo,   fulfillment.cpo  ].filter(c => c !== null) as number[];
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
+
+  // Combined: use total cost / total orders across all depts (not sum of CPOs)
+  const totalOrders = design.orders + preservation.orders + fulfillment.orders;
+  const totalCost   = design.cost   + preservation.cost   + fulfillment.cost;
+  const totalHours  = design.hours  + preservation.hours  + fulfillment.hours;
 
   const allActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0
     && [...design.estimatedPayroll, ...preservation.estimatedPayroll, ...fulfillment.estimatedPayroll].length === 0
@@ -279,10 +282,10 @@ function buildPeriod(
 
   return {
     design, preservation, fulfillment,
-    combinedRatio:     ratios.length  > 0 ? ratios.reduce((a, b) => a + b, 0)  : null,
-    combinedCPO:       cpos.length    > 0 ? cpos.reduce((a, b) => a + b, 0)    : null,
-    combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) : null,
-    combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   : null,
+    combinedRatio:     totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null,
+    combinedCPO:       totalOrders > 0 && totalCost  > 0 ? totalCost  / totalOrders : null,
+    combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) / gRatios.length : null,
+    combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   / gCpos.length   : null,
     allActual,
     anyActual,
   };
