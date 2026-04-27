@@ -44,7 +44,7 @@ function parseEmployeesXLSX(file: File): Promise<EmployeeRow[]> {
             employmentType: String(r['Employment type name'] ?? '').trim(),
           }));
         resolve(parsed);
-      } catch (err) { reject(err); }
+      } catch (err) { reject(new Error(err instanceof Error ? err.message : JSON.stringify(err))); }
     };
     reader.onerror = reject;
     reader.readAsArrayBuffer(file);
@@ -164,7 +164,7 @@ function UploadCard({ type, title, description, frequency, accentColor }: Upload
       if (type === 'payroll')   rows = await parsePayrollXLSX(file);
       setPreview(rows);
       setStatus('preview');
-    } catch (err) { setErrorMsg(`Parse failed: ${String(err)}`); setStatus('error'); }
+    } catch (err) { setErrorMsg(`Parse failed: ${err instanceof Error ? err.message : JSON.stringify(err)}`); setStatus('error'); }
   }
 
   async function handleUpload() {
