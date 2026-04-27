@@ -2865,7 +2865,7 @@ export function SchedulePage({
 }: SchedulePageProps) {
 
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
-  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master'>('design');
+  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll'>('design');
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
@@ -3237,6 +3237,7 @@ export function SchedulePage({
               ['preservation', 'Preservation'],
               ['fulfillment',  'Fulfillment'],
               ['master',       'Master Schedule'],
+              ['payroll',      'Payroll Upload'],
             ] as const).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
@@ -3890,6 +3891,18 @@ export function SchedulePage({
       )}
 
       {/* ── MASTER SCHEDULE ─────────────────────────────────────────────────── */}
+      {dept === 'payroll' && (
+        <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-700">Rippling Payroll Upload</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Upload the &quot;Payroll Cost by Location and Department&quot; report from Rippling every two weeks. Data is stored securely and used only for accurate CPO calculations — pay details are never shown to team members.</p>
+          </div>
+          <div className="p-5">
+            <RipplingUpload />
+          </div>
+        </div>
+      )}
+
       {dept === 'master' && (
         <MasterScheduleSection
           location={location}
