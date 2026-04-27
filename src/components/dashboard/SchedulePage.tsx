@@ -2768,12 +2768,6 @@ function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
           </div>
         )}
       </div>
-
-      {/* ── ADMIN: Payroll Upload ─────────────────────────────────────────── */}
-      <div className="mt-8 border-t border-slate-200 pt-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Admin — Payroll Data</p>
-        <RipplingUpload />
-      </div>
     </div>
   );
 }
