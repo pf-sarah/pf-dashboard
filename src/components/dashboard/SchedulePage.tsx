@@ -100,13 +100,13 @@ const GEORGIA_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
 
 const DEFAULT_UTAH_DESIGNERS: Designer[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true, role: 'master' as const },
-  { id: 'ut-1',   name: 'Deanna L Brown',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-1',   name: 'Deanna Haug',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-2',   name: 'Sarah Glissmeyer', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
-  { id: 'ut-3',   name: 'Kathryn Hill',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
-  { id: 'ut-4',   name: 'Mia Legas',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-3',   name: 'Kathryn Sonntag',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-4',   name: 'Mia Legas Boots',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-5',   name: 'Sloane James',     ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-6',   name: 'Audrey Brown',     ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
-  { id: 'ut-7',   name: 'Chloe Leonard',    ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
+  { id: 'ut-7',   name: 'Chloe Jensen',    ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
 ];
 
 const DEFAULT_GEORGIA_DESIGNERS: Designer[] = [
@@ -2398,13 +2398,13 @@ interface StaffMember {
 
 const UTAH_STAFF: StaffMember[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',       homeDept: 'design',       onCall: false },
-  { id: 'ut-1',   name: 'Deanna L Brown',         homeDept: 'design',       onCall: false },
+  { id: 'ut-1',   name: 'Deanna Haug',         homeDept: 'design',       onCall: false },
   { id: 'ut-2',   name: 'Sarah Glissmeyer',        homeDept: 'design',       onCall: false },
-  { id: 'ut-3',   name: 'Kathryn Hill',            homeDept: 'design',       onCall: false },
-  { id: 'ut-4',   name: 'Mia Legas',               homeDept: 'design',       onCall: false },
+  { id: 'ut-3',   name: 'Kathryn Sonntag',            homeDept: 'design',       onCall: false },
+  { id: 'ut-4',   name: 'Mia Legas Boots',               homeDept: 'design',       onCall: false },
   { id: 'ut-5',   name: 'Sloane James',            homeDept: 'design',       onCall: false },
   { id: 'ut-6',   name: 'Audrey Brown',            homeDept: 'design',       onCall: false },
-  { id: 'ut-7',   name: 'Chloe Leonard',           homeDept: 'design',       onCall: false },
+  { id: 'ut-7',   name: 'Chloe Jensen',           homeDept: 'design',       onCall: false },
   { id: 'ut-p1',  name: 'Katelyn Wilson',          homeDept: 'preservation', onCall: false },
   { id: 'ut-p2',  name: 'Emma Dunakey',            homeDept: 'preservation', onCall: true  },
   { id: 'ut-f1',  name: 'Izabella DePrima',        homeDept: 'fulfillment',  onCall: false },
