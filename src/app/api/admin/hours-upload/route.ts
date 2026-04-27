@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
           member_name:  rec.member_name,
           actual_hours: Math.round(rec.hours * 100) / 100,
           actual_orders: existing?.actual_orders ?? 0,
+          hours_source: 'upload',
           updated_at:   new Date().toISOString(),
         }, { onConflict: 'location,department,week_of,member_name' });
 
