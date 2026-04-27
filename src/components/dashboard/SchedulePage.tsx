@@ -1,5 +1,7 @@
 'use client';
 import { RipplingUpload } from './RipplingUpload';
+import { EmployeeAutocomplete } from './EmployeeAutocomplete';
+import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
@@ -224,8 +226,13 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
       <div className="space-y-2">
         {designers.map(d => (
           <div key={d.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
-            <input type="text" value={d.name} onChange={e => onChange(d.id, 'name', e.target.value)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <EmployeeAutocomplete
+              value={d.name}
+              location={location ?? 'Utah'}
+              department="Design"
+              onChange={val => onChange(d.id, 'name', val)}
+              onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); }}
+            />
             <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="specialist">Specialist</option>
@@ -1136,13 +1143,14 @@ function useDraggableOrder<T extends { id: string }>(
 }
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
-function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio }: {
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
   team: PresTeamMember[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
+  deptLocation?: string;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1162,9 +1170,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
               onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
               onDragEnd={handleDragEnd}
               className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-            <input type="text" value={m.name}
-              onChange={e => onUpdateRoster(m.id, 'name', e.target.value)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <EmployeeAutocomplete
+              value={m.name}
+              location={deptLocation ?? 'Utah'}
+              department="Preservation"
+              onChange={val => onUpdateRoster(m.id, 'name', val)}
+              onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); }}
+            />
             <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="specialist">Specialist</option>
@@ -1189,7 +1201,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 }
 
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
-function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio }: {
+function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
   team: FfTeamMember[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   onUpdateName: (id: string, name: string) => void;
@@ -1197,6 +1209,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
+  deptLocation?: string;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1216,9 +1229,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
               onDragEnd={handleDragEnd}
               className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-            <input type="text" value={m.name}
-              onChange={e => onUpdateName(m.id, e.target.value)}
-              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <EmployeeAutocomplete
+              value={m.name}
+              location={deptLocation ?? 'Utah'}
+              department="Fulfillment"
+              onChange={val => onUpdateName(m.id, val)}
+              onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); }}
+            />
             <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="specialist">Specialist</option>
@@ -1708,6 +1725,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                 <PresRosterEditor
                   team={team}
                   presRoster={presRoster}
+                  deptLocation={location}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveMember}
                   onRefreshRatio={async (id, name) => {
@@ -2232,6 +2250,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                 <FfRosterEditor
                   team={team}
                   ffRoster={ffRoster}
+                  deptLocation={location}
                   onUpdateName={updateFfRosterName}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveFfMember}
@@ -3394,6 +3413,7 @@ export function SchedulePage({
                   onChange={handleDesignerChange}
                   onAdd={handleAddDesigner}
                   onRemove={handleRemoveDesigner}
+                  location={location}
                 />
                 {deletedStack.length > 0 && (
                   <button onClick={handleUndo}
