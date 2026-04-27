@@ -106,8 +106,11 @@ export async function POST(req: NextRequest) {
       const batch = records.slice(i, i + BATCH);
       const { error } = await supabase
         .from('rippling_payroll')
-        .upsert(batch, { onConflict: 'full_name,department,period_start,period_end' });
-      if (error) throw error;
+        .upsert(batch, { onConflict: 'full_name,department,period_start,period_end', ignoreDuplicates: false });
+      if (error) {
+        console.error('Supabase upsert error:', JSON.stringify(error));
+        throw new Error(`Supabase error: ${error.message} (code: ${error.code})`);
+      }
       inserted += batch.length;
     }
 
