@@ -101,11 +101,11 @@ const GEORGIA_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
 const DEFAULT_UTAH_DESIGNERS: Designer[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true, role: 'master' as const },
   { id: 'ut-1',   name: 'Deanna Haug',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
-  { id: 'ut-2',   name: 'Sarah Glissmeyer', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ut-2',   name: 'Sarah Handy', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-3',   name: 'Kathryn Sonntag',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-4',   name: 'Mia Legas Boots',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-5',   name: 'Sloane James',     ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
-  { id: 'ut-6',   name: 'Audrey Brown',     ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
+  { id: 'ut-6',   name: 'Audrey Windsor',     ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
   { id: 'ut-7',   name: 'Chloe Jensen',    ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
 ];
 
@@ -547,10 +547,10 @@ const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
 ];
 
 const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
-  { id: 'ut-f1', name: 'Izabella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true, role: 'master' as const },
+  { id: 'ut-f1', name: 'Bella DePrima',       ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), isManager: true, role: 'master' as const },
   { id: 'ut-f2', name: 'Warner Neuenschwander',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'specialist' as const },
   { id: 'ut-f3', name: 'Owen Shaw',              ratio: 0.35, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'senior' as const },
-  { id: 'ut-f4', name: 'Emma Swenson',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'senior' as const },
+  { id: 'ut-f4', name: 'Emma Van Dyke',           ratio: 0.37, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(8).fill(8), role: 'senior' as const },
 ];
 
 const GEORGIA_FULFILLMENT_TEAM: FfTeamMember[] = [
@@ -910,7 +910,7 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   department:          'preservation' | 'fulfillment' | 'design';
   location:            'Utah' | 'Georgia';
   teamMembers:         string[];
-  teamActuals:         { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
+  teamActuals:         { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number; hours_source?: string }[];
   onActualsSaved:      () => void;
   showReceivedField:   boolean;
   ordersLabel:         string;
@@ -951,9 +951,9 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
   }, [teamActuals, department, location]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function getEntry(weekOf: string, name: string) {
-    if (localEdits[weekOf]?.[name]) return localEdits[weekOf][name];
+    if (localEdits[weekOf]?.[name]) return { ...localEdits[weekOf][name], source: 'manual' };
     const row = teamActuals.find(r => r.department === department && r.week_of === weekOf && r.member_name === name);
-    return { hours: row?.actual_hours ?? 0, orders: row?.actual_orders ?? 0 };
+    return { hours: row?.actual_hours ?? 0, orders: row?.actual_orders ?? 0, source: row?.hours_source ?? 'manual' };
   }
 
   function setEntry(weekOf: string, name: string, field: 'hours' | 'orders', val: number) {
@@ -1094,7 +1094,7 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
                           <input type="number" min="0" step="0.5" value={entry.hours || ''}
                             placeholder="0h" title="Hours"
                             onChange={e => setEntry(w, name, 'hours', parseFloat(e.target.value) || 0)}
-                            className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center text-slate-400 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                            className={`w-12 border border-slate-200 rounded px-1 py-0.5 text-center bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${entry.source === 'upload' ? 'text-green-600 font-medium' : 'text-slate-400'}`} />
                           {ratio !== null && (
                             <span className={`text-[9px] font-medium ${ratio <= 0.7 ? 'text-green-700' : ratio <= 1.5 ? 'text-amber-700' : 'text-red-600'}`}>
                               {ratio.toFixed(2)}
@@ -1106,6 +1106,40 @@ function DeptHistoricalsTab({ department, location, teamMembers, teamActuals, on
                   })}
                 </tr>
               ))}
+              {/* Flex workers — people with hours in this dept not on the roster */}
+              {(() => {
+                const rosterNames = new Set(teamMembers);
+                const flexNames = [...new Set(
+                  teamActuals
+                    .filter(r => r.department === department && r.actual_hours > 0 && !rosterNames.has(r.member_name))
+                    .map(r => r.member_name)
+                )];
+                if (flexNames.length === 0) return null;
+                return flexNames.map((name, ni) => (
+                  <tr key={name} className={`border-t border-dashed border-slate-200 ${ni % 2 === 0 ? 'bg-slate-50/20' : 'bg-slate-50/40'}`}>
+                    <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
+                      <div className="font-medium text-slate-600">{name}</div>
+                      <div className="text-[10px] text-indigo-400">flex</div>
+                    </td>
+                    {displayWeeks.map(w => {
+                      const entry = getEntry(w, name);
+                      const hasData = entry.hours > 0 || entry.orders > 0;
+                      return (
+                        <td key={w} className={`px-1 py-1 text-center ${hasData ? '' : 'opacity-30'}`}>
+                          <div className="flex flex-col gap-0.5 items-center">
+                            <span className="text-indigo-700 font-medium text-xs">{entry.orders > 0 ? entry.orders : ''}</span>
+                            {entry.hours > 0 && (
+                              <span className={`text-xs font-medium ${entry.source === 'upload' ? 'text-green-600' : 'text-slate-400'}`}>
+                                {entry.hours.toFixed(1)}h
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -2399,18 +2433,18 @@ interface StaffMember {
 const UTAH_STAFF: StaffMember[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',       homeDept: 'design',       onCall: false },
   { id: 'ut-1',   name: 'Deanna Haug',         homeDept: 'design',       onCall: false },
-  { id: 'ut-2',   name: 'Sarah Glissmeyer',        homeDept: 'design',       onCall: false },
+  { id: 'ut-2',   name: 'Sarah Handy',        homeDept: 'design',       onCall: false },
   { id: 'ut-3',   name: 'Kathryn Sonntag',            homeDept: 'design',       onCall: false },
   { id: 'ut-4',   name: 'Mia Legas Boots',               homeDept: 'design',       onCall: false },
   { id: 'ut-5',   name: 'Sloane James',            homeDept: 'design',       onCall: false },
-  { id: 'ut-6',   name: 'Audrey Brown',            homeDept: 'design',       onCall: false },
+  { id: 'ut-6',   name: 'Audrey Windsor',            homeDept: 'design',       onCall: false },
   { id: 'ut-7',   name: 'Chloe Jensen',           homeDept: 'design',       onCall: false },
   { id: 'ut-p1',  name: 'Katelyn Wilson',          homeDept: 'preservation', onCall: false },
   { id: 'ut-p2',  name: 'Emma Dunakey',            homeDept: 'preservation', onCall: true  },
-  { id: 'ut-f1',  name: 'Izabella DePrima',        homeDept: 'fulfillment',  onCall: false },
+  { id: 'ut-f1',  name: 'Bella DePrima',        homeDept: 'fulfillment',  onCall: false },
   { id: 'ut-f2',  name: 'Warner Neuenschwander',   homeDept: 'fulfillment',  onCall: false },
   { id: 'ut-f3',  name: 'Owen Shaw',               homeDept: 'fulfillment',  onCall: false },
-  { id: 'ut-f4',  name: 'Emma Swenson',            homeDept: 'fulfillment',  onCall: false },
+  { id: 'ut-f4',  name: 'Emma Van Dyke',            homeDept: 'fulfillment',  onCall: false },
 ];
 
 const GEORGIA_STAFF: StaffMember[] = [
