@@ -12,9 +12,20 @@ function fmtDate(iso: string) {
 }
 function excelDate(val: unknown): string {
   if (!val) return '';
-  if (val instanceof Date) return val.toISOString().split('T')[0];
+  if (val instanceof Date) {
+    // Use local date parts to avoid UTC offset issues
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
   if (typeof val === 'number') {
-    return new Date(Math.round((val - 25569) * 86400 * 1000)).toISOString().split('T')[0];
+    // Excel serial date
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dy = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${mo}-${dy}`;
   }
   return String(val).split('T')[0];
 }
