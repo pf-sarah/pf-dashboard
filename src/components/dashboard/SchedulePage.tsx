@@ -1,4 +1,5 @@
 'use client';
+import { RipplingUpload } from './RipplingUpload';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
@@ -214,18 +215,15 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
   }
   return (
     <div>
-      <div className="grid grid-cols-[1fr_80px_80px_80px_110px_130px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+      <div className="grid grid-cols-[1fr_80px_90px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
         <span>Name</span>
         <span className="text-center">Role</span>
-        <span className="text-center">Pay type</span>
         <span className="text-center">Ratio</span>
-        <span className="text-center">Hourly rate</span>
-        <span className="text-center">Annual salary</span>
         <span />
       </div>
       <div className="space-y-2">
         {designers.map(d => (
-          <div key={d.id} className="grid grid-cols-[1fr_80px_80px_80px_110px_130px_20px] gap-2 items-center">
+          <div key={d.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
             <input type="text" value={d.name} onChange={e => onChange(d.id, 'name', e.target.value)}
               className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
             <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
@@ -233,11 +231,6 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
               <option value="specialist">Specialist</option>
               <option value="senior">Senior</option>
               <option value="master">Master</option>
-            </select>
-            <select value={d.payType} onChange={e => onChange(d.id, 'payType', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="hourly">Hourly</option>
-              <option value="salary">Salary</option>
             </select>
             <div className="flex items-center gap-1">
               <input type="number" value={d.ratio} step="0.1" min="0.1"
@@ -249,20 +242,6 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
                 {refreshingId === d.id ? '…' : '↻'}
               </button>
             </div>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={d.hourlyRate || ''} step="0.50" min="0" placeholder="0"
-                disabled={d.payType === 'salary'}
-                onChange={e => onChange(d.id, 'hourlyRate', e.target.value)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={d.annualSalary || ''} step="1000" min="0" placeholder="e.g. 52000"
-                disabled={d.payType === 'hourly'}
-                onChange={e => onChange(d.id, 'annualSalary', e.target.value)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
             <button onClick={() => onRemove(d.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
           </div>
         ))}
@@ -271,10 +250,7 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
         className="mt-3 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
         + Add designer
       </button>
-      <p className="mt-3 text-xs text-slate-400">
-        <strong>Salary:</strong> enter annual — divided by 52 for weekly CPO.&nbsp;
-        <strong>Hourly:</strong> cost = hours × rate.
-      </p>
+      <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload. Ratio = hours per frame.</p>
     </div>
   );
 }
@@ -1172,13 +1148,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
     useDraggableOrder(team, onReorder);
   return (
     <div>
-      <div className="grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      <div className="grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span />
       </div>
       <div className="space-y-2">
         {team.map((m) => (
           <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+            className={`grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
             onDrop={() => handleDrop(m.id)}>
             <span
@@ -1202,30 +1178,12 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
               <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
                 className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
             </div>
-            <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(m.id, 'payType', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="hourly">Hourly</option>
-              <option value="salary">Salary</option>
-            </select>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
-                disabled={m.payType === 'salary'}
-                onChange={e => onUpdateRoster(m.id, 'rate', parseFloat(e.target.value) || 0)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={m.annualSalary || ''} step="1000" min="0" placeholder="e.g. 40000"
-                disabled={m.payType !== 'salary'}
-                onChange={e => onUpdateRoster(m.id, 'annualSalary', parseFloat(e.target.value) || 0)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
             <button onClick={() => onRemove(m.id)}
               className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload.</p>
     </div>
   );
 }
@@ -1244,13 +1202,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
     useDraggableOrder(team, onReorder);
   return (
     <div>
-      <div className="grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
-        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span className="text-center">Pay type</span><span className="text-center">Hourly rate</span><span className="text-center">Annual salary</span><span />
+      <div className="grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+        <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span />
       </div>
       <div className="space-y-2">
         {team.map((m, mi) => (
           <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_80px_70px_80px_110px_120px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+            className={`grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
             onDrop={() => handleDrop(m.id)}>
             <span
@@ -1274,30 +1232,12 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
                 className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
             </div>
-            <select value={m.payType ?? 'hourly'} onChange={e => onUpdateRoster(mi, 'payType', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="hourly">Hourly</option>
-              <option value="salary">Salary</option>
-            </select>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={m.rate || ''} step="0.50" min="0" placeholder="0"
-                disabled={m.payType === 'salary'}
-                onChange={e => onUpdateRoster(mi, 'rate', parseFloat(e.target.value) || 0)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none">$</span>
-              <input type="number" value={m.annualSalary || ''} step="1000" min="0" placeholder="e.g. 40000"
-                disabled={m.payType !== 'salary'}
-                onChange={e => onUpdateRoster(mi, 'annualSalary', parseFloat(e.target.value) || 0)}
-                className="w-full pl-5 border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-30 disabled:bg-slate-50" />
-            </div>
             <button onClick={() => onRemove(m.id)}
               className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
           </div>
         ))}
       </div>
+      <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload.</p>
     </div>
   );
 }
@@ -2827,6 +2767,12 @@ function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
             {uniqueMissing.length > 0 && metrics.combinedCPO === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
           </div>
         )}
+      </div>
+
+      {/* ── ADMIN: Payroll Upload ─────────────────────────────────────────── */}
+      <div className="mt-8 border-t border-slate-200 pt-6">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Admin — Payroll Data</p>
+        <RipplingUpload />
       </div>
     </div>
   );
