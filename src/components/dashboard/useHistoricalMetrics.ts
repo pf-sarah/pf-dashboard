@@ -269,10 +269,11 @@ function buildPeriod(
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
 
-  // Combined: use total cost / total orders across all depts (not sum of CPOs)
+  // Combined CPO = sum of per-dept CPOs (preservation CPO + design CPO + fulfillment CPO)
   const totalOrders = design.orders + preservation.orders + fulfillment.orders;
-  const totalCost   = design.cost   + preservation.cost   + fulfillment.cost;
   const totalHours  = design.hours  + preservation.hours  + fulfillment.hours;
+  const deptCPOs = [design.cpo, preservation.cpo, fulfillment.cpo].filter(c => c !== null) as number[];
+  const combinedCPO = deptCPOs.length > 0 ? deptCPOs.reduce((a, b) => a + b, 0) : null;
 
   const allActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0
     && [...design.estimatedPayroll, ...preservation.estimatedPayroll, ...fulfillment.estimatedPayroll].length === 0
@@ -283,7 +284,7 @@ function buildPeriod(
   return {
     design, preservation, fulfillment,
     combinedRatio:     totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null,
-    combinedCPO:       totalOrders > 0 && totalCost  > 0 ? totalCost  / totalOrders : null,
+    combinedCPO,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) / gRatios.length : null,
     combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   / gCpos.length   : null,
     allActual,
@@ -313,11 +314,14 @@ function buildGoalPeriod(
   };
 }
 
-interface RipplingPerson {
-  fullName: string;
-  totalGross: number;
+interface LaborRow {
+  employee:   string;
+  department: string;
+  week_of:    string;
+  gross_pay:  number;
 }
 
+// Fetch actual gross pay from weekly_labor_cost table, summed per employee for the period
 async function fetchPayrollForPeriod(
   location: string,
   department: string,
@@ -325,11 +329,18 @@ async function fetchPayrollForPeriod(
   to: string
 ): Promise<PayrollMap> {
   try {
-    const res = await fetch(`/api/admin/payroll-upload?location=${location}&department=${department}&from=${from}&to=${to}`);
+    const res = await fetch(
+      `/api/admin/weekly-labor-upload?location=${location}&from=${from}&to=${to}`
+    );
     if (!res.ok) return {};
-    const data = await res.json() as { people?: RipplingPerson[] };
+    const data = await res.json() as { rows?: LaborRow[] };
     const map: PayrollMap = {};
-    (data.people ?? []).forEach(p => { map[p.fullName] = p.totalGross; });
+    // Filter to the requested dept and sum gross pay per employee
+    (data.rows ?? [])
+      .filter(r => r.department.toLowerCase() === department.toLowerCase())
+      .forEach(r => {
+        map[r.employee] = (map[r.employee] ?? 0) + r.gross_pay;
+      });
     return map;
   } catch {
     return {};
