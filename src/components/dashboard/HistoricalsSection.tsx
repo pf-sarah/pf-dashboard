@@ -57,7 +57,7 @@ function getAllWeeks(): string[] {
 }
 
 export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate }: HistoricalsSectionProps) {
-  const { enrichedActuals, loading, refresh } = useActualsWithPayroll(location);
+  const { enrichedActuals, loading, refresh, getWeekCosts } = useActualsWithPayroll(location);
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [managerHours, setManagerHours] = useState<Record<string, number>>({});
@@ -282,11 +282,14 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                 <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600 border-r border-slate-200">Week total</td>
                 {allWeeks.map(w => {
                   const totalOrders = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
-                  const totalCost   = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).cost, 0);
-                  const allActual   = allDisplayMembers.every(name => {
-                    const e = getEntry(w, name);
-                    return e.hours === 0 || e.isActual;
-                  });
+                  // Get total dept cost from weekly_labor_cost via getWeekCosts, plus salary managers
+                  const weekCosts = getWeekCosts(w);
+                  const deptKey = department.charAt(0).toUpperCase() + department.slice(1);
+                  const deptCost = weekCosts.find(wc => wc.department === deptKey)?.totalCost ?? 0;
+                  // Fall back to summing individual costs if no labor upload data
+                  const memberCost = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).cost, 0);
+                  const totalCost = deptCost > 0 ? deptCost : memberCost;
+                  const allActual = weekCosts.length > 0 && (weekCosts.find(wc => wc.department === deptKey)?.isActual ?? false);
                   const teamCPO = totalOrders > 0 && totalCost > 0 ? totalCost / totalOrders : null;
                   const isFirst = allWeeks.filter(x => getMonthKey(x) === getMonthKey(w))[0] === w;
                   return (
