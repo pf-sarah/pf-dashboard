@@ -25,6 +25,45 @@ interface ActualRow {
 // Rippling payroll data: personName → total gross pay for the period
 export type PayrollMap = Record<string, number>;
 
+// Georgia salary manager history — mirrors useActualsWithPayroll.ts
+interface SalaryManagerEntry {
+  name: string;
+  location: string;
+  departments: string[];
+  annualSalary: number;
+  from?: string;
+  to?: string;
+}
+
+const GEORGIA_MANAGER_HISTORY: SalaryManagerEntry[] = [
+  { name: 'Katherine Piper', location: 'Georgia', departments: ['design'],                 annualSalary: 45760, to: '2026-04-12' },
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['preservation'],           annualSalary: 47008, to: '2026-04-12' },
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['design','preservation'],  annualSalary: 56000, from: '2026-04-13' },
+];
+
+const UTAH_SALARY_MANAGERS: SalaryManagerEntry[] = [
+  { name: 'Jennika Merrill', location: 'Utah', departments: ['design'],      annualSalary: 45760 },
+  { name: 'Bella DePrima',   location: 'Utah', departments: ['fulfillment'], annualSalary: 41600 },
+];
+
+function getSalaryManagerCost(location: string, dept: string, weekStart: string, weekEnd: string): number {
+  const weeks = getWeeksInRange(weekStart, weekEnd);
+  const managers = location === 'Georgia' ? GEORGIA_MANAGER_HISTORY : UTAH_SALARY_MANAGERS;
+  let total = 0;
+  for (const week of weeks) {
+    for (const mgr of managers) {
+      if (mgr.location !== location) continue;
+      if (!mgr.departments.includes(dept)) continue;
+      const after  = !mgr.from || week >= mgr.from;
+      const before = !mgr.to   || week <= mgr.to;
+      if (after && before) {
+        total += (mgr.annualSalary / 52) / mgr.departments.length;
+      }
+    }
+  }
+  return total;
+}
+
 export interface DeptMetrics {
   ratio: number | null;
   cpo: number | null;
@@ -116,7 +155,8 @@ function computeActualDeptMetrics(
   weekStart: string,
   weekEnd: string,
   roster: RosterMember[],
-  payroll: PayrollMap  // gross pay per person for this period from Rippling
+  payroll: PayrollMap,  // gross pay per person for this period from Rippling
+  location: string
 ): DeptMetrics {
   const deptRows = rows.filter(r =>
     r.department === dept && r.week_of >= weekStart && r.week_of <= weekEnd
@@ -164,6 +204,9 @@ function computeActualDeptMetrics(
       }
     }
   });
+
+  // Add salary manager cost (not in weekly_labor_cost)
+  totalCost += getSalaryManagerCost(location, dept, weekStart, weekEnd);
 
   const ratio = totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null;
   const cpo   = totalOrders > 0 && totalCost  > 0 ? totalCost  / totalOrders : null;
@@ -260,25 +303,27 @@ function buildPeriod(
   weekStart: string,
   weekEnd: string,
   rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] },
-  payrollByDept: { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap }
+  payrollByDept: { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap },
+  location: string
 ): PeriodMetrics {
-  const design       = computeActualDeptMetrics(rows, 'design',       weekStart, weekEnd, rosters.design,       payrollByDept.design);
-  const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation, payrollByDept.preservation);
-  const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment,  payrollByDept.fulfillment);
+  const design       = computeActualDeptMetrics(rows, 'design',       weekStart, weekEnd, rosters.design,       payrollByDept.design,       location);
+  const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation, payrollByDept.preservation, location);
+  const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment,  payrollByDept.fulfillment,  location);
 
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
 
-  // Combined CPO = sum of per-dept CPOs (preservation CPO + design CPO + fulfillment CPO)
+  // Combined CPO = sum of per-dept CPOs + G&A spread across all orders
   const totalOrders = design.orders + preservation.orders + fulfillment.orders;
   const totalHours  = design.hours  + preservation.hours  + fulfillment.hours;
-  const deptCPOs = [design.cpo, preservation.cpo, fulfillment.cpo].filter(c => c !== null) as number[];
-  const combinedCPO = deptCPOs.length > 0 ? deptCPOs.reduce((a, b) => a + b, 0) : null;
+  const deptCPOs    = [design.cpo, preservation.cpo, fulfillment.cpo].filter(c => c !== null) as number[];
+  const gaCost      = Object.values(payrollByDept.ga).reduce((s, v) => s + v, 0);
+  const gaCPO       = totalOrders > 0 && gaCost > 0 ? gaCost / totalOrders : 0;
+  const combinedCPO = deptCPOs.length > 0 ? deptCPOs.reduce((a, b) => a + b, 0) + gaCPO : null;
 
   const allActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0
     && [...design.estimatedPayroll, ...preservation.estimatedPayroll, ...fulfillment.estimatedPayroll].length === 0
     && [...design.missingRates, ...preservation.missingRates, ...fulfillment.missingRates].length === 0;
-
   const anyActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0;
 
   return {
@@ -286,7 +331,7 @@ function buildPeriod(
     combinedRatio:     totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null,
     combinedCPO,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) / gRatios.length : null,
-    combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   / gCpos.length   : null,
+    combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0) : null,
     allActual,
     anyActual,
   };
@@ -356,13 +401,13 @@ export function useHistoricalMetrics(
 
   // Payroll maps per dept per period
   const [payroll, setPayroll] = useState<{
-    thisMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
-    lastMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
-    lastWeek:   { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap };
+    thisMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
+    lastMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
+    lastWeek:   { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
   }>({
-    thisMonth:  { design: {}, preservation: {}, fulfillment: {} },
-    lastMonth:  { design: {}, preservation: {}, fulfillment: {} },
-    lastWeek:   { design: {}, preservation: {}, fulfillment: {} },
+    thisMonth:  { design: {}, preservation: {}, fulfillment: {}, ga: {} },
+    lastMonth:  { design: {}, preservation: {}, fulfillment: {}, ga: {} },
+    lastWeek:   { design: {}, preservation: {}, fulfillment: {}, ga: {} },
   });
 
   useEffect(() => {
@@ -386,15 +431,18 @@ export function useHistoricalMetrics(
     Promise.all([
       // thisMonth
       ...depts.map((d, i) => fetchPayrollForPeriod(location, d, thisMonth.start, thisMonth.end).then(m => ({ period: 'thisMonth', dept: deptKeys[i], map: m }))),
+      fetchPayrollForPeriod(location, 'G&A', thisMonth.start, thisMonth.end).then(m => ({ period: 'thisMonth', dept: 'ga', map: m })),
       // lastMonth
       ...depts.map((d, i) => fetchPayrollForPeriod(location, d, lastMonth.start, lastMonth.end).then(m => ({ period: 'lastMonth', dept: deptKeys[i], map: m }))),
+      fetchPayrollForPeriod(location, 'G&A', lastMonth.start, lastMonth.end).then(m => ({ period: 'lastMonth', dept: 'ga', map: m })),
       // lastWeek
       ...depts.map((d, i) => fetchPayrollForPeriod(location, d, lastWeekStart, lastWeekEnd).then(m => ({ period: 'lastWeek', dept: deptKeys[i], map: m }))),
+      fetchPayrollForPeriod(location, 'G&A', lastWeekStart, lastWeekEnd).then(m => ({ period: 'lastWeek', dept: 'ga', map: m })),
     ]).then(results => {
       const next = {
-        thisMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
-        lastMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
-        lastWeek:   { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap },
+        thisMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
+        lastMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
+        lastWeek:   { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
       };
       results.forEach(r => {
         (next[r.period as keyof typeof next] as Record<string, PayrollMap>)[r.dept] = r.map;
@@ -411,9 +459,9 @@ export function useHistoricalMetrics(
     const nextMonth  = getMonthBounds(1);
 
     return {
-      thisMonth:     buildPeriod(rows, thisMonth.start,  thisMonth.end,  rosters, payroll.thisMonth),
-      lastMonth:     buildPeriod(rows, lastMonth.start,  lastMonth.end,  rosters, payroll.lastMonth),
-      lastWeek:      buildPeriod(rows, lastWeekStart,    lastWeekEnd,    rosters, payroll.lastWeek),
+      thisMonth:     buildPeriod(rows, thisMonth.start,  thisMonth.end,  rosters, payroll.thisMonth,  location),
+      lastMonth:     buildPeriod(rows, lastMonth.start,  lastMonth.end,  rosters, payroll.lastMonth,  location),
+      lastWeek:      buildPeriod(rows, lastWeekStart,    lastWeekEnd,    rosters, payroll.lastWeek,   location),
       thisMonthGoal: buildGoalPeriod(thisMonth.start, thisMonth.end, rosters),
       nextMonthGoal: buildGoalPeriod(nextMonth.start, nextMonth.end, rosters),
       loading,
