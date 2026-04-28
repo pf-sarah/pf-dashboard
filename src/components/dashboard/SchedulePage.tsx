@@ -130,6 +130,15 @@ function buildDefaultUtahSchedule(): WeekSchedule[] {
   }));
 }
 
+// Distribute total weekly hours across 5 days as evenly as possible
+// e.g. 38hrs → [8,8,8,7,7], 37hrs → [8,8,7,7,7]
+function distributeHours(total: number): number[] {
+  if (total <= 0) return [0, 0, 0, 0, 0];
+  const base = Math.floor(total / 5);
+  const rem  = Math.round(total) % 5;
+  return Array.from({ length: 5 }, (_, i) => i < rem ? base + 1 : base);
+}
+
 function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
   return Array.from({ length: WEEKS }, () => ({
     'ga-1': 0, 'ga-2': 0, 'ga-3': 0, 'ga-4': 0, 'ga-5': 0,
@@ -1984,6 +1993,25 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>({});
+  // Pre-populate daily hours from weekly schedule on first load
+  useEffect(() => {
+    const init: Record<string, number[]> = {};
+    (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).forEach(m => {
+      const weeklyHrs = ffHours[m.id]?.[0] ?? 0;
+      if (weeklyHrs > 0) init[m.id] = distributeHours(weeklyHrs);
+    });
+    Object.keys(ffRoster).forEach(id => {
+      if (!init[id]) {
+        const weeklyHrs = ffHours[id]?.[0] ?? 0;
+        if (weeklyHrs > 0) init[id] = distributeHours(weeklyHrs);
+      }
+    });
+    if (Object.keys(init).length > 0) setFfDailyHours(prev => {
+      const merged = { ...init };
+      Object.keys(prev).forEach(id => { if (prev[id].some(h => h > 0)) merged[id] = prev[id]; });
+      return merged;
+    });
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showRoster, setShowRoster] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
 
@@ -2934,6 +2962,20 @@ export function SchedulePage({
   const [showCPO,      setShowCPO]     = useState(true);
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>({});
+  // Pre-populate daily hours from weekly schedule on first load
+  useEffect(() => {
+    const init: Record<string, number[]> = {};
+    designers.forEach(d => {
+      const weeklyHrs = schedule[0]?.[d.id] ?? 0;
+      if (weeklyHrs > 0) init[d.id] = distributeHours(weeklyHrs);
+    });
+    if (Object.keys(init).length > 0) setDesignDailyHours(prev => {
+      // Only set for members that haven't been manually edited yet
+      const merged = { ...init };
+      Object.keys(prev).forEach(id => { if (prev[id].some(h => h > 0)) merged[id] = prev[id]; });
+      return merged;
+    });
+  }, [designers.length, location]); // eslint-disable-line react-hooks/exhaustive-deps
   const [deletedStack, setDeletedStack] = useState<{designer: Designer; schedule: WeekSchedule[]}[]>([]);
 
   // Live queue counts from parent (no more manual inputs)
