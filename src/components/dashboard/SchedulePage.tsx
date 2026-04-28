@@ -1315,7 +1315,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const mondayIso = monday.toISOString().split('T')[0];
   const sundayIso = addDays(mondayIso, 6);
 
-  const [presTab,       setPresTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
+  const [presTab,       setPresTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster,    setShowRoster]   = useState(false);
   const [weekOffset,    setWeekOffset]   = useState(0);
   const [activePresTab, setActivePresTab] = useState<'weekly' | '52week'>('weekly');
@@ -1565,107 +1565,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
       {/* Tabs: This Week | Schedule | Historicals */}
       <div className="flex border-b border-slate-200">
-        {(['thisweek', 'schedule', 'historicals'] as const).map(t => (
+        {(['schedule', 'historicals'] as const).map(t => (
           <button key={t} onClick={() => setPresTab(t)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}>{t === 'thisweek' ? 'This Week' : t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
+            }`}>{t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
         ))}
       </div>
-
-      {/* ── SCHEDULE TAB ── */}
-      {presTab === 'thisweek' && (() => {
-        const days = getWeekdays(0);
-        function getPH(id: string, di: number) { return presHours[id]?.[di] ?? 0; }
-        function setPH(id: string, di: number, val: number) {
-          const prev = presHours[id] ?? Array(5).fill(0);
-          onPresHoursChange({ ...presHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) });
-        }
-        const teamDailyOrders = (di: number) => team.reduce((s, m) => {
-          const h = getPH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0);
-        }, 0);
-        const teamDailyCost = (di: number) => team.reduce((s, m) => {
-          const h = getPH(m.id, di); return s + h * m.rate;
-        }, 0);
-        const teamWeekOrders = days.reduce((s, _, di) => s + teamDailyOrders(di), 0);
-        const presHasRates = team.some(m => m.rate > 0);
-        return (
-          <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — this week</h3>
-                <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Orders calculated from each member&apos;s ratio.</p>
-              </div>
-              {presHasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100">
-                    <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
-                    {days.map((d, i) => (
-                      <th key={i} className={`px-2 py-2 text-center font-medium min-w-[90px] whitespace-nowrap ${i === 0 ? 'bg-green-50 text-green-700' : 'text-slate-500'}`}>
-                        {d.label}<br /><span className="font-normal text-[10px]">{d.dateStr}</span>
-                      </th>
-                    ))}
-                    <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Week total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {team.map((m, mi) => {
-                    const weekOrders = days.reduce((s, _, di) => { const h = getPH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0); }, 0);
-                    const weekHrs = days.reduce((s, _, di) => s + getPH(m.id, di), 0);
-                    const weekCost = days.reduce((s, _, di) => s + getPH(m.id, di) * m.rate, 0);
-                    const weekCPO = weekOrders > 0 && weekCost > 0 ? weekCost / weekOrders : null;
-                    return (
-                      <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                        <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
-                          <div className="font-medium text-slate-700">{m.name}</div>
-                          <div className="text-slate-400">{m.ratio} h/ord</div>
-                        </td>
-                        {days.map((_, dayIdx) => {
-                          const h = getPH(m.id, dayIdx);
-                          const orders = m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0;
-                          const cost = h * m.rate;
-                          const cpo = orders > 0 && cost > 0 ? cost / orders : null;
-                          return (
-                            <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-green-50/30' : ''}`}>
-                              <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
-                                onChange={e => setPH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
-                                className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
-                              {presHasRates && cpo !== null && <div className="text-green-700 text-[10px]">{fmt$(cpo)}</div>}
-                            </td>
-                          );
-                        })}
-                        <td className="px-3 py-2 text-center">
-                          <div className="font-medium text-green-700">{weekOrders} ord</div>
-                          <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
-                          {presHasRates && weekCPO !== null && <div className="text-green-700 text-[10px]">{fmt$(weekCPO)}</div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                    <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Daily total</td>
-                    {days.map((_, di) => {
-                      const o = teamDailyOrders(di); const cc = teamDailyCost(di);
-                      const cpo = o > 0 && cc > 0 ? cc / o : null;
-                      return (
-                        <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-green-50/50' : ''}`}>
-                          <div className="text-green-700">{o} ord</div>
-                          {presHasRates && cpo !== null && <div className="text-[10px] text-green-700">{fmt$(cpo)}</div>}
-                        </td>
-                      );
-                    })}
-                    <td className="px-3 py-2 text-center font-semibold text-green-700">{teamWeekOrders} ord</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })()}
 
       {presTab === 'schedule' && (
         <div className="space-y-4">
@@ -3462,6 +3368,7 @@ export function SchedulePage({
           {/* Inner tabs */}
           <div className="flex border-b border-slate-200">
             {([
+              ['thisweek',    'This Week'],
               ['schedule',    'Weekly Schedule'],
               ['queue',       'Queue & Turnaround'],
               ['monthly',     'Monthly Summary'],
