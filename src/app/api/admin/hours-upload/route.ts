@@ -20,11 +20,17 @@ function normalizeDept(raw: string): string {
 }
 
 function getMondayISO(dateStr: string): string {
+  // Week runs Sun–Sat; return the Monday of that week (Mon after the Sunday start)
+  // e.g. Sun Apr 19 → week of Mon Apr 20; Sat Apr 25 → week of Mon Apr 20
   const d = new Date(dateStr + 'T12:00:00');
-  const dow = d.getDay();
-  const diff = dow === 0 ? -6 : 1 - dow;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split('T')[0];
+  const dow = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  // Days to subtract to get to the Sunday of this week
+  const toSunday = dow; // 0 for Sun, 1 for Mon, etc.
+  const sunday = new Date(d);
+  sunday.setDate(d.getDate() - toSunday);
+  // Monday = sunday + 1
+  sunday.setDate(sunday.getDate() + 1);
+  return sunday.toISOString().split('T')[0];
 }
 
 interface HoursRow {
