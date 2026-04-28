@@ -39,12 +39,22 @@ export interface WeekCost {
   isActual:   boolean;
 }
 
-// Salary managers — sourced from rippling_employees table
-// These are loaded dynamically but we keep defaults here as fallback
+// Salary managers — Utah uses dynamic loading from rippling_employees.
+// Georgia has a time-split management history that Rippling's dept field
+// doesn't capture (Amber is listed as 'Operations'), so it's hardcoded here.
+
+// Georgia manager history (week_of is the Monday the change took effect)
+const GEORGIA_MANAGER_HISTORY: Array<SalaryManager & { from?: string; to?: string }> = [
+  // Before 4/13/2026: Katherine Piper → Design, Amber → Preservation only
+  { name: 'Katherine Piper', location: 'Georgia', departments: ['Design'],                 annualSalary: 45760,  to: '2026-04-12' },
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],           annualSalary: 47008,  to: '2026-04-12' },
+  // From 4/13/2026: Amber → Design + Preservation ($538.46/wk each = $56,000/52/2 * 2 depts)
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000,  from: '2026-04-13' },
+];
+
 const SALARY_MANAGERS: SalaryManager[] = [
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000 },
-  { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                 annualSalary: 45760 },
-  { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],            annualSalary: 41600 },
+  { name: 'Jennika Merrill', location: 'Utah', departments: ['Design'],       annualSalary: 45760 },
+  { name: 'Bella DePrima',   location: 'Utah', departments: ['Fulfillment'],  annualSalary: 41600 },
 ];
 
 export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
@@ -99,14 +109,25 @@ export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
     // From weekly labor upload
     const weekRows = laborRows.filter(r => r.week_of === weekOf);
     for (const dept of depts) {
-      const deptRows = weekRows.filter(r => r.department === dept || 
+      const deptRows = weekRows.filter(r => r.department === dept ||
         (dept === 'G&A' && (r.department === 'G&A' || r.department.toLowerCase().includes('general') || r.department.toLowerCase().includes('admin') || r.department.toLowerCase().includes('operations'))));
       const total = deptRows.reduce((s, r) => s + r.gross_pay, 0);
       if (total > 0) costs.push({ week_of: weekOf, department: dept, totalCost: total, isActual: true });
     }
 
-    // Add salary manager weekly cost
-    for (const mgr of salaryMgrs) {
+    // Determine which salary managers apply for this week
+    // Utah: use dynamically loaded salaryMgrs
+    // Georgia: use time-aware history
+    const applicableManagers: SalaryManager[] = [
+      ...salaryMgrs, // Utah managers (already filtered to location)
+      ...GEORGIA_MANAGER_HISTORY.filter(mgr => {
+        const after  = !mgr.from || weekOf >= mgr.from;
+        const before = !mgr.to   || weekOf <= mgr.to;
+        return after && before;
+      }),
+    ].filter(mgr => mgr.location === location);
+
+    for (const mgr of applicableManagers) {
       const weeklyPay = mgr.annualSalary / 52;
       const perDept   = weeklyPay / mgr.departments.length;
       for (const dept of mgr.departments) {
