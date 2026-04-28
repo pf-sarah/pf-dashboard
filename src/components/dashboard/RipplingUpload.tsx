@@ -2,6 +2,8 @@
 
 import { useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { parseWeeklyLaborXLSX } from './weeklyLaborParser';
+import type { WeeklyLaborRow } from './weeklyLaborParser';
 
 function fmt$(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -149,7 +151,7 @@ function parsePayrollXLSX(file: File): Promise<PayrollRow[]> {
 
 // ─── Upload Card ───────────────────────────────────────────────────────────────
 
-type UploadType = 'employees' | 'hours' | 'payroll';
+type UploadType = 'employees' | 'hours' | 'payroll' | 'weeklylabor';
 
 interface UploadCardProps {
   type:        UploadType;
@@ -170,9 +172,10 @@ function UploadCard({ type, title, description, frequency, accentColor }: Upload
     setStatus('parsing'); setErrorMsg(''); setResult(null);
     try {
       let rows: unknown[] = [];
-      if (type === 'employees') rows = await parseEmployeesXLSX(file);
-      if (type === 'hours')     rows = await parseHoursXLSX(file);
-      if (type === 'payroll')   rows = await parsePayrollXLSX(file);
+      if (type === 'employees')    rows = await parseEmployeesXLSX(file);
+      if (type === 'hours')          rows = await parseHoursXLSX(file);
+      if (type === 'payroll')        rows = await parsePayrollXLSX(file);
+      if (type === 'weeklylabor')   rows = await parseWeeklyLaborXLSX(file);
       setPreview(rows);
       setStatus('preview');
     } catch (err) { setErrorMsg(`Parse failed: ${err instanceof Error ? err.message : JSON.stringify(err)}`); setStatus('error'); }
@@ -182,10 +185,11 @@ function UploadCard({ type, title, description, frequency, accentColor }: Upload
     if (!preview) return;
     setStatus('uploading');
     try {
-      const endpoint = type === 'employees' ? '/api/admin/employees-upload'
-                     : type === 'hours'     ? '/api/admin/hours-upload'
+      const endpoint = type === 'employees'  ? '/api/admin/employees-upload'
+                     : type === 'hours'      ? '/api/admin/hours-upload'
+                     : type === 'weeklylabor' ? '/api/admin/weekly-labor-upload'
                      : '/api/admin/payroll-upload';
-      const bodyKey  = type === 'employees' ? 'employees' : type === 'hours' ? 'rows' : 'rows';
+      const bodyKey  = type === 'employees' ? 'employees' : 'rows';
       const res  = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -233,6 +237,7 @@ function UploadCard({ type, title, description, frequency, accentColor }: Upload
               {type === 'employees' && ` (${new Set((preview as EmployeeRow[]).map(r => r.fullName)).size} people)`}
               {type === 'hours'     && ` (${new Set((preview as HoursRow[]).map(r => r.employee)).size} people, ${new Set((preview as HoursRow[]).map(r => r.date.slice(0,7))).size} months)`}
               {type === 'payroll'   && ` (${new Set((preview as PayrollRow[]).map(r => r.employee)).size} people — ${fmt$((preview as PayrollRow[]).reduce((s,r) => s + r.grossPay, 0))} total gross)`}
+              {type === 'weeklylabor' && ` (${new Set((preview as WeeklyLaborRow[]).map(r => r.employee)).size} people, ${new Set((preview as WeeklyLaborRow[]).map(r => r.weekOf)).size} weeks — ${fmt$((preview as WeeklyLaborRow[]).reduce((s,r) => s + r.grossPay, 0))} total)`}
             </div>
             <div className="flex gap-2">
               <button onClick={handleUpload} className="px-4 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
@@ -306,6 +311,13 @@ export function PayrollUploadPanel() {
         title="Payroll CPO Upload"
         description='Upload "App dashboard upload for CPO" from Rippling. Actual gross pay per person per pay period — used for green CPO in historicals.'
         frequency="bi-weekly"
+        accentColor="bg-green-50 text-green-700"
+      />
+      <UploadCard
+        type="weeklylabor"
+        title="Weekly Labor Cost by Location & Department"
+        description='Upload "Weekly_Earnings_by_Location__Department" from Rippling. Used for accurate CPO calculations — includes G&A allocation and salary manager costs.'
+        frequency="weekly"
         accentColor="bg-green-50 text-green-700"
       />
     </div>

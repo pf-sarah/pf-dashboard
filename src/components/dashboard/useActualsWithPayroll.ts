@@ -12,119 +12,173 @@ export interface ActualRow {
   hours_source?: string;
 }
 
-export interface PayrollRow {
-  full_name:    string;
-  department:   string;
-  location:     string;
-  gross_pay:    number;
-  period_start: string;
-  period_end:   string;
+export interface WeeklyLaborRow {
+  employee:   string;
+  location:   string;
+  department: string;
+  week_of:    string;
+  gross_pay:  number;
+}
+
+export interface SalaryManager {
+  name:          string;
+  location:      string;
+  departments:   string[];  // depts to split across equally
+  annualSalary:  number;
 }
 
 export interface EnrichedActual extends ActualRow {
-  cost:      number;   // actual gross or estimate
-  isActual:  boolean;  // true = came from Rippling payroll
+  cost:     number;
+  isActual: boolean;
 }
 
-// Returns true if a week (Mon) overlaps with a pay period
-function weekOverlapsPeriod(weekOf: string, periodStart: string, periodEnd: string): boolean {
-  // Week runs Sun–Sat (Sun = weekOf - 1 day, Sat = weekOf + 5 days)
-  const mon = new Date(weekOf + 'T12:00:00');
-  const sun = new Date(mon); sun.setDate(mon.getDate() - 1);
-  const sat = new Date(mon); sat.setDate(mon.getDate() + 5);
-  const pStart = new Date(periodStart + 'T12:00:00');
-  const pEnd   = new Date(periodEnd   + 'T12:00:00');
-  return sun <= pEnd && sat >= pStart;
+export interface WeekCost {
+  week_of:    string;
+  department: string; // 'Design' | 'Preservation' | 'Fulfillment' | 'G&A'
+  totalCost:  number;
+  isActual:   boolean;
 }
 
-// Get all weeks (Mon ISO) that a pay period overlaps
-function weeksInPeriod(periodStart: string, periodEnd: string, allWeeks: string[]): string[] {
-  return allWeeks.filter(w => weekOverlapsPeriod(w, periodStart, periodEnd));
-}
+// Salary managers — sourced from rippling_employees table
+// These are loaded dynamically but we keep defaults here as fallback
+const SALARY_MANAGERS: SalaryManager[] = [
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000 },
+  { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                 annualSalary: 45760 },
+  { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],            annualSalary: 41600 },
+];
 
 export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
-  const [actuals,  setActuals]  = useState<ActualRow[]>([]);
-  const [payroll,  setPayroll]  = useState<PayrollRow[]>([]);
-  const [loading,  setLoading]  = useState(true);
+  const [actuals,     setActuals]     = useState<ActualRow[]>([]);
+  const [laborRows,   setLaborRows]   = useState<WeeklyLaborRow[]>([]);
+  const [salaryMgrs,  setSalaryMgrs]  = useState<SalaryManager[]>(SALARY_MANAGERS.filter(m => m.location === location));
+  const [loading,     setLoading]     = useState(true);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch actuals
-      const actualsRes = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
-      const actualsData = await actualsRes.json() as { teamActuals?: ActualRow[] };
-      const rows = actualsData.teamActuals ?? [];
-      setActuals(rows);
+      const [actualsRes, laborRes, empRes] = await Promise.all([
+        fetch(`/api/actuals?location=${location}&type=team&weeks=100`),
+        fetch(`/api/admin/weekly-labor-upload?location=${location}&from=2025-12-01&to=${new Date().toISOString().split('T')[0]}`),
+        fetch(`/api/admin/employees-upload?location=${location}`),
+      ]);
 
-      // Fetch payroll for all depts — wide date range to cover all history
-      const depts = ['Design', 'Preservation', 'Fulfillment'];
-      const from = '2025-12-01';
-      const to   = new Date().toISOString().split('T')[0];
-      const payrollRows: PayrollRow[] = [];
-      await Promise.all(depts.map(async dept => {
-        const res = await fetch(`/api/admin/payroll-upload?location=${location}&department=${dept}&from=${from}&to=${to}`);
-        const data = await res.json() as { rawRows?: PayrollRow[] };
-        if (data.rawRows) payrollRows.push(...data.rawRows);
-      }));
-      setPayroll(payrollRows);
+      const actualsData = await actualsRes.json() as { teamActuals?: ActualRow[] };
+      setActuals(actualsData.teamActuals ?? []);
+
+      const laborData = await laborRes.json() as { rows?: WeeklyLaborRow[] };
+      setLaborRows(laborData.rows ?? []);
+
+      // Load salary managers from employee directory
+      const empData = await empRes.json() as { employees?: { full_name: string; location: string; department: string; pay_type: string; annual_salary: number }[] };
+      const salaryEmps = (empData.employees ?? []).filter(e => e.pay_type === 'salary' && e.annual_salary > 0);
+
+      // Group by person to handle multi-dept managers (Amber)
+      const mgrMap: Record<string, SalaryManager> = {};
+      for (const e of salaryEmps) {
+        if (!mgrMap[e.full_name]) {
+          mgrMap[e.full_name] = { name: e.full_name, location: e.location, departments: [], annualSalary: e.annual_salary };
+        }
+        if (!mgrMap[e.full_name].departments.includes(e.department)) {
+          mgrMap[e.full_name].departments.push(e.department);
+        }
+      }
+      if (Object.keys(mgrMap).length > 0) {
+        setSalaryMgrs(Object.values(mgrMap).filter(m => m.location === location));
+      }
     } catch {}
     setLoading(false);
   }, [location]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // Enrich actuals with payroll cost
-  function enrich(rows: ActualRow[]): EnrichedActual[] {
-    // Build a map of all weeks present in actuals
-    const allWeeks = [...new Set(rows.map(r => r.week_of))].sort();
+  // Get weekly cost per dept including G&A and salary managers
+  function getWeekCosts(weekOf: string): WeekCost[] {
+    const costs: WeekCost[] = [];
+    const depts = ['Design', 'Preservation', 'Fulfillment', 'G&A'];
 
-    // For each person+dept+period, calculate total hours across all weeks in that period
-    // So we can split proportionally
-    const periodHours: Record<string, number> = {};
-    // key: `${name}|${dept}|${period_start}|${period_end}`
-    for (const pr of payroll) {
-      const key = `${pr.full_name}|${pr.department.toLowerCase()}|${pr.period_start}|${pr.period_end}`;
-      if (!periodHours[key]) periodHours[key] = 0;
-      const weeks = weeksInPeriod(pr.period_start, pr.period_end, allWeeks);
-      for (const w of weeks) {
-        const actual = rows.find(r =>
-          r.member_name === pr.full_name &&
-          r.department.toLowerCase() === pr.department.toLowerCase() &&
-          r.week_of === w
-        );
-        periodHours[key] += actual?.actual_hours ?? 0;
+    // From weekly labor upload
+    const weekRows = laborRows.filter(r => r.week_of === weekOf);
+    for (const dept of depts) {
+      const deptRows = weekRows.filter(r => r.department === dept || 
+        (dept === 'G&A' && (r.department === 'G&A' || r.department.toLowerCase().includes('general') || r.department.toLowerCase().includes('admin') || r.department.toLowerCase().includes('operations'))));
+      const total = deptRows.reduce((s, r) => s + r.gross_pay, 0);
+      if (total > 0) costs.push({ week_of: weekOf, department: dept, totalCost: total, isActual: true });
+    }
+
+    // Add salary manager weekly cost
+    for (const mgr of salaryMgrs) {
+      const weeklyPay = mgr.annualSalary / 52;
+      const perDept   = weeklyPay / mgr.departments.length;
+      for (const dept of mgr.departments) {
+        const existing = costs.find(c => c.week_of === weekOf && c.department === dept);
+        if (existing) {
+          existing.totalCost += perDept;
+        } else {
+          costs.push({ week_of: weekOf, department: dept, totalCost: perDept, isActual: weekRows.length > 0 });
+        }
       }
     }
 
+    return costs;
+  }
+
+  // Compute CPO for a week across all depts
+  function getWeekCPO(weekOf: string, ordersByDept: Record<string, number>): { cpo: number | null; isActual: boolean } | null {
+    const weekCosts = getWeekCosts(weekOf);
+    if (weekCosts.length === 0) return null;
+
+    const totalOrders = Object.values(ordersByDept).reduce((s, n) => s + n, 0);
+    if (totalOrders === 0) return null;
+
+    let totalCPO = 0;
+    let anyActual = false;
+
+    // Per-dept CPO
+    for (const dept of ['Design', 'Preservation', 'Fulfillment']) {
+      const cost = weekCosts.find(c => c.department === dept)?.totalCost ?? 0;
+      const orders = ordersByDept[dept.toLowerCase()] ?? 0;
+      if (cost > 0 && orders > 0) {
+        totalCPO += cost / orders;
+        if (weekCosts.find(c => c.department === dept)?.isActual) anyActual = true;
+      }
+    }
+
+    // G&A spread across all orders
+    const gaCost = weekCosts.find(c => c.department === 'G&A')?.totalCost ?? 0;
+    if (gaCost > 0 && totalOrders > 0) {
+      totalCPO += gaCost / totalOrders;
+    }
+
+    return { cpo: totalCPO, isActual: anyActual };
+  }
+
+  // Enrich actuals with cost data
+  function enrich(rows: ActualRow[]): EnrichedActual[] {
     return rows.map(row => {
-      // Find payroll records that overlap this week for this person+dept
-      const matchingPayroll = payroll.filter(pr =>
-        pr.full_name === row.member_name &&
-        pr.department.toLowerCase() === row.department.toLowerCase() &&
-        weekOverlapsPeriod(row.week_of, pr.period_start, pr.period_end)
+      // Find weekly labor for this person+dept
+      const laborRow = laborRows.find(r =>
+        r.employee === row.member_name &&
+        r.department.toLowerCase() === row.department.toLowerCase() &&
+        r.week_of === row.week_of
       );
 
-      if (matchingPayroll.length > 0 && row.actual_hours > 0) {
-        // Allocate gross pay proportionally by hours
-        let allocatedCost = 0;
-        for (const pr of matchingPayroll) {
-          const key = `${pr.full_name}|${pr.department.toLowerCase()}|${pr.period_start}|${pr.period_end}`;
-          const totalHoursInPeriod = periodHours[key] ?? 0;
-          if (totalHoursInPeriod > 0) {
-            allocatedCost += (row.actual_hours / totalHoursInPeriod) * pr.gross_pay;
-          } else {
-            // No hours data — split evenly across weeks in period
-            const weeks = weeksInPeriod(pr.period_start, pr.period_end, allWeeks);
-            allocatedCost += pr.gross_pay / Math.max(1, weeks.length);
-          }
-        }
-        return { ...row, cost: allocatedCost, isActual: true };
+      if (laborRow && laborRow.gross_pay > 0) {
+        return { ...row, cost: laborRow.gross_pay, isActual: true };
       }
 
-      // Fall back to rate estimate — will be 0 if no rate set (handled by caller)
+      // Fall back — cost will be 0, caller uses rate estimate
       return { ...row, cost: 0, isActual: false };
     });
   }
 
-  return { actuals, payroll, enrichedActuals: enrich(actuals), loading, refresh: fetchAll };
+  return {
+    actuals,
+    laborRows,
+    salaryMgrs,
+    enrichedActuals: enrich(actuals),
+    getWeekCosts,
+    getWeekCPO,
+    loading,
+    refresh: fetchAll,
+  };
 }
