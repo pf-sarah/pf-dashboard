@@ -189,7 +189,7 @@ export async function GET(req: NextRequest) {
       byPerson[row.full_name].checkCount += 1;
     }
 
-    return NextResponse.json({ ok: true, people: Object.values(byPerson) });
+    return NextResponse.json({ ok: true, people: Object.values(byPerson), rawRows: data ?? [] });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
