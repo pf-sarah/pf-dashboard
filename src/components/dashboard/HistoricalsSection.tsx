@@ -131,7 +131,7 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: updated.hours, actualOrders: updated.orders }),
         });
-        refresh();
+        // No refresh() — localEdits already reflects the change, avoids disrupting input focus
       } catch {}
       setSavingKey(null);
     }, 800);
