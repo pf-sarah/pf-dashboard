@@ -1247,6 +1247,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
   team: FfTeamMember[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  employeeRates?:       Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   onUpdateName: (id: string, name: string) => void;
   onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) => void;
   onRemove: (id: string) => void;
@@ -1303,7 +1304,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange }: {
+  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {} }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1311,6 +1312,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
   mgrTotalHours:         Record<string, number[]>;
   onPresHoursChange:     (h: Record<string, number[]>) => void;
@@ -1466,15 +1468,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const base = defaultTeam.map(m => {
       const roster = presRoster[m.id];
       const hours  = presHours[m.id] ?? Array(WEEKS).fill(m.hours[0] ?? 0);
-      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, hours };
+      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), hours };
     });
     // Add any custom members stored in presRoster not in defaultTeam
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(presRoster).forEach(([id, r]) => {
       if (!defaultIds.has(id)) {
         base.push({
-          id, name: r.name, ratio: r.ratio, rate: r.rate,
-          pay: 'hourly' as const,
+          id, name: r.name, ratio: r.ratio, rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0),
           payType: (r.payType ?? 'hourly') as 'hourly' | 'salary',
           annualSalary: r.annualSalary ?? 0,
           hours: presHours[id] ?? Array(WEEKS).fill(0),
@@ -1978,7 +1979,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 // ─── FulfillmentSection ────────────────────────────────────────────────────────
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
-  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange }: {
+  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {} }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
@@ -1990,6 +1991,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   onFfHoursChange:      (h: Record<string, number[]>) => void;
   onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onMgrTotalHoursChange:(h: Record<string, number[]>) => void;
+  employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>({});
@@ -2021,7 +2023,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const base = defaultTeam.map(m => {
       const roster = ffRoster[m.id];
       const hours  = ffHours[m.id] ?? [...m.hours];
-      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate ?? m.rate, name: roster?.name ?? m.name,
+      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), name: roster?.name ?? m.name,
         payType: roster?.payType ?? 'hourly' as const,
         annualSalary: roster?.annualSalary ?? 0, hours };
     });
@@ -2030,7 +2032,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       if (!defaultIds.has(id)) {
         base.push({ id, name: r.name ?? 'New Member', ratio: r.ratio ?? 1.0, pay: 'hourly' as const,
           payType: r.payType ?? 'hourly' as const, annualSalary: r.annualSalary ?? 0,
-          rate: r.rate ?? 0, hours: ffHours[id] ?? Array(8).fill(0) });
+        rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0), hours: ffHours[id] ?? Array(8).fill(0) });
       }
     });
     return base;
@@ -2853,6 +2855,25 @@ export function SchedulePage({
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
+  // Employee rates from Rippling — used to fill zero rates for flex members
+  const [employeeRates, setEmployeeRates] = useState<Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>>({});
+  useEffect(() => {
+    fetch(`/api/admin/employees-upload?location=${location}`)
+      .then(r => r.json())
+      .then((d: { employees?: { full_name: string; pay_type: string; hourly_rate: number; annual_salary: number }[] }) => {
+        const map: Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }> = {};
+        (d.employees ?? []).forEach(e => {
+          map[e.full_name] = {
+            hourlyRate:   e.hourly_rate   ?? 0,
+            annualSalary: e.annual_salary ?? 0,
+            payType:      (e.pay_type === 'salary' ? 'salary' : 'hourly') as 'hourly'|'salary',
+          };
+        });
+        setEmployeeRates(map);
+      })
+      .catch(() => {});
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Derive designers and schedule from persisted settings + defaults
   const defaultDesigners = location === 'Utah' ? DEFAULT_UTAH_DESIGNERS : DEFAULT_GEORGIA_DESIGNERS;
@@ -3290,6 +3311,7 @@ export function SchedulePage({
           onPresRosterChange={(r) => update('presRoster', r)}
           onPresSettingsChange={(s) => update('presSettings', s)}
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
+          employeeRates={employeeRates}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=all&weeks=52`)
               .then(r => r.json())
