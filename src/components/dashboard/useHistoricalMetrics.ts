@@ -124,6 +124,16 @@ function getMonthBounds(offsetMonths: number): { start: string; end: string } {
   const d = new Date();
   const first = new Date(d.getFullYear(), d.getMonth() + offsetMonths, 1);
   const last  = new Date(d.getFullYear(), d.getMonth() + offsetMonths + 1, 0);
+  // For current month: cap end at last completed Monday (don't include current week)
+  if (offsetMonths === 0) {
+    const lastMon = getMondayDate(-1); // last completed week's Monday
+    const lastMonStr = isoDate(lastMon);
+    // end = Sunday of last completed week = lastMon + 6 days
+    const lastSun = new Date(lastMon);
+    lastSun.setDate(lastMon.getDate() + 6);
+    const cappedEnd = isoDate(lastSun) < isoDate(last) ? isoDate(lastSun) : isoDate(last);
+    return { start: isoDate(first), end: cappedEnd };
+  }
   return { start: isoDate(first), end: isoDate(last) };
 }
 
@@ -174,36 +184,31 @@ function computeActualDeptMetrics(
   const estimatedPayroll: string[] = [];
   const weeksInPeriod = new Set(deptRows.map(r => r.week_of)).size || 1;
 
-  roster.forEach(m => {
-    const data = byMember[m.name] ?? { hours: 0, orders: 0 };
+  // Orders and hours: sum from ALL actuals rows (includes flex workers not on roster)
+  Object.values(byMember).forEach(data => {
     totalOrders += data.orders;
     totalHours  += data.hours;
+  });
 
-    // Check if we have actual Rippling data for this person
-    const ripplingGross = payroll[m.name];
-    if (ripplingGross !== undefined && ripplingGross > 0) {
-      // Use actual gross pay from Rippling
-      totalCost += ripplingGross;
-      actualPayroll.push(m.name);
-    } else if (m.payType === 'salary') {
-      if (m.annualSalary > 0) {
+  // Cost: use weekly_labor_cost totals directly (payroll map = sum of gross pay per person)
+  // This correctly handles flex workers, mid-month joiners, etc.
+  const payrollTotal = Object.values(payroll).reduce((s, v) => s + v, 0);
+  if (payrollTotal > 0) {
+    totalCost += payrollTotal;
+    roster.forEach(m => { if (payroll[m.name]) actualPayroll.push(m.name); else estimatedPayroll.push(m.name); });
+  } else {
+    // Fallback to roster estimates if no payroll data
+    roster.forEach(m => {
+      if (m.payType === 'salary' && m.annualSalary > 0) {
         totalCost += (m.annualSalary / 52) * weeksInPeriod;
         estimatedPayroll.push(m.name);
-      } else {
-        missingRates.push(m.name);
-      }
-    } else {
-      const totalH = m.isManager
-        ? (data.hours + (m.mgrTotalHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0))
-        : data.hours;
-      if (m.hourlyRate > 0) {
-        totalCost += totalH * m.hourlyRate;
+      } else if (m.hourlyRate > 0) {
+        const data = byMember[m.name] ?? { hours: 0, orders: 0 };
+        totalCost += data.hours * m.hourlyRate;
         estimatedPayroll.push(m.name);
-      } else if (data.hours > 0) {
-        missingRates.push(m.name);
       }
-    }
-  });
+    });
+  }
 
   // Add salary manager cost (not in weekly_labor_cost)
   totalCost += getSalaryManagerCost(location, dept, weekStart, weekEnd);
