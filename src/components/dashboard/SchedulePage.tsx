@@ -2863,11 +2863,16 @@ export function SchedulePage({
       .then((d: { employees?: { full_name: string; pay_type: string; hourly_rate: number; annual_salary: number }[] }) => {
         const map: Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }> = {};
         (d.employees ?? []).forEach(e => {
-          map[e.full_name] = {
+          const entry = {
             hourlyRate:   e.hourly_rate   ?? 0,
             annualSalary: e.annual_salary ?? 0,
             payType:      (e.pay_type === 'salary' ? 'salary' : 'hourly') as 'hourly'|'salary',
           };
+          // Index by full name, lowercase full name, and lowercase first name for flex member lookups
+          map[e.full_name] = entry;
+          map[e.full_name.toLowerCase()] = entry;
+          const firstName = e.full_name.split(' ')[0].toLowerCase();
+          if (!map[firstName]) map[firstName] = entry;
         });
         setEmployeeRates(map);
       })
