@@ -1403,11 +1403,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const days: { iso: string; utahEst: number; gaEst: number; utahDefault: number; gaDefault: number; label: string; dateStr: string }[] = [];
     // Always use current week's Monday, not the event date range
     const _today = new Date();
-    const _dow = _today.getDay();
-    const _diff = _dow === 0 ? -6 : 1 - _dow;
+    _today.setHours(0, 0, 0, 0);
+    const _dow = _today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const _daysToMon = _dow === 0 ? -6 : 1 - _dow;
     const _mon = new Date(_today);
-    _mon.setDate(_today.getDate() + _diff);
-    const d = new Date(_mon.toISOString().split('T')[0] + 'T12:00:00');
+    _mon.setDate(_today.getDate() + _daysToMon);
+    const d = new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate(), 12, 0, 0);
     let dayIdx = 0;
     while (days.length < 5) {
       const dow = d.getDay();
