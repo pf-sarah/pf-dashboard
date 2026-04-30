@@ -1401,7 +1401,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   // Build 5 weekdays starting from the loaded dateFrom
   const fiveDays = (() => {
     const days: { iso: string; utahEst: number; gaEst: number; utahDefault: number; gaDefault: number; label: string; dateStr: string }[] = [];
-    const d = new Date((dateFrom || new Date().toISOString().split('T')[0]) + 'T12:00:00');
+    // Always use current week's Monday, not the event date range
+    const _today = new Date();
+    const _dow = _today.getDay();
+    const _diff = _dow === 0 ? -6 : 1 - _dow;
+    const _mon = new Date(_today);
+    _mon.setDate(_today.getDate() + _diff);
+    const d = new Date(_mon.toISOString().split('T')[0] + 'T12:00:00');
     let dayIdx = 0;
     while (days.length < 5) {
       const dow = d.getDay();
