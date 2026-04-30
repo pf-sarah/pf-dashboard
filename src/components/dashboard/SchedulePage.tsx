@@ -240,7 +240,7 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
               location={location ?? 'Utah'}
               department="Design"
               onChange={val => onChange(d.id, 'name', val)}
-              onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); }}
+              onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); onChange(d.id, 'hourlyRate', String(emp.hourly_rate ?? 0)); onChange(d.id, 'payType', emp.pay_type); onChange(d.id, 'annualSalary', String(emp.annual_salary ?? 0)); }}
             />
             <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
@@ -1218,7 +1218,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
               location={deptLocation ?? 'Utah'}
               department="Preservation"
               onChange={val => onUpdateRoster(m.id, 'name', val)}
-              onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); }}
+              onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); onUpdateRoster(m.id, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(m.id, 'payType', emp.pay_type); onUpdateRoster(m.id, 'annualSalary', emp.annual_salary ?? 0); }}
             />
             <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
@@ -1278,7 +1278,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               location={deptLocation ?? 'Utah'}
               department="Fulfillment"
               onChange={val => onUpdateName(m.id, val)}
-              onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); }}
+              onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); onUpdateRoster(mi, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(mi, 'payType', emp.pay_type); onUpdateRoster(mi, 'annualSalary', emp.annual_salary ?? 0); }}
             />
             <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
@@ -2864,7 +2864,7 @@ export function SchedulePage({
         const map: Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }> = {};
         (d.employees ?? []).forEach(e => {
           const entry = {
-            hourlyRate:   e.hourly_rate   ?? 0,
+            hourlyRate:   e.hourly_rate > 0 ? e.hourly_rate : (e.annual_salary > 0 ? e.annual_salary / 2080 : 0),
             annualSalary: e.annual_salary ?? 0,
             payType:      (e.pay_type === 'salary' ? 'salary' : 'hourly') as 'hourly'|'salary',
           };

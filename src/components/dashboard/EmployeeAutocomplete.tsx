@@ -70,6 +70,8 @@ export function EmployeeAutocomplete({ value, location, department, onChange, on
     setQuery(emp.full_name);
     setSuggestions([]);
     setOpen(false);
+    // Cancel any pending debounced onChange to avoid partial name overwriting the selection
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     onSelect(emp);
   }
 
