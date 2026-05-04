@@ -8,15 +8,15 @@ const supabase = createClient(
 );
 
 const PIPELINE_STATUSES = [
-  'bouquetReceived','checkedOn','inProgress','almostReadyToFrame',
+  'bouquetReceived','checkedOn','progress','almostReadyToFrame',
   'readyToFrame','frameCompleted','glued','readyToSeal',
-  'readyToPackage','readyToFulfill','preparingToShip','approved','disapproved',
+  'readyToPackage','readyToFulfill','preparingToBeShipped','approved','disapproved',
 ];
 
 const STATUS_RANK: Record<string, number> = {
-  bouquetReceived:1, checkedOn:2, inProgress:3, almostReadyToFrame:4,
+  bouquetReceived:1, checkedOn:2, progress:3, almostReadyToFrame:4,
   readyToFrame:5, frameCompleted:6, glued:7, readyToSeal:8,
-  readyToPackage:9, readyToFulfill:10, preparingToShip:11, approved:12, disapproved:13,
+  readyToPackage:9, readyToFulfill:10, preparingToBeShipped:11, approved:12, disapproved:13,
 };
 
 const RESIN_PRODUCT_IDS = new Set([
