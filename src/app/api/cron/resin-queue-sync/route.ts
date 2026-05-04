@@ -119,7 +119,6 @@ export async function GET(req: NextRequest) {
             : `/orders.json?page_info=${photoPageInfo}&limit=250&fields=id,order_number,created_at,tags,line_items`
         );
         photoIsFirst = false;
-        const data = await shopifyFetch(url);
         const orders: ShopifyOrder[] = data.orders ?? [];
 
         for (const order of orders) {
