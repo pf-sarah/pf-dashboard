@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
       while (true) {
         let url: string;
         if (isFirst) {
-          url = `/orders.json?tag=${status}&fulfillment_status=partial,unshipped&status=open&limit=250&fields=id,order_number,created_at,tags,line_items`;
+          url = `/orders.json?tag=${status}&status=open&limit=250&fields=id,order_number,created_at,tags,line_items`;
         } else {
           url = `/orders.json?page_info=${pageInfo}&limit=250&fields=id,order_number,created_at,tags,line_items`;
         }
