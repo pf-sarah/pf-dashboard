@@ -113,15 +113,21 @@ export async function GET(req: NextRequest) {
       let photoPageInfo: string | null = null;
       let photoIsFirst = true;
       while (true) {
-        const url = photoIsFirst
-          ? `/orders.json?status=open&limit=250&fields=id,order_number,created_at,tags,line_items`
-          : `/orders.json?page_info=${photoPageInfo}&limit=250&fields=id,order_number,created_at,tags,line_items`;
+        const data = await shopifyFetch(
+          photoIsFirst
+            ? `/orders.json?tag=Custom+Resin&status=open&limit=250&fields=id,order_number,created_at,tags,line_items`
+            : `/orders.json?page_info=${photoPageInfo}&limit=250&fields=id,order_number,created_at,tags,line_items`
+        );
         photoIsFirst = false;
-
         const data = await shopifyFetch(url);
         const orders: ShopifyOrder[] = data.orders ?? [];
 
         for (const order of orders) {
+          // Skip orders already caught by pipeline status tag search above
+          const orderTags = (order.tags ?? '').split(',').map((t: string) => t.trim());
+          const hasPipelineTag = PIPELINE_STATUSES.some(s => orderTags.includes(s));
+          if (hasPipelineTag) continue;
+
           const hasPhotoVariant = order.line_items.some(
             (li: ShopifyLineItem) => PHOTO_INSPIRATION_VARIANT_IDS.has(String(li.variant_id))
           );
