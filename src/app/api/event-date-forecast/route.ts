@@ -18,17 +18,24 @@ export async function GET(req: NextRequest) {
   const token  = process.env.SHOPIFY_ADMIN_TOKEN?.trim();
   if (!domain || !token) return NextResponse.json({ error: 'Shopify not configured' }, { status: 500 });
 
-  const currentCount   = parseInt(req.nextUrl.searchParams.get('currentCount') ?? '0');
-  const eventWeekStart = req.nextUrl.searchParams.get('eventWeekStart') ?? '';
+  // The event date range the user selected
+  const startDate    = req.nextUrl.searchParams.get('start') ?? '';
+  const endDate      = req.nextUrl.searchParams.get('end')   ?? '';
+  const currentCount = parseInt(req.nextUrl.searchParams.get('currentCount') ?? '0');
+
+  if (!startDate || !endDate) {
+    return NextResponse.json({ error: 'start and end required' }, { status: 400 });
+  }
 
   try {
-    const twoMonthsAgo = new Date();
-    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    // Pull last 3 months of orders to build the curve + cover current range
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
 
     const all: ShopifyOrder[] = [];
     let url: string | null =
       `https://${domain}/admin/api/2024-10/orders.json?status=any&limit=250` +
-      `&created_at_min=${encodeURIComponent(twoMonthsAgo.toISOString())}` +
+      `&created_at_min=${encodeURIComponent(threeMonthsAgo.toISOString())}` +
       `&fields=id,name,tags,created_at`;
 
     while (url) {
@@ -46,86 +53,106 @@ export async function GET(req: NextRequest) {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const todayMs = today.getTime();
 
-    // Group orders by event-week Monday
-    const weekMap: Record<string, ShopifyOrder[]> = {};
+    // ── STEP 1: Build cumulative curve from settled historical event dates ──────
+    // A settled event date = event date is 14+ days ago (full 7-day window closed + buffer)
+    // For each settled event date, collect all orders placed within -30 to +7 days of it
+    // Then compute what fraction were placed by day 0, 1, 2, ... 7
+
+    // Group all orders by their event date tag
+    const byEventDate: Record<string, { placedMs: number }[]> = {};
     for (const order of all) {
-      const tags = order.tags.split(',').map(t => t.trim());
-      const eventDateTag = tags.find(t => /^\d{4}-\d{2}-\d{2}$/.test(t));
-      if (!eventDateTag) continue;
-      const eventDate = new Date(eventDateTag + 'T12:00:00');
-      const dow = eventDate.getDay();
-      const daysToMon = dow === 0 ? -6 : 1 - dow;
-      const weekMon = new Date(eventDate);
-      weekMon.setDate(eventDate.getDate() + daysToMon);
-      const weekKey = weekMon.toISOString().split('T')[0];
-      if (!weekMap[weekKey]) weekMap[weekKey] = [];
-      weekMap[weekKey].push(order);
+      const tags = order.tags.split(',').map((t: string) => t.trim());
+      const eventTag = tags.find((t: string) => /^\d{4}-\d{2}-\d{2}$/.test(t));
+      if (!eventTag) continue;
+      const placedMs = new Date(order.created_at).setHours(0, 0, 0, 0);
+      if (!byEventDate[eventTag]) byEventDate[eventTag] = [];
+      byEventDate[eventTag].push({ placedMs });
     }
 
-    // Compute avg fraction of final orders placed by Mon / Tue / Wed
-    // using only complete past weeks with enough signal
-    const stats = { mon: 0, tue: 0, wed: 0, total: 0, weekCount: 0 };
+    // For settled dates, compute cumulative % by day (0–7)
+    // cumulativeByDay[d] = avg fraction of final total placed by day d after event
+    const dayAccum: number[] = Array(8).fill(0); // index 0–7
+    let settledDateCount = 0;
 
-    for (const [weekKey, orders] of Object.entries(weekMap)) {
-      const weekMon = new Date(weekKey + 'T12:00:00');
-      const weekSun = new Date(weekMon);
-      weekSun.setDate(weekMon.getDate() + 6);
-      weekSun.setHours(23, 59, 59);
-      if (weekSun >= today) continue;  // skip incomplete weeks
-      if (orders.length < 3) continue; // skip noise
+    for (const [eventDateStr, orders] of Object.entries(byEventDate)) {
+      const eventMs = new Date(eventDateStr + 'T12:00:00').setHours(0, 0, 0, 0);
+      const daysAgo = Math.floor((todayMs - eventMs) / 86400000);
 
-      const finalCount  = orders.length;
-      const weekMonMs   = weekMon.getTime();
-      let byMon = 0, byTue = 0, byWed = 0;
+      // Only use dates that are fully settled (14+ days ago)
+      if (daysAgo < 14) continue;
+      // Only use dates with enough signal
+      if (orders.length < 2) continue;
 
-      for (const order of orders) {
-        const placed = new Date(order.created_at);
-        placed.setHours(0, 0, 0, 0);
-        const daysIntoWeek = Math.floor((placed.getTime() - weekMonMs) / 86400000);
-        if (daysIntoWeek <= 0) byMon++;
-        if (daysIntoWeek <= 1) byTue++;
-        if (daysIntoWeek <= 2) byWed++;
+      // Filter to orders placed within -30 to +7 days of event date
+      const relevant = orders.filter(o => {
+        const diff = Math.floor((o.placedMs - eventMs) / 86400000);
+        return diff >= -30 && diff <= 7;
+      });
+      if (relevant.length < 2) continue;
+
+      const finalCount = relevant.length;
+
+      // For each day 0–7, count how many orders placed by that day
+      for (let d = 0; d <= 7; d++) {
+        const byDay = relevant.filter(o =>
+          Math.floor((o.placedMs - eventMs) / 86400000) <= d
+        ).length;
+        dayAccum[d] += byDay / finalCount;
       }
-
-      stats.mon       += byMon / finalCount;
-      stats.tue       += byTue / finalCount;
-      stats.total     += finalCount;
-      stats.weekCount++;
-      // byTue and byWed accumulate separately
-      stats.tue += 0; // already counted above — reset handled below
-      stats.wed += byWed / finalCount;
+      settledDateCount++;
     }
 
-    const wc = stats.weekCount || 1;
-    const multipliers = {
-      byMonday:       stats.mon / wc,
-      byTuesday:      stats.tue / wc,
-      byWednesday:    stats.wed / wc,
-      weeksAnalyzed:  stats.weekCount,
-      avgWeeklyTotal: stats.weekCount > 0 ? Math.round(stats.total / stats.weekCount) : 0,
-    };
+    // Average across all settled event dates
+    const curve: number[] = dayAccum.map(v =>
+      settledDateCount > 0 ? v / settledDateCount : 0
+    );
 
+    // ── STEP 2: Compute blended % for the selected date range ─────────────────
+    // For each event date in the range, look up how many days ago it was
+    // and read that day's cumulative % from the curve.
+    // Blend across all dates in range (simple average).
+
+    const rangeDates: string[] = [];
+    const cursor = new Date(startDate + 'T12:00:00');
+    const rangeEnd = new Date(endDate + 'T12:00:00');
+    while (cursor <= rangeEnd) {
+      rangeDates.push(cursor.toISOString().split('T')[0]);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    let blendedPct = 0;
+    for (const dateStr of rangeDates) {
+      const eventMs = new Date(dateStr + 'T12:00:00').setHours(0, 0, 0, 0);
+      const daysAfter = Math.floor((todayMs - eventMs) / 86400000);
+      // Clamp to 0–7; dates in the future get 0, dates 7+ days ago get curve[7]
+      const clampedDay = Math.max(0, Math.min(7, daysAfter));
+      blendedPct += curve[clampedDay];
+    }
+    blendedPct = rangeDates.length > 0 ? blendedPct / rangeDates.length : 0;
+
+    // ── STEP 3: Project expected total ────────────────────────────────────────
     let projection: {
-      expected: number; confidence: string; multiplierUsed: number; dayOfWeek: string
+      expected: number;
+      blendedPct: number;
+      stillExpected: number;
+      confidence: string;
+      curve: number[];
     } | null = null;
 
-    if (currentCount > 0 && eventWeekStart) {
-      const eventMon     = new Date(eventWeekStart + 'T12:00:00');
-      const daysIntoWeek = Math.floor((today.getTime() - eventMon.getTime()) / 86400000);
-      let multiplierUsed = multipliers.byMonday;
-      let dayOfWeek      = 'Monday';
-      if (daysIntoWeek <= 0)      { multiplierUsed = multipliers.byMonday;    dayOfWeek = 'Monday'; }
-      else if (daysIntoWeek <= 1) { multiplierUsed = multipliers.byTuesday;   dayOfWeek = 'Tuesday'; }
-      else if (daysIntoWeek <= 2) { multiplierUsed = multipliers.byWednesday; dayOfWeek = 'Wednesday'; }
-      else                        { multiplierUsed = 0.95;                     dayOfWeek = 'Thursday+'; }
-
-      const expected   = multiplierUsed > 0.05 ? Math.round(currentCount / multiplierUsed) : currentCount;
-      const confidence = stats.weekCount >= 6 ? 'high' : stats.weekCount >= 3 ? 'medium' : 'low';
-      projection = { expected, confidence, multiplierUsed, dayOfWeek };
+    if (currentCount > 0 && blendedPct > 0.05) {
+      const expected      = Math.round(currentCount / blendedPct);
+      const stillExpected = Math.max(0, expected - currentCount);
+      const confidence    = settledDateCount >= 10 ? 'high' : settledDateCount >= 4 ? 'medium' : 'low';
+      projection = { expected, blendedPct, stillExpected, confidence, curve };
     }
 
-    return NextResponse.json({ multipliers, projection, weeksAnalyzed: stats.weekCount });
+    return NextResponse.json({
+      curve,
+      settledDateCount,
+      projection,
+    });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

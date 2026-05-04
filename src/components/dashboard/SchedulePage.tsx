@@ -1366,20 +1366,23 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const [shopifyLoading, setShopifyLoading] = useState(false);
   const [shopifyError,   setShopifyError]   = useState('');
 
-  // ── Forecast: expected total based on day-of-week order patterns ─────────────
+  // ── Forecast: expected final total based on days-after-event order curve ───────
   const [forecastExpected,  setForecastExpected]  = useState<number | null>(null);
-  const [forecastDay,       setForecastDay]       = useState('');
+  const [forecastStill,     setForecastStill]     = useState<number | null>(null);
   const [forecastLoading,   setForecastLoading]   = useState(false);
 
-  function loadForecast(currentCount: number, eventWeekStart: string) {
-    if (currentCount === 0) { setForecastExpected(null); return; }
+  function loadForecast(currentCount: number, from: string, to: string) {
+    if (currentCount === 0) { setForecastExpected(null); setForecastStill(null); return; }
     setForecastLoading(true);
-    fetch(`/api/event-date-forecast?currentCount=${currentCount}&eventWeekStart=${eventWeekStart}`)
+    fetch(`/api/event-date-forecast?start=${from}&end=${to}&currentCount=${currentCount}`)
       .then(r => r.json())
-      .then((d: { projection?: { expected: number; dayOfWeek: string } }) => {
+      .then((d: { projection?: { expected: number; stillExpected: number } }) => {
         if (d.projection) {
           setForecastExpected(d.projection.expected);
-          setForecastDay(d.projection.dayOfWeek);
+          setForecastStill(d.projection.stillExpected);
+        } else {
+          setForecastExpected(null);
+          setForecastStill(null);
         }
       })
       .catch(() => {})
@@ -1395,14 +1398,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         if (d.error) { setShopifyError(d.error); return; }
         setShopifyByDate(d.byDate ?? {});
         setShopifyTotal(d.total ?? 0);
-        // Compute event-week Monday for forecast (use the start of the loaded range)
-        const rangeStart = new Date(from + 'T12:00:00');
-        const dow = rangeStart.getDay();
-        const daysToMon = dow === 0 ? -6 : 1 - dow;
-        const weekMon = new Date(rangeStart);
-        weekMon.setDate(rangeStart.getDate() + daysToMon);
-        const weekMonIso = weekMon.toISOString().split('T')[0];
-        loadForecast(d.total ?? 0, weekMonIso);
+        loadForecast(d.total ?? 0, from, to);
       })
       .catch(e => setShopifyError(String(e)))
       .finally(() => setShopifyLoading(false));
@@ -1645,8 +1641,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                 {shopifyTotal > 0 && <span className="text-[10px] bg-rose-100 text-rose-600 rounded px-1.5 py-0.5">live</span>}
                 {forecastLoading && <span className="text-xs text-slate-300 italic">forecasting…</span>}
                 {!forecastLoading && forecastExpected !== null && forecastExpected > shopifyTotal && (
-                  <span className="text-sm text-slate-400" title={`Based on historical ${forecastDay} order patterns`}>
+                  <span className="text-sm font-medium text-slate-500">
                     ~{forecastExpected} expected
+                    {forecastStill !== null && forecastStill > 0 && (
+                      <span className="ml-1 text-xs text-slate-400">(+{forecastStill} more coming)</span>
+                    )}
                   </span>
                 )}
               </div>
