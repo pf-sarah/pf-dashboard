@@ -197,6 +197,7 @@ interface ShopifyLineItem {
   id:                 number;
   title:              string;
   variant_title:      string | null;
+  variant_id:         number;
   product_id:         number;
   quantity:           number;
   fulfillment_status: string | null;
