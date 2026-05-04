@@ -224,9 +224,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     setSyncLoading(true);
     setSyncResult(null);
     try {
-      const res = await fetch('/api/cron/resin-queue-sync', {
-        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}` },
-      });
+      const res = await fetch('/api/cron/resin-queue-sync');
       const d = await res.json();
       setSyncResult(`Synced ${d.synced ?? 0} resin items (${d.skipped ?? 0} skipped — not yet bouquetReceived)`);
       // Refresh summary
@@ -245,7 +243,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     try {
       const res = await fetch(
         `/api/admin/sync-resin-locations${dryRun ? '?dryRun=true' : ''}`,
-        { method: 'POST', headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET ?? ''}` } }
+        { method: 'POST' }
       );
       const d = await res.json();
       setMoveResult(
