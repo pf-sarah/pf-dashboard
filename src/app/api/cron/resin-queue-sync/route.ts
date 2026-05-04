@@ -25,6 +25,14 @@ const RESIN_PRODUCT_IDS = new Set([
   '8069413830826',
 ]);
 
+// Orders containing these variant IDs are photo-inspiration orders.
+// They never enter the PF pipeline so qualify for the resin queue immediately.
+const PHOTO_INSPIRATION_VARIANT_IDS = new Set([
+  '47597372833962',  // locket
+  '47597193232554',  // pressed floral necklace
+  '47597411598506',  // ring
+]);
+
 const SHOPIFY_API_VERSION = '2024-01';
 
 async function shopifyFetch(path: string) {
@@ -100,10 +108,61 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // ── Also fetch photo-inspiration orders (no pipeline tag needed) ──────────
+    {
+      let photoPageInfo: string | null = null;
+      let photoIsFirst = true;
+      while (true) {
+        const url = photoIsFirst
+          ? `/orders.json?status=open&limit=250&fields=id,order_number,created_at,tags,line_items`
+          : `/orders.json?page_info=${photoPageInfo}&limit=250&fields=id,order_number,created_at,tags,line_items`;
+        photoIsFirst = false;
+
+        const data = await shopifyFetch(url);
+        const orders: ShopifyOrder[] = data.orders ?? [];
+
+        for (const order of orders) {
+          const hasPhotoVariant = order.line_items.some(
+            (li: ShopifyLineItem) => PHOTO_INSPIRATION_VARIANT_IDS.has(String(li.variant_id))
+          );
+          if (!hasPhotoVariant) continue;
+
+          for (const li of order.line_items) {
+            if (!RESIN_PRODUCT_IDS.has(String(li.product_id))) continue;
+            if (li.fulfillment_status === 'fulfilled') continue;
+            if (seen.has(String(li.id))) continue;
+            seen.add(String(li.id));
+
+            resinLineItems.push({
+              shopifyOrderId:     String(order.id),
+              shopifyOrderNumber: String(order.order_number),
+              lineItemId:         String(li.id),
+              lineItemTitle:      li.title ?? '',
+              variantTitle:       li.variant_title ?? null,
+              quantity:           li.quantity ?? 1,
+              fulfillmentStatus:  li.fulfillment_status ?? null,
+              productId:          String(li.product_id),
+              orderCreatedAt:     order.created_at,
+              pipelineStatus:     'photoOrder',
+            });
+          }
+        }
+
+        const linkHeader = (data as { link?: string }).link ?? '';
+        if (linkHeader.includes('rel="next"')) {
+          const match = linkHeader.match(/page_info=([^&>]+)[^>]*>;\s*rel="next"/);
+          photoPageInfo = match?.[1] ?? null;
+          if (!photoPageInfo) break;
+        } else {
+          break;
+        }
+      }
+    }
+
     console.log(`[resin-queue-sync] Found ${resinLineItems.length} unfulfilled resin line items`);
 
     if (resinLineItems.length === 0) {
-      return NextResponse.json({ synced: 0, message: 'No unfulfilled resin line items found with pipeline status tags' });
+      return NextResponse.json({ synced: 0, message: 'No unfulfilled resin line items found' });
     }
 
     const orderNumbers = [...new Set(resinLineItems.map(li => li.shopifyOrderNumber))];
