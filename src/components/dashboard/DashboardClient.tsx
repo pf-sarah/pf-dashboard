@@ -5,6 +5,7 @@ import { ResponseTimeSection } from './ResponseTimeSection';
 import { EventDateSection } from './EventDateSection';
 import { SortedLocationSection } from './SortedLocationSection';
 import { SchedulePage } from './SchedulePage';
+import ResinPage from './ResinPage';
 
 interface PipelineCount {
   status: string;

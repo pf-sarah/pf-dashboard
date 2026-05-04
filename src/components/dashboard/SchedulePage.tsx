@@ -1,4 +1,5 @@
 'use client';
+import ResinPage from './ResinPage';
 import { RipplingUpload } from './RipplingUpload';
 import { EmployeeAutocomplete } from './EmployeeAutocomplete';
 import type { RipplingEmployee } from './EmployeeAutocomplete';
@@ -2858,7 +2859,7 @@ export function SchedulePage({
 }: SchedulePageProps) {
 
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
-  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll'>('design');
+  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>('design');
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
@@ -3269,6 +3270,8 @@ export function SchedulePage({
               ['fulfillment',  'Fulfillment'],
               ['master',       'Master Schedule'],
               ['payroll',      'Payroll Upload'],
+              ['resin',        'Resin'],
+              ['resin',        'Resin'],
             ] as const).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
@@ -3937,6 +3940,9 @@ export function SchedulePage({
         </div>
       )}
 
+      {dept === 'resin' && (
+        <ResinPage />
+      )}
       {dept === 'master' && (
         <MasterScheduleSection
           location={location}
