@@ -166,6 +166,7 @@ export async function GET(req: NextRequest) {
       ordersMatched: orderMap.size,
       ordersTotal:   orderNumbers.length,
       unmatched:     orderNumbers.length - orderMap.size,
+      supabaseUrl:   process.env.NEXT_PUBLIC_SUPABASE_URL,
     });
 
   } catch (err) {
