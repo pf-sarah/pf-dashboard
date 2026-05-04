@@ -22,6 +22,7 @@ const STATUS_RANK: Record<string, number> = {
 const RESIN_PRODUCT_IDS = new Set([
   '8199232553130',
   '7880850047146',
+  '8069413830826',
 ]);
 
 const SHOPIFY_API_VERSION = '2024-01';
