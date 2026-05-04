@@ -717,6 +717,32 @@ function ResinQueueTable() {
   const [total, setTotal]   = useState(0);
   const [page, setPage]     = useState(1);
   const [loading, setLoading] = useState(true);
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [moveResults, setMoveResults] = useState<Record<string, 'moved' | 'error'>>({});
+
+  async function moveToUtah(order: ResinQueueRow) {
+    setMovingId(order.line_item_id);
+    try {
+      const res = await fetch('/api/admin/sync-resin-locations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shopifyOrderId: order.shopify_order_id, lineItemId: order.line_item_id }),
+      });
+      const d = await res.json();
+      if (d.moved >= 1 || d.alreadyUtah >= 1) {
+        setMoveResults(r => ({ ...r, [order.line_item_id]: 'moved' }));
+        setOrders(prev => prev.map(o =>
+          o.line_item_id === order.line_item_id ? { ...o, origin_location: 'Utah' } : o
+        ));
+      } else {
+        setMoveResults(r => ({ ...r, [order.line_item_id]: 'error' }));
+      }
+    } catch {
+      setMoveResults(r => ({ ...r, [order.line_item_id]: 'error' }));
+    } finally {
+      setMovingId(null);
+    }
+  }
 
   const fetchPage = useCallback(async (p: number) => {
     setLoading(true);
@@ -768,6 +794,7 @@ function ResinQueueTable() {
               <th className="px-3 py-2 text-left font-medium text-slate-500">Origin</th>
               <th className="px-3 py-2 text-left font-medium text-slate-500">Order date</th>
               <th className="px-3 py-2 text-center font-medium text-slate-500">Qty</th>
+              <th className="px-3 py-2 text-center font-medium text-slate-500">Location</th>
             </tr>
           </thead>
           <tbody>
@@ -791,6 +818,21 @@ function ResinQueueTable() {
                 </td>
                 <td className="px-3 py-1.5 text-slate-500">{o.order_date ?? '—'}</td>
                 <td className="px-3 py-1.5 text-center text-slate-600">{o.quantity}</td>
+                <td className="px-3 py-1.5 text-center">
+                  {o.origin_location === 'Georgia' && moveResults[o.line_item_id] !== 'moved' ? (
+                    <button
+                      onClick={() => moveToUtah(o)}
+                      disabled={movingId === o.line_item_id}
+                      className="text-[10px] bg-amber-500 hover:bg-amber-600 text-white rounded px-2 py-1 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      {movingId === o.line_item_id ? '…' : 'Move to UT'}
+                    </button>
+                  ) : moveResults[o.line_item_id] === 'moved' ? (
+                    <span className="text-[10px] text-emerald-600 font-medium">✓ Moved</span>
+                  ) : moveResults[o.line_item_id] === 'error' ? (
+                    <span className="text-[10px] text-red-500">Failed</span>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -937,6 +979,7 @@ function ResinHistoricalsSection({
 
 interface ResinQueueRow {
   line_item_id:        string;
+  shopify_order_id:    string;
   shopify_order_number: string;
   line_item_title:     string;
   variant_title:       string | null;
