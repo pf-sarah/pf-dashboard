@@ -152,15 +152,14 @@ export async function GET(req: NextRequest) {
     if (upsertError) throw new Error('Upsert failed: ' + JSON.stringify(upsertError));
     const insertedCount = upsertData?.length ?? 0;
 
-    const activeIds = resinLineItems.map(li => li.lineItemId);
-    if (activeIds.length > 0) {
-      await supabase
-        .from('resin_queue')
-        .delete()
-        .not('line_item_id', 'in', `(${activeIds.map(id => `'${id}'`).join(',')})`);
-    }
-
-    return NextResponse.json({
+    // DISABLED: const activeIds = resinLineItems.map(li => li.lineItemId);
+    // DISABLED: if (activeIds.length > 0) {
+    // DISABLED: await supabase
+    // DISABLED: .from('resin_queue')
+    // DISABLED: .delete()
+    // DISABLED: .not('line_item_id', 'in', `(${activeIds.map(id => `'${id}'`).join(',')})`);
+    // DISABLED: }
+    // DISABLED:     return NextResponse.json({
       synced:        rows.length,
       inserted:      insertedCount,
       ordersMatched: orderMap.size,
