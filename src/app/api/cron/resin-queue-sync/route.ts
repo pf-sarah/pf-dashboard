@@ -144,11 +144,13 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const { error: upsertError } = await supabase
+    const { error: upsertError, data: upsertData } = await supabase
       .from('resin_queue')
-      .upsert(rows, { onConflict: 'line_item_id' });
+      .upsert(rows, { onConflict: 'line_item_id' })
+      .select('line_item_id');
 
-    if (upsertError) throw upsertError;
+    if (upsertError) throw new Error('Upsert failed: ' + JSON.stringify(upsertError));
+    const insertedCount = upsertData?.length ?? 0;
 
     const activeIds = resinLineItems.map(li => li.lineItemId);
     if (activeIds.length > 0) {
@@ -160,6 +162,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       synced:        rows.length,
+      inserted:      insertedCount,
       ordersMatched: orderMap.size,
       ordersTotal:   orderNumbers.length,
       unmatched:     orderNumbers.length - orderMap.size,
