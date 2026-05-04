@@ -3271,7 +3271,6 @@ export function SchedulePage({
               ['master',       'Master Schedule'],
               ['payroll',      'Payroll Upload'],
               ['resin',        'Resin'],
-              ['resin',        'Resin'],
             ] as const).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
