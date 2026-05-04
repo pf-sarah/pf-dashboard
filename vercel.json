@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/sync-shopify-tags",
       "schedule": "30 */2 * * *"
+    },
+    {
+      "path": "/api/cron/resin-queue-sync",
+      "schedule": "0 10 * * *"
     }
   ]
 }
