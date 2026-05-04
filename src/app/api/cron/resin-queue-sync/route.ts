@@ -148,7 +148,7 @@ export async function GET(req: NextRequest) {
               fulfillmentStatus:  li.fulfillment_status ?? null,
               productId:          String(li.product_id),
               orderCreatedAt:     order.created_at,
-              pipelineStatus:     'photoOrder',
+              pipelineStatus:     'recreation',
             });
           }
         }
