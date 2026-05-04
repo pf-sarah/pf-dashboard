@@ -1366,6 +1366,26 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const [shopifyLoading, setShopifyLoading] = useState(false);
   const [shopifyError,   setShopifyError]   = useState('');
 
+  // ── Forecast: expected total based on day-of-week order patterns ─────────────
+  const [forecastExpected,  setForecastExpected]  = useState<number | null>(null);
+  const [forecastDay,       setForecastDay]       = useState('');
+  const [forecastLoading,   setForecastLoading]   = useState(false);
+
+  function loadForecast(currentCount: number, eventWeekStart: string) {
+    if (currentCount === 0) { setForecastExpected(null); return; }
+    setForecastLoading(true);
+    fetch(`/api/event-date-forecast?currentCount=${currentCount}&eventWeekStart=${eventWeekStart}`)
+      .then(r => r.json())
+      .then((d: { projection?: { expected: number; dayOfWeek: string } }) => {
+        if (d.projection) {
+          setForecastExpected(d.projection.expected);
+          setForecastDay(d.projection.dayOfWeek);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setForecastLoading(false));
+  }
+
   function loadRange(from: string, to: string) {
     setShopifyLoading(true);
     setShopifyError('');
@@ -1375,6 +1395,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         if (d.error) { setShopifyError(d.error); return; }
         setShopifyByDate(d.byDate ?? {});
         setShopifyTotal(d.total ?? 0);
+        // Compute event-week Monday for forecast (use the start of the loaded range)
+        const rangeStart = new Date(from + 'T12:00:00');
+        const dow = rangeStart.getDay();
+        const daysToMon = dow === 0 ? -6 : 1 - dow;
+        const weekMon = new Date(rangeStart);
+        weekMon.setDate(rangeStart.getDate() + daysToMon);
+        const weekMonIso = weekMon.toISOString().split('T')[0];
+        loadForecast(d.total ?? 0, weekMonIso);
       })
       .catch(e => setShopifyError(String(e)))
       .finally(() => setShopifyLoading(false));
@@ -1612,9 +1640,15 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
             <div className="bg-white border border-slate-100 rounded-xl p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Event-date orders loaded</p>
               <p className="text-xs text-slate-400 mb-2">{dateFrom} → {dateTo}</p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-xl font-semibold text-rose-700">{shopifyLoading ? '…' : shopifyTotal}</p>
                 {shopifyTotal > 0 && <span className="text-[10px] bg-rose-100 text-rose-600 rounded px-1.5 py-0.5">live</span>}
+                {forecastLoading && <span className="text-xs text-slate-300 italic">forecasting…</span>}
+                {!forecastLoading && forecastExpected !== null && forecastExpected > shopifyTotal && (
+                  <span className="text-sm text-slate-400" title={`Based on historical ${forecastDay} order patterns`}>
+                    ~{forecastExpected} expected
+                  </span>
+                )}
               </div>
             </div>
           </div>
