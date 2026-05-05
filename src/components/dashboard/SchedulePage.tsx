@@ -1320,7 +1320,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
   onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
-  weeklyEstimates:       Record<string, number>;
+  weeklyEstimates:       Record<string, { ut: number; ga: number }>;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -1998,7 +1998,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         </td>
                         {windowWeeks.map(w => {
                           const weekIso = isoMonday(w);
-                          const designEstimate = weeklyEstimates?.[weekIso] ?? null;
+                          const _we = weeklyEstimates?.[weekIso]; const designEstimate = _we !== undefined ? (location === 'Utah' ? _we.ut : _we.ga) : null;
                           const isUnderstaffed = designEstimate !== null && weeklyTotals[w] < designEstimate;
                           return (
                             <td key={w} className="px-2 py-1.5 text-center">
@@ -3042,7 +3042,11 @@ export function SchedulePage({
     return (anyM.rate ?? anyM.hourlyRate ?? 0) > 0 || (anyM.annualSalary ?? 0) > 0;
   });
   function setWeeklyEstimate(weekOf: string, val: number) {
-    update('weeklyEstimates', { ...weeklyEstimates, [weekOf]: val });
+    const existing = weeklyEstimates[weekOf] ?? { ut: 0, ga: 0 };
+    const updated = location === 'Utah'
+      ? { ...existing, ut: val }
+      : { ...existing, ga: val };
+    update('weeklyEstimates', { ...weeklyEstimates, [weekOf]: updated });
   }
 
   const avgIntake = settings.avgIntake;
@@ -3196,7 +3200,7 @@ export function SchedulePage({
       if (presActuals[graduatingIso] !== undefined) return presActuals[graduatingIso];
       const hist = intakeData.find(h => h.weekOf === graduatingIso);
       if (hist) return hist.actual;
-      if (weeklyEstimates[graduatingIso] !== undefined) return weeklyEstimates[graduatingIso];
+      const _we = weeklyEstimates[graduatingIso]; if (_we !== undefined) return location === 'Utah' ? _we.ut : _we.ga;
       return avgIntake;
     });
     const queueAtStart: number[] = [designableQueue];
@@ -3729,7 +3733,7 @@ export function SchedulePage({
                     const overstaffed = total !== null && total < 8;
                     const { bar, text, label } = turnaroundColors(total, overstaffed);
                     const weekIso = isoMonday(w);
-                    const estVal  = weeklyEstimates[weekIso] ?? '';
+                    const _weVal = weeklyEstimates[weekIso]; const estVal = _weVal !== undefined ? (location === 'Utah' ? _weVal.ut : _weVal.ga) : '';
                     return (
                       <div key={w} className="flex items-center gap-3">
                         <span className="text-xs text-slate-500 w-16 shrink-0">{getWeekLabel(w)}</span>

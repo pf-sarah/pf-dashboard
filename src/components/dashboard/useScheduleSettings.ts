@@ -53,7 +53,7 @@ export interface ScheduleSettings {
   masterAvailability: MasterAvailability;
   flexRows:           Record<string, FlexRow[]>;
   avgIntake:          number;
-  weeklyEstimates:    Record<string, number>;
+  weeklyEstimates:    Record<string, { ut: number; ga: number }>;
   // Manager total hours (production + managerial) — parallel to dept hours maps
   mgrTotalHours:      HoursMap;
 }
@@ -92,6 +92,18 @@ export function useScheduleSettings(location: 'Utah' | 'Georgia') {
           KEYS.forEach(k => {
             if (data[k] !== undefined) (next as Record<string, unknown>)[k] = data[k];
           });
+          // Migrate weeklyEstimates from flat number to {ut, ga} shape
+          if (next.weeklyEstimates) {
+            const migrated: Record<string, { ut: number; ga: number }> = {};
+            Object.entries(next.weeklyEstimates).forEach(([week, val]) => {
+              if (typeof val === 'number') {
+                migrated[week] = { ut: val, ga: 0 };
+              } else {
+                migrated[week] = val as { ut: number; ga: number };
+              }
+            });
+            next.weeklyEstimates = migrated;
+          }
           return next;
         });
       })
