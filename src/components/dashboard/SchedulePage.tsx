@@ -1305,7 +1305,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {} }: {
+  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {} }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1320,6 +1320,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
   onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
+  weeklyEstimates:       Record<string, number>;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -1944,10 +1945,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           );
                         })}
                       </tr>
-                      {/* Shopify default estimates row */}
+                      {/* Shopify bookings row — display only */}
                       <tr className="bg-slate-50/50">
                         <td className="sticky left-0 bg-slate-50/50 px-4 py-1.5 text-[10px] text-slate-400">
-                          Shopify est. ({location})
+                          Shopify bookings
                         </td>
                         {windowWeeks.map(w => {
                           const weekIso = isoMonday(w);
@@ -1975,19 +1976,42 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     onPresSettingsChange({ ...presSettings, weekOverrides: newOverrides });
                                   }}
                                   className="w-14 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-rose-300"
-                                  title="Override estimate. Leave blank to use Shopify default."
+                                  title="Override Shopify booking estimate. Leave blank to use Shopify default."
                                 />
-                                {defaultVal !== null && (
+                                {defaultVal !== null && override && (
                                   <span className="text-[9px] text-slate-300" title="Shopify default">
-                                    {override ? `def: ${defaultVal}` : defaultVal}
+                                    def: {defaultVal}
                                   </span>
                                 )}
                                 {displayVal !== null && displayVal !== undefined && (
-                                  <div className={`text-[10px] font-medium ${weeklyTotals[w] >= displayVal ? 'text-green-600' : 'text-amber-600'}`}>
-                                    {weeklyTotals[w] >= displayVal ? '✓' : `${displayVal - weeklyTotals[w]} short`}
-                                  </div>
+                                  <span className="text-[9px] text-slate-400">{displayVal}</span>
                                 )}
                               </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                      {/* Design bouquets received row — drives staffing check */}
+                      <tr className="bg-indigo-50/30">
+                        <td className="sticky left-0 bg-indigo-50/30 px-4 py-1.5 text-[10px] text-indigo-500 font-medium">
+                          Bouquets received est.
+                        </td>
+                        {windowWeeks.map(w => {
+                          const weekIso = isoMonday(w);
+                          const designEstimate = weeklyEstimates?.[weekIso] ?? null;
+                          const isUnderstaffed = designEstimate !== null && weeklyTotals[w] < designEstimate;
+                          return (
+                            <td key={w} className="px-2 py-1.5 text-center">
+                              {designEstimate !== null ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className="text-[11px] font-medium text-indigo-600">{designEstimate}</span>
+                                  <div className={`text-[10px] font-medium ${!isUnderstaffed ? 'text-green-600' : 'text-red-500'}`}>
+                                    {!isUnderstaffed ? '✓' : `${designEstimate - weeklyTotals[w]} short`}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-300">—</span>
+                              )}
                             </td>
                           );
                         })}
@@ -3359,6 +3383,7 @@ export function SchedulePage({
           onPresSettingsChange={(s) => update('presSettings', s)}
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
           employeeRates={employeeRates}
+          weeklyEstimates={weeklyEstimates}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=all&weeks=52`)
               .then(r => r.json())
