@@ -2078,8 +2078,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       }
     });
     if (Object.keys(init).length > 0) setFfDailyHours(prev => {
+      // Only pre-populate members that have no saved entry at all
       const merged = { ...init };
-      Object.keys(prev).forEach(id => { if (prev[id].some(h => h > 0)) merged[id] = prev[id]; });
+      Object.keys(prev).forEach(id => { merged[id] = prev[id]; });
       return merged;
     });
   }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3072,9 +3073,9 @@ export function SchedulePage({
       if (weeklyHrs > 0) init[d.id] = distributeHours(weeklyHrs);
     });
     if (Object.keys(init).length > 0) setDesignDailyHours(prev => {
-      // Only set for members that haven't been manually edited yet
+      // Only pre-populate members that have no saved entry at all
       const merged = { ...init };
-      Object.keys(prev).forEach(id => { if (prev[id].some(h => h > 0)) merged[id] = prev[id]; });
+      Object.keys(prev).forEach(id => { merged[id] = prev[id]; });
       return merged;
     });
   }, [designers.length, location]); // eslint-disable-line react-hooks/exhaustive-deps
