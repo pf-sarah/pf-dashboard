@@ -2044,7 +2044,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 // ─── FulfillmentSection ────────────────────────────────────────────────────────
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
-  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {} }: {
+  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {},
+  ffDailyHoursProp, onFfDailyHoursChange }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
@@ -2057,9 +2058,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onMgrTotalHoursChange:(h: Record<string, number[]>) => void;
   employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
+  ffDailyHoursProp?:     Record<string, number[]>;
+  onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
-  const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>({});
+  const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
+  useEffect(() => { if (ffDailyHoursProp && Object.keys(ffDailyHoursProp).length > 0) setFfDailyHours(ffDailyHoursProp); }, [JSON.stringify(ffDailyHoursProp)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
     const init: Record<string, number[]> = {};
@@ -2184,7 +2188,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         function getFFH(id: string, di: number) { return ffDailyHours[id]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
           const prev = ffDailyHours[id] ?? Array(5).fill(0);
-          setFfDailyHours({ ...ffDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) });
+          const next = { ...ffDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) };
+          setFfDailyHours(next);
+          onFfDailyHoursChange?.(next);
         }
         function ffDailyCost(m: FfTeamMember, di: number) {
           const h = getFFH(m.id, di);
@@ -3056,7 +3062,8 @@ export function SchedulePage({
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
-  const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>({});
+  const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
+  useEffect(() => { if (settings.designDailyHours && Object.keys(settings.designDailyHours).length > 0) setDesignDailyHours(settings.designDailyHours); }, [JSON.stringify(settings.designDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
     const init: Record<string, number[]> = {};
@@ -3418,6 +3425,8 @@ export function SchedulePage({
           onFfHoursChange={(h) => update('ffHours', h)}
           onFfRosterChange={(r) => update('ffRoster', r)}
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
+          ffDailyHoursProp={settings.ffDailyHours}
+          onFfDailyHoursChange={(h) => update('ffDailyHours', h)}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
               .then(r => r.json())
@@ -3531,7 +3540,9 @@ export function SchedulePage({
             function getDH(id: string, di: number) { return designDailyHours[id]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
               const prev = designDailyHours[id] ?? Array(5).fill(0);
-              setDesignDailyHours({ ...designDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) });
+              const next = { ...designDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) };
+              setDesignDailyHours(next);
+              update('designDailyHours', next);
             }
             function dDailyCost(d: Designer, di: number) {
               const h = getDH(d.id, di);

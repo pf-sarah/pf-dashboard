@@ -56,6 +56,8 @@ export interface ScheduleSettings {
   weeklyEstimates:    Record<string, { ut: number; ga: number }>;
   // Manager total hours (production + managerial) — parallel to dept hours maps
   mgrTotalHours:      HoursMap;
+  designDailyHours:   HoursMap;
+  ffDailyHours:       HoursMap;
 }
 
 const DEFAULTS: ScheduleSettings = {
@@ -68,12 +70,14 @@ const DEFAULTS: ScheduleSettings = {
   avgIntake: 45,
   weeklyEstimates: {},
   mgrTotalHours: {},
+  designDailyHours: {},
+  ffDailyHours: {},
 };
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
   'ffHours','ffRoster','masterAvailability','flexRows','avgIntake','weeklyEstimates',
-  'mgrTotalHours',
+  'mgrTotalHours','designDailyHours','ffDailyHours',
 ];
 
 export function useScheduleSettings(location: 'Utah' | 'Georgia') {
