@@ -10,10 +10,12 @@ interface TeamMember {
   payType:      'hourly' | 'salary';
   hourlyRate:   number;
   annualSalary: number;
-  isManager?:   boolean;
+  isManager?:        boolean;
+  excludeFromCPO?:   boolean;
 }
 
 interface HistoricalsSectionProps {
+  excludeFromCPONames?: string[];
   department:    'design' | 'preservation' | 'fulfillment';
   location:      'Utah' | 'Georgia';
   members:       TeamMember[];
@@ -56,7 +58,7 @@ function getAllWeeks(): string[] {
   return weeks;
 }
 
-export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate }: HistoricalsSectionProps) {
+export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate, excludeFromCPONames = [] }: HistoricalsSectionProps) {
   const { enrichedActuals, loading, refresh, getWeekCosts } = useActualsWithPayroll(location);
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -287,7 +289,12 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                   const deptKey = department.charAt(0).toUpperCase() + department.slice(1);
                   const deptCost = weekCosts.find(wc => wc.department === deptKey)?.totalCost ?? 0;
                   // Fall back to summing individual costs if no labor upload data
-                  const memberCost = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).cost, 0);
+                  const memberCost = allDisplayMembers.reduce((s, name) => {
+                    const m = members.find(m => m.name === name);
+                    if (m?.excludeFromCPO) return s;
+                    if (excludeFromCPONames.includes(name)) return s;
+                    return s + getEntry(w, name).cost;
+                  }, 0);
                   const totalCost = deptCost > 0 ? deptCost : memberCost;
                   const allActual = weekCosts.length > 0 && (weekCosts.find(wc => wc.department === deptKey)?.isActual ?? false);
                   const teamCPO = totalOrders > 0 && totalCost > 0 ? totalCost / totalOrders : null;
