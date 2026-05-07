@@ -295,7 +295,8 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                     if (excludeFromCPONames.includes(name)) return s;
                     return s + getEntry(w, name).cost;
                   }, 0);
-                  const totalCost = deptCost > 0 ? deptCost : memberCost;
+                  const excludedCost = excludeFromCPONames.reduce((s, name) => s + getEntry(w, name).cost, 0);
+                  const totalCost = deptCost > 0 ? Math.max(0, deptCost - excludedCost) : memberCost;
                   const allActual = weekCosts.length > 0 && (weekCosts.find(wc => wc.department === deptKey)?.isActual ?? false);
                   const teamCPO = totalOrders > 0 && totalCost > 0 ? totalCost / totalOrders : null;
                   const isFirst = allWeeks.filter(x => getMonthKey(x) === getMonthKey(w))[0] === w;
