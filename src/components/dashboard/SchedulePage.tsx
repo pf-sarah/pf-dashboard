@@ -2961,7 +2961,8 @@ export function SchedulePage({
     const base = defaultDesigners.map(d => {
       const persisted = settings.designRoster[d.id];
       if (!persisted) return d;
-      return { ...d, name: persisted.name ?? d.name, ratio: persisted.ratio, payType: persisted.payType, hourlyRate: persisted.hourlyRate, annualSalary: persisted.annualSalary };
+      const rateFromRippling = employeeRates[persisted.name ?? d.name]?.hourlyRate ?? 0;
+      return { ...d, name: persisted.name ?? d.name, ratio: persisted.ratio, payType: persisted.payType, hourlyRate: persisted.hourlyRate > 0 ? persisted.hourlyRate : rateFromRippling, annualSalary: persisted.annualSalary };
     });
     const defaultIds = new Set(defaultDesigners.map(d => d.id));
     Object.entries(settings.designRoster).forEach(([id, r]) => {
