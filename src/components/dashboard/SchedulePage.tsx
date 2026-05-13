@@ -3648,7 +3648,7 @@ export function SchedulePage({
                       <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                         <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Daily total</td>
                         {days.map((_, di) => {
-                          const f = teamDailyFrames(di); const cc = teamDailyCost(di);
+                          const f = Math.round(teamDailyFrames(di) * 100) / 100; const cc = teamDailyCost(di);
                           const cpo = f > 0 && cc > 0 ? cc / f : null;
                           return (
                             <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
@@ -3657,7 +3657,7 @@ export function SchedulePage({
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 text-center font-semibold text-indigo-700">{teamWeekFrames}f</td>
+                        <td className="px-3 py-2 text-center font-semibold text-indigo-700">{Math.round(teamWeekFrames * 100) / 100}f</td>
                       </tr>
                     </tbody>
                   </table>
