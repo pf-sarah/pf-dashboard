@@ -665,8 +665,8 @@ export default function SchedulePage() {
                             <input type="number" value={hrs || ''} min="0" step="1" placeholder="—"
                               onChange={e => handleHoursChange(w, d.id, e.target.value)}
                               onContextMenu={e => { e.preventDefault();
-                                const v = window.prompt(`Apply ${d.name}'s hours to all 52 weeks:`, String(hrs));
-                                if (v !== null) applyToAllWeeks(d.id, parseFloat(v) || 0);
+                                if (!window.confirm(`Copy ${hrs} hours to all 52 weeks for ${d.name}?`)) return;
+                                applyToAllWeeks(d.id, hrs);
                               }}
                               className="w-14 text-center border border-slate-200 rounded px-1 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"
                               title="Right-click to apply to all weeks" />

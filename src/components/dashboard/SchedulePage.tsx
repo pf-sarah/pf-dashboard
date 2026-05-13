@@ -1525,6 +1525,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   }
 
   function applyToAllWeeks(memberId: string, hours: number) {
+    if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
     const newHours = { ...presHours, [memberId]: Array(WEEKS).fill(hours) };
     onPresHoursChange(newHours);
   }
@@ -2134,6 +2135,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfHoursChange(newHours);
   }
   function applyToAllWeeks(id: string, hours: number) {
+    if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
     onFfHoursChange({ ...ffHours, [id]: Array(WEEKS).fill(hours) });
   }
   function updateRoster(mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) {
@@ -2382,6 +2384,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                 }}
                                 onContextMenu={e => { e.preventDefault();
                                   const val = mgrTotalHours[m.id]?.[w] ?? prodH;
+                                  if (!window.confirm(`Copy ${val} hours to all 52 weeks for this manager?`)) return;
                                   const newH = { ...mgrTotalHours, [m.id]: Array(WEEKS).fill(val) };
                                   onMgrTotalHoursChange(newH);
                                 }}
@@ -3150,6 +3153,7 @@ export function SchedulePage({
     update('mgrTotalHours', newHours);
   }
   function applyToAllWeeks(designerId: string, hours: number) {
+    if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this designer?`)) return;
     const newHours = { ...settings.designHours, [designerId]: Array(WEEKS).fill(hours) };
     update('designHours', newHours);
   }
