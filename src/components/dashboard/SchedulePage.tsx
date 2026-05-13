@@ -1822,7 +1822,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                   }}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
+                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
                               {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
@@ -1843,7 +1843,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
-                            <div className="text-indigo-700">{Math.round(cap * 10) / 10} ord</div>
+                            <div className="text-indigo-700">{Math.round(cap * 100) / 100} ord</div>
                             {est > 0 && (
                               <div className={`text-[10px] font-medium ${diff > 0 ? 'text-green-700' : diff < 0 ? 'text-red-600' : 'text-amber-600'}`}>
                                 {diff > 0 ? '+' : ''}{diff} vs est.
@@ -1933,7 +1933,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
                                   />
                                 )}
-                                {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
+                                {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
                                 {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                               </td>
                             );
@@ -2177,7 +2177,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         <div className="bg-white border border-slate-100 rounded-xl p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
           <p className="text-xs text-slate-400 mb-2">&nbsp;</p>
-          <p className="text-xl font-semibold text-slate-900">{Math.round(weekCap * 10) / 10} <span className="text-sm font-normal text-slate-400">orders</span></p>
+          <p className="text-xl font-semibold text-slate-900">{Math.round(weekCap * 100) / 100} <span className="text-sm font-normal text-slate-400">orders</span></p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Team CPO</p>
@@ -2267,13 +2267,13 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                               <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                 onChange={e => setFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
+                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
                               {ffHasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
                         })}
                         <td className="px-3 py-2 text-center">
-                          <div className="font-medium text-amber-700">{Math.round(weekOrders * 10) / 10} ord</div>
+                          <div className="font-medium text-amber-700">{Math.round(weekOrders * 100) / 100} ord</div>
                           <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
                           {ffHasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                         </td>
@@ -2287,7 +2287,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       const cpo = o > 0 && cc > 0 ? cc / o : null;
                       return (
                         <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
-                          <div className="text-amber-700">{Math.round(o * 10) / 10} ord</div>
+                          <div className="text-amber-700">{Math.round(o * 100) / 100} ord</div>
                           {ffHasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
                         </td>
                       );
@@ -2403,7 +2403,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                 title="Total hours (production + managerial) — right-click to apply to all weeks"
                                 className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                             )}
-                            {o > 0 && <div className="text-slate-400 mt-0.5">{Math.round(o * 10) / 10} ord</div>}
+                            {o > 0 && <div className="text-slate-400 mt-0.5">{Math.round(o * 100) / 100} ord</div>}
                             {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                           </td>
                         );
@@ -3632,13 +3632,13 @@ export function SchedulePage({
                                   <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                     onChange={e => setDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
                                     className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                                  {frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames * 10) / 10}f</div>}
+                                  {frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames * 100) / 100}f</div>}
                                   {hasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                                 </td>
                               );
                             })}
                             <td className="px-3 py-2 text-center">
-                              <div className="font-medium text-indigo-700">{Math.round(weekFrames * 10) / 10}f</div>
+                              <div className="font-medium text-indigo-700">{Math.round(weekFrames * 100) / 100}f</div>
                               <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
                               {hasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                             </td>
