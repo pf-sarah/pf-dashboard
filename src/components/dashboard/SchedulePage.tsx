@@ -3624,9 +3624,10 @@ export function SchedulePage({
                             </td>
                             {days.map((_, dayIdx) => {
                               const h = getDH(d.id, dayIdx);
-                              const frames = d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0;
+                              const framesRaw = d.ratio > 0 && h > 0 ? h / d.ratio : 0;
+                              const frames = Math.round(framesRaw);
                               const cost = dDailyCost(d, dayIdx);
-                              const cpo = frames > 0 && cost > 0 ? cost / frames : null;
+                              const cpo = framesRaw > 0 && cost > 0 ? cost / framesRaw : null;
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
                                   <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
