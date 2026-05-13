@@ -1334,6 +1334,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const [showRoster,    setShowRoster]   = useState(false);
   const [weekOffset,    setWeekOffset]   = useState(0);
   const [activePresTab, setActivePresTab] = useState<'weekly' | '52week'>('weekly');
+  const [presThisWeekOffset, setPresThisWeekOffset] = useState(0);
 
   // Date range for the 7-day delivery estimates
   const dateFrom = presSettings.dateFrom ?? mondayIso;
@@ -1429,13 +1430,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   // Build 5 weekdays starting from the loaded dateFrom
   const fiveDays = (() => {
     const days: { iso: string; utahEst: number; gaEst: number; utahDefault: number; gaDefault: number; label: string; dateStr: string }[] = [];
-    // Always use current week's Monday, not the event date range
+    // Use presThisWeekOffset to support toggling forward up to 4 weeks
     const _today = new Date();
     _today.setHours(0, 0, 0, 0);
     const _dow = _today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
     const _daysToMon = _dow === 0 ? -6 : 1 - _dow;
     const _mon = new Date(_today);
-    _mon.setDate(_today.getDate() + _daysToMon);
+    _mon.setDate(_today.getDate() + _daysToMon + presThisWeekOffset * 7);
     const d = new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate(), 12, 0, 0);
     let dayIdx = 0;
     while (days.length < 5) {
@@ -1771,8 +1772,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           {activePresTab === 'weekly' && (
             <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-                <h3 className="text-sm font-semibold text-slate-700">Hours per team member — this week</h3>
-                {hasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
+                <h3 className="text-sm font-semibold text-slate-700">Hours per team member — {presThisWeekOffset === 0 ? 'this week' : presThisWeekOffset === 1 ? 'next week' : `week +${presThisWeekOffset}`}</h3>
+                <div className="flex items-center gap-2">
+                  {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                  <button onClick={() => setPresThisWeekOffset(Math.max(0, presThisWeekOffset - 1))} disabled={presThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                  <button onClick={() => setPresThisWeekOffset(Math.min(4, presThisWeekOffset + 1))} disabled={presThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
