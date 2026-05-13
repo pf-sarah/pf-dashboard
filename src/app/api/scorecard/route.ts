@@ -34,6 +34,39 @@ function weeksInMonth(weekOfs: string[], monthKey: string): string[] {
   return weekOfs.filter(w => weekMonth(w) === monthKey);
 }
 
+// ── Salary managers (mirrors useActualsWithPayroll.ts exactly) ───────────────
+// These are never in weekly_labor_cost — cost is computed from annual salary.
+// Georgia manager history is time-aware (Amber changed role on 2026-04-13).
+
+interface SalaryMgr {
+  name: string; location: string; departments: string[];
+  annualSalary: number; from?: string; to?: string;
+}
+
+const SALARY_MANAGERS: SalaryMgr[] = [
+  // Utah
+  { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                 annualSalary: 45760 },
+  { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],            annualSalary: 41600 },
+  // Georgia — time-aware
+  { name: 'Katherine Piper', location: 'Georgia', departments: ['Design'],                 annualSalary: 45760, to:   '2026-04-12' },
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],           annualSalary: 47008, to:   '2026-04-12' },
+  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000, from: '2026-04-13' },
+];
+
+// Returns salary manager weekly cost contribution for a given location+dept+weekOf
+function getSalaryMgrCost(location: string, dept: string, weekOf: string): number {
+  let total = 0;
+  for (const mgr of SALARY_MANAGERS) {
+    if (mgr.location !== location) continue;
+    if (!mgr.departments.includes(dept)) continue;
+    const after  = !mgr.from || weekOf >= mgr.from;
+    const before = !mgr.to   || weekOf <= mgr.to;
+    if (!after || !before) continue;
+    total += (mgr.annualSalary / 52) / mgr.departments.length;
+  }
+  return total;
+}
+
 // Departments included in blended CPO (all except Resin)
 const BLENDED_DEPTS = ['Design', 'Preservation', 'Fulfillment', 'G&A'];
 // All departments that have their own CPO
@@ -136,9 +169,19 @@ export async function GET(req: NextRequest) {
 
         // ── Labor cost by dept this month ─────────────────────────────────────
         const laborByDept: Record<string, number> = {};
+        // Hourly staff from weekly_labor_cost upload
         for (const row of laborRows.filter(r => r.location === loc && weekOfs.includes(r.week_of))) {
           const dept = normalizeDeptForScorecard(row.department);
           laborByDept[dept] = (laborByDept[dept] ?? 0) + row.gross_pay;
+        }
+        // Salary managers — computed from annual salary, never in weekly_labor_cost
+        // Mirrors useActualsWithPayroll.ts getSalaryMgrCost logic exactly
+        const allDepts = ['Design', 'Preservation', 'Fulfillment', 'G&A', 'Resin'];
+        for (const dept of allDepts) {
+          for (const weekOf of weekOfs) {
+            const mgrCost = getSalaryMgrCost(loc, dept, weekOf);
+            if (mgrCost > 0) laborByDept[dept] = (laborByDept[dept] ?? 0) + mgrCost;
+          }
         }
 
         // ── Production by dept this month (from team_member_week_actuals) ──────
