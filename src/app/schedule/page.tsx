@@ -664,12 +664,12 @@ export default function SchedulePage() {
                           <td key={w} className="px-2 py-1.5 text-center">
                             <input type="number" value={hrs || ''} min="0" step="1" placeholder="—"
                               onChange={e => handleHoursChange(w, d.id, e.target.value)}
-                              onDoubleClick={() => {
+                              onContextMenu={e => { e.preventDefault();
                                 const v = window.prompt(`Apply ${d.name}'s hours to all 52 weeks:`, String(hrs));
                                 if (v !== null) applyToAllWeeks(d.id, parseFloat(v) || 0);
                               }}
                               className="w-14 text-center border border-slate-200 rounded px-1 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300 bg-white"
-                              title="Double-click to apply to all weeks" />
+                              title="Right-click to apply to all weeks" />
                             {frames > 0 && (
                               <div className="text-[10px] mt-0.5 space-y-px">
                                 <div className="text-slate-400">{Math.round(frames * 10) / 10}f</div>

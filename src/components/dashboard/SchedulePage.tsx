@@ -1904,8 +1904,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 <input
                                   type="number" value={prodH || ''} min="0" step="0.5" placeholder="0"
                                   onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
-                                  onDoubleClick={() => applyToAllWeeks(m.id, prodH)}
-                                  title={m.isManager ? 'Production hours (double-click = all weeks)' : 'Double-click to apply to all weeks'}
+                                  onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, prodH); }}
+                                  title={m.isManager ? 'Production hours (right-click = all weeks)' : 'Right-click to apply to all weeks'}
                                   className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
                                 />
                                 {m.isManager && (
@@ -2020,7 +2020,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   </table>
                 </div>
               </div>
-              <p className="text-xs text-slate-400">Double-click any hours cell to apply that value to all 52 weeks for that team member.</p>
+              <p className="text-xs text-slate-400">Right-click any hours cell to apply that value to all 52 weeks for that team member.</p>
             </div>
           )}
 
@@ -2186,7 +2186,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       </div>
 
       {ffTab === 'thisweek' && (() => {
-        const days = getWeekdays(0);
+        const [thisWeekOffset, setThisWeekOffset] = useState(0);
+        const days = getWeekdays(thisWeekOffset);
         function getFFH(id: string, di: number) { return ffDailyHours[id]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
           const prev = ffDailyHours[id] ?? Array(5).fill(0);
@@ -2208,10 +2209,14 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
               <div>
-                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — this week</h3>
+                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}</h3>
                 <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Orders calculated from each member&apos;s ratio.</p>
               </div>
-              {ffHasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
+              <div className="flex items-center gap-2">
+                {ffHasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
@@ -2365,8 +2370,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                           <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                             <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
                               onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
-                              onDoubleClick={() => applyToAllWeeks(m.id, prodH)}
-                              title={m.isManager ? 'Production hours' : 'Double-click to apply to all weeks'}
+                              onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, prodH); }}
+                              title={m.isManager ? 'Production hours' : 'Right-click to apply to all weeks'}
                               className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                             {m.isManager && (
                               <input type="number" value={totalH || ''} placeholder="total h" min="0" step="0.5"
@@ -2375,12 +2380,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                   newH[m.id][w] = parseFloat(e.target.value) || 0;
                                   onMgrTotalHoursChange(newH);
                                 }}
-                                onDoubleClick={() => {
+                                onContextMenu={e => { e.preventDefault();
                                   const val = mgrTotalHours[m.id]?.[w] ?? prodH;
                                   const newH = { ...mgrTotalHours, [m.id]: Array(WEEKS).fill(val) };
                                   onMgrTotalHoursChange(newH);
                                 }}
-                                title="Total hours (production + managerial) — double-click to apply to all weeks"
+                                title="Total hours (production + managerial) — right-click to apply to all weeks"
                                 className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                             )}
                             {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
@@ -2412,7 +2417,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
               </table>
             </div>
           </div>
-          <p className="text-xs text-slate-400">Double-click any hours cell to apply that value to all 52 weeks for that team member.</p>
+          <p className="text-xs text-slate-400">Right-click any hours cell to apply that value to all 52 weeks for that team member.</p>
         </>
       )}
 
@@ -2588,7 +2593,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
           <span className="text-xs font-medium text-slate-600 min-w-[100px] text-center">
             {weekLabel} · {days[0]?.dateStr} – {days[4]?.dateStr}
           </span>
-          <button onClick={() => setWeekOffset(Math.min(2, weekOffset + 1))} disabled={weekOffset >= 2}
+          <button onClick={() => setWeekOffset(Math.min(4, weekOffset + 1))} disabled={weekOffset >= 4}
             className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
         </div>
       </div>
@@ -3540,7 +3545,8 @@ export function SchedulePage({
 
           {/* ── WEEKLY SCHEDULE TAB ─────────────────────────────────────────── */}
           {activeTab === 'thisweek' && (() => {
-            const days = getWeekdays(0);
+            const [thisWeekOffset, setThisWeekOffset] = useState(0);
+            const days = getWeekdays(thisWeekOffset);
             function getDH(id: string, di: number) { return designDailyHours[id]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
               const prev = designDailyHours[id] ?? Array(5).fill(0);
@@ -3561,10 +3567,14 @@ export function SchedulePage({
               <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — this week</h3>
+                    <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}</h3>
                     <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Frames calculated from each designer&apos;s ratio.</p>
                   </div>
-                  {hasRates && <span className="text-xs text-slate-400">CPO shown when rate is set</span>}
+                  <div className="flex items-center gap-2">
+                    {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                    <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                    <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs">
@@ -3688,8 +3698,8 @@ export function SchedulePage({
                               <input
                                 type="number" value={hrs || ''} min="0" step="0.5" placeholder="0"
                                 onChange={e => handleHoursChange(w, d.id, e.target.value)}
-                                onDoubleClick={() => applyToAllWeeks(d.id, hrs)}
-                                title={isDesignMgr ? 'Production hours' : 'Double-click to apply to all weeks'}
+                                onContextMenu={e => { e.preventDefault(); applyToAllWeeks(d.id, hrs); }}
+                                title={isDesignMgr ? 'Production hours' : 'Right-click to apply to all weeks'}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
                               />
                               {isDesignMgr && (
