@@ -1805,7 +1805,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
                               <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
                                 title={m.isManager ? 'Production hours' : 'Hours'}
-                                onChange={e => updateHours(m.id, di, parseFloat(e.target.value) || 0)}
+                                onChange={e => updateDailyHours(m.id, di, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                               {m.isManager && (
                                 <input type="number" value={totalH || ''} placeholder="total" min="0" step="0.5"
