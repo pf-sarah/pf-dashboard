@@ -1305,13 +1305,15 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {} }: {
+  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {} }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
   teamActuals:           { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
+  presDailyHours:        Record<string, number[]>;
+  onPresDailyHoursChange:(h: Record<string, number[]>) => void;
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
@@ -1522,6 +1524,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const newHours = { ...presHours, [memberId]: [...(presHours[memberId] ?? Array(WEEKS).fill(0))] };
     newHours[memberId][weekIdx] = val;
     onPresHoursChange(newHours);
+  }
+  function updateDailyHours(memberId: string, dayIdx: number, val: number) {
+    const newHours = { ...presDailyHours, [memberId]: [...(presDailyHours[memberId] ?? Array(5).fill(0))] };
+    newHours[memberId][dayIdx] = val;
+    onPresDailyHoursChange(newHours);
   }
 
   function applyToAllWeeks(memberId: string, hours: number) {
@@ -1789,7 +1796,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           </div>
                         </td>
                         {fiveDays.map((_, di) => {
-                          const prodH = m.hours[di] ?? 0;
+                          const prodH = presDailyHours[m.id]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
                           const orders = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
@@ -3076,6 +3083,8 @@ export function SchedulePage({
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
+  const [presDailyHours, setPresDailyHours] = useState<Record<string, number[]>>(settings.presDailyHours ?? {});
+  useEffect(() => { if (settings.presDailyHours && Object.keys(settings.presDailyHours).length > 0) setPresDailyHours(settings.presDailyHours); }, [JSON.stringify(settings.presDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (settings.designDailyHours && Object.keys(settings.designDailyHours).length > 0) setDesignDailyHours(settings.designDailyHours); }, [JSON.stringify(settings.designDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
@@ -3400,6 +3409,8 @@ export function SchedulePage({
           countsLoading={countsLoading}
           teamActuals={teamActuals}
           presHours={settings.presHours}
+          presDailyHours={presDailyHours}
+          onPresDailyHoursChange={(h) => { setPresDailyHours(h); update('presDailyHours', h); }}
           presRoster={settings.presRoster}
           presSettings={settings.presSettings}
           mgrTotalHours={settings.mgrTotalHours}
