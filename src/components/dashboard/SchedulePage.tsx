@@ -2063,6 +2063,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
+  const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
   useEffect(() => { if (ffDailyHoursProp && Object.keys(ffDailyHoursProp).length > 0) setFfDailyHours(ffDailyHoursProp); }, [JSON.stringify(ffDailyHoursProp)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
@@ -2186,8 +2187,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       </div>
 
       {ffTab === 'thisweek' && (() => {
-        const [thisWeekOffset, setThisWeekOffset] = useState(0);
-        const days = getWeekdays(thisWeekOffset);
+        const days = getWeekdays(ffThisWeekOffset);
         function getFFH(id: string, di: number) { return ffDailyHours[id]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
           const prev = ffDailyHours[id] ?? Array(5).fill(0);
@@ -2209,13 +2209,13 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
               <div>
-                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}</h3>
+                <h3 className="text-sm font-semibold text-slate-700">Hours per team member per day — {ffThisWeekOffset === 0 ? 'this week' : ffThisWeekOffset === 1 ? 'next week' : `week +${ffThisWeekOffset}`}</h3>
                 <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Orders calculated from each member&apos;s ratio.</p>
               </div>
               <div className="flex items-center gap-2">
                 {ffHasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
-                <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-                <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                <button onClick={() => setFfThisWeekOffset(Math.max(0, ffThisWeekOffset - 1))} disabled={ffThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                <button onClick={() => setFfThisWeekOffset(Math.min(4, ffThisWeekOffset + 1))} disabled={ffThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -3071,6 +3071,7 @@ export function SchedulePage({
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
+  const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
   useEffect(() => { if (settings.designDailyHours && Object.keys(settings.designDailyHours).length > 0) setDesignDailyHours(settings.designDailyHours); }, [JSON.stringify(settings.designDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
@@ -3545,8 +3546,7 @@ export function SchedulePage({
 
           {/* ── WEEKLY SCHEDULE TAB ─────────────────────────────────────────── */}
           {activeTab === 'thisweek' && (() => {
-            const [thisWeekOffset, setThisWeekOffset] = useState(0);
-            const days = getWeekdays(thisWeekOffset);
+            const days = getWeekdays(designThisWeekOffset);
             function getDH(id: string, di: number) { return designDailyHours[id]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
               const prev = designDailyHours[id] ?? Array(5).fill(0);
@@ -3567,13 +3567,13 @@ export function SchedulePage({
               <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}</h3>
+                    <h3 className="text-sm font-semibold text-slate-700">Hours per designer per day — {designThisWeekOffset === 0 ? 'this week' : designThisWeekOffset === 1 ? 'next week' : `week +${designThisWeekOffset}`}</h3>
                     <p className="text-xs text-slate-400 mt-0.5">{days[0]?.dateStr} – {days[4]?.dateStr} · Frames calculated from each designer&apos;s ratio.</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
-                    <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-                    <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                    <button onClick={() => setDesignThisWeekOffset(Math.max(0, designThisWeekOffset - 1))} disabled={designThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+                    <button onClick={() => setDesignThisWeekOffset(Math.min(4, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
