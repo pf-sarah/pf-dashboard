@@ -1561,12 +1561,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
   const dayTotals = Array.from({ length: 5 }, (_, di) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[di] ?? 0) / m.ratio) : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[di] ?? 0) / m.ratio : 0), 0)
   );
 
   // Per-week totals for 52-week grid
   const weeklyTotals = Array.from({ length: WEEKS }, (_, w) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[w] ?? 0) / m.ratio) : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[w] ?? 0) / m.ratio : 0), 0)
   );
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
@@ -1803,7 +1803,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         {fiveDays.map((_, di) => {
                           const prodH = presDailyHours[m.id]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
-                          const orders = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                          const orders = m.ratio > 0 ? prodH / m.ratio : 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
                           const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
@@ -1822,7 +1822,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                   }}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
                               {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
@@ -1843,7 +1843,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
-                            <div className="text-indigo-700">{cap} ord</div>
+                            <div className="text-indigo-700">{Math.round(cap * 10) / 10} ord</div>
                             {est > 0 && (
                               <div className={`text-[10px] font-medium ${diff > 0 ? 'text-green-700' : diff < 0 ? 'text-red-600' : 'text-amber-600'}`}>
                                 {diff > 0 ? '+' : ''}{diff} vs est.
@@ -1909,7 +1909,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           {windowWeeks.map(w => {
                             const prodH = m.hours[w] ?? 0;
                             const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
-                            const orders = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                            const orders = m.ratio > 0 ? prodH / m.ratio : 0;
                             const cost = m.payType === 'salary' ? (m.annualSalary / 52) : totalH * m.rate;
                             const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                             return (
@@ -1933,7 +1933,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
                                   />
                                 )}
-                                {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                                {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
                                 {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                               </td>
                             );
@@ -2157,7 +2157,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
   }
 
-  const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round((m.hours[0] ?? 0) / m.ratio) : 0), 0);
+  const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[0] ?? 0) / m.ratio : 0), 0);
   const weekCost   = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
   const teamCPO    = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
@@ -2177,7 +2177,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         <div className="bg-white border border-slate-100 rounded-xl p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
           <p className="text-xs text-slate-400 mb-2">&nbsp;</p>
-          <p className="text-xl font-semibold text-slate-900">{weekCap} <span className="text-sm font-normal text-slate-400">orders</span></p>
+          <p className="text-xl font-semibold text-slate-900">{Math.round(weekCap * 10) / 10} <span className="text-sm font-normal text-slate-400">orders</span></p>
         </div>
         <div className="bg-white border border-slate-100 rounded-xl p-4">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Team CPO</p>
@@ -2214,7 +2214,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           return m.payType === 'salary' ? m.annualSalary / 260 : h * m.rate;
         }
         const teamDailyOrders = (di: number) => team.reduce((s, m) => {
-          const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0);
+          const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? h / m.ratio : 0);
         }, 0);
         const teamDailyCost = (di: number) => team.reduce((s, m) => s + ffDailyCost(m, di), 0);
         const teamWeekOrders = days.reduce((s, _, di) => s + teamDailyOrders(di), 0);
@@ -2247,7 +2247,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                 </thead>
                 <tbody>
                   {team.map((m, mi) => {
-                    const weekOrders = days.reduce((s, _, di) => { const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0); }, 0);
+                    const weekOrders = days.reduce((s, _, di) => { const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? h / m.ratio : 0); }, 0);
                     const weekHrs = days.reduce((s, _, di) => s + getFFH(m.id, di), 0);
                     const weekCost = days.reduce((s, _, di) => s + ffDailyCost(m, di), 0);
                     const weekCPO = weekOrders > 0 && weekCost > 0 ? weekCost / weekOrders : null;
@@ -2259,7 +2259,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         </td>
                         {days.map((_, dayIdx) => {
                           const h = getFFH(m.id, dayIdx);
-                          const orders = m.ratio > 0 && h > 0 ? Math.round(h / m.ratio) : 0;
+                          const orders = m.ratio > 0 && h > 0 ? h / m.ratio : 0;
                           const cost = ffDailyCost(m, dayIdx);
                           const cpo = orders > 0 && cost > 0 ? cost / orders : null;
                           return (
@@ -2267,13 +2267,13 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                               <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                 onChange={e => setFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{orders} ord</div>}
+                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 10) / 10} ord</div>}
                               {ffHasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
                         })}
                         <td className="px-3 py-2 text-center">
-                          <div className="font-medium text-amber-700">{weekOrders} ord</div>
+                          <div className="font-medium text-amber-700">{Math.round(weekOrders * 10) / 10} ord</div>
                           <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
                           {ffHasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                         </td>
@@ -2287,7 +2287,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       const cpo = o > 0 && cc > 0 ? cc / o : null;
                       return (
                         <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
-                          <div className="text-amber-700">{o} ord</div>
+                          <div className="text-amber-700">{Math.round(o * 10) / 10} ord</div>
                           {ffHasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
                         </td>
                       );
@@ -2377,7 +2377,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
                         const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
                         const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
-                        const o = m.ratio > 0 ? Math.round(prodH / m.ratio) : 0;
+                        const o = m.ratio > 0 ? prodH / m.ratio : 0;
                         const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
                         const cpo = !m.isManager && o > 0 && cost > 0 ? cost / o : null;
                         return (
@@ -2403,7 +2403,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                 title="Total hours (production + managerial) — right-click to apply to all weeks"
                                 className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                             )}
-                            {o > 0 && <div className="text-slate-400 mt-0.5">{o} ord</div>}
+                            {o > 0 && <div className="text-slate-400 mt-0.5">{Math.round(o * 10) / 10} ord</div>}
                             {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                           </td>
                         );
@@ -2413,7 +2413,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
                     {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
-                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? Math.round(((ffHours[m.id] ?? [])[w] ?? 0) / m.ratio) : 0), 0);
+                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? ((ffHours[m.id] ?? [])[w] ?? 0) / m.ratio : 0), 0);
                       const cost = team.reduce((s, m) => {
                         const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
                         const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
@@ -3579,7 +3579,7 @@ export function SchedulePage({
               return d.payType === 'salary' ? d.annualSalary / 260 : h * d.hourlyRate;
             }
             const teamDailyFrames = (di: number) => designers.reduce((s, d) => {
-              const h = getDH(d.id, di); return s + (d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0);
+              const h = getDH(d.id, di); return s + (d.ratio > 0 && h > 0 ? h / d.ratio : 0);
             }, 0);
             const teamDailyCost = (di: number) => designers.reduce((s, d) => s + dDailyCost(d, di), 0);
             const teamWeekFrames = days.reduce((s, _, di) => s + teamDailyFrames(di), 0);
@@ -3611,7 +3611,7 @@ export function SchedulePage({
                     </thead>
                     <tbody>
                       {designers.map((d, di) => {
-                        const weekFrames = days.reduce((s, _, dayIdx) => { const h = getDH(d.id, dayIdx); return s + (d.ratio > 0 && h > 0 ? Math.round(h / d.ratio) : 0); }, 0);
+                        const weekFrames = days.reduce((s, _, dayIdx) => { const h = getDH(d.id, dayIdx); return s + (d.ratio > 0 && h > 0 ? h / d.ratio : 0); }, 0);
                         const weekHrs = days.reduce((s, _, dayIdx) => s + getDH(d.id, dayIdx), 0);
                         const weekCost = days.reduce((s, _, dayIdx) => s + dDailyCost(d, dayIdx), 0);
                         const weekCPO = weekFrames > 0 && weekCost > 0 ? weekCost / weekFrames : null;
@@ -3624,22 +3624,21 @@ export function SchedulePage({
                             </td>
                             {days.map((_, dayIdx) => {
                               const h = getDH(d.id, dayIdx);
-                              const framesRaw = d.ratio > 0 && h > 0 ? h / d.ratio : 0;
-                              const frames = Math.round(framesRaw);
+                              const frames = d.ratio > 0 && h > 0 ? h / d.ratio : 0;
                               const cost = dDailyCost(d, dayIdx);
-                              const cpo = framesRaw > 0 && cost > 0 ? cost / framesRaw : null;
+                              const cpo = frames > 0 && cost > 0 ? cost / frames : null;
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
                                   <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
                                     onChange={e => setDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
                                     className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                                  {frames > 0 && <div className="text-slate-400 mt-0.5">{frames}f</div>}
+                                  {frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames * 10) / 10}f</div>}
                                   {hasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                                 </td>
                               );
                             })}
                             <td className="px-3 py-2 text-center">
-                              <div className="font-medium text-indigo-700">{weekFrames}f</div>
+                              <div className="font-medium text-indigo-700">{Math.round(weekFrames * 10) / 10}f</div>
                               <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
                               {hasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                             </td>
