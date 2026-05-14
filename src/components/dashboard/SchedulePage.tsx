@@ -1582,7 +1582,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
   const dayTotals = Array.from({ length: 5 }, (_, di) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[di] ?? 0) / m.ratio : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[m.id]?.[di] ?? 0) / m.ratio : 0), 0)
   );
 
   // Per-week totals for 52-week grid
@@ -1860,7 +1860,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const diff = cap - est;
                         const dayCost = team.reduce((s, m) => {
                           if (m.rate === 0 && m.annualSalary === 0) return s; // exclude uncosted members (e.g. GM helping out)
-                          const prodH = m.hours[di] ?? 0;
+                          const prodH = presDailyHours[m.id]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
