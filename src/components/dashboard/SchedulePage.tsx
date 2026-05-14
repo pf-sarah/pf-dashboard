@@ -1662,7 +1662,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
             <div className="bg-white border border-slate-100 rounded-xl p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
               <p className="text-xs text-slate-400 mb-2">orders processable</p>
-              <p className="text-xl font-semibold text-slate-900">{weeklyTotals[0]} <span className="text-sm font-normal text-slate-400">orders</span></p>
+              <p className="text-xl font-semibold text-slate-900">{Math.round(weeklyTotals[0] * 100) / 100} <span className="text-sm font-normal text-slate-400">orders</span></p>
             </div>
             <div className="bg-white border border-slate-100 rounded-xl p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Event-date orders loaded</p>
@@ -1826,8 +1826,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           const prodH = presDailyHours[m.id]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
                           const orders = m.ratio > 0 ? prodH / m.ratio : 0;
+                          const hasRate = m.rate > 0 || m.annualSalary > 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
-                          const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
+                          const cpo = !m.isManager && hasRate && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
                               <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
@@ -1858,6 +1859,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const est = location === 'Utah' ? d.utahEst : d.gaEst;
                         const diff = cap - est;
                         const dayCost = team.reduce((s, m) => {
+                          if (m.rate === 0 && m.annualSalary === 0) return s; // exclude uncosted members (e.g. GM helping out)
                           const prodH = m.hours[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
@@ -1868,7 +1870,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             <div className="text-indigo-700">{Math.round(cap * 100) / 100} ord</div>
                             {est > 0 && (
                               <div className={`text-[10px] font-medium ${diff > 0 ? 'text-green-700' : diff < 0 ? 'text-red-600' : 'text-amber-600'}`}>
-                                {diff > 0 ? '+' : ''}{diff} vs est.
+                                {diff > 0 ? '+' : ''}{Math.round(diff * 100) / 100} vs est.
                               </div>
                             )}
                             {dayCPO !== null && <div className="text-[10px] text-amber-600">{fmt$(dayCPO)}</div>}
@@ -2314,7 +2316,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         </td>
                       );
                     })}
-                    <td className="px-3 py-2 text-center font-semibold text-amber-700">{teamWeekOrders} ord</td>
+                    <td className="px-3 py-2 text-center font-semibold text-amber-700">{Math.round(teamWeekOrders * 100) / 100} ord</td>
                   </tr>
                 </tbody>
               </table>
