@@ -1874,6 +1874,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
+                        const dayHours = team.reduce((s, m) => s + (presDailyHours[m.id]?.[di] ?? 0), 0);
+                        const dayRatio = cap > 0 ? dayHours / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
                             <div className="text-indigo-700">{Math.round(cap * 100) / 100} ord</div>
@@ -1882,6 +1884,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 {diff > 0 ? '+' : ''}{Math.round(diff * 100) / 100} vs est.
                               </div>
                             )}
+                            {dayRatio !== null && <div className="text-[10px] text-slate-500">{Math.round(dayRatio * 100) / 100} h/ord</div>}
                             {dayCPO !== null && <div className="text-[10px] text-amber-600">{fmt$(dayCPO)}</div>}
                           </td>
                         );
@@ -2318,9 +2321,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                     {days.map((_, di) => {
                       const o = teamDailyOrders(di); const cc = teamDailyCost(di);
                       const cpo = o > 0 && cc > 0 ? cc / o : null;
+                      const ffDayHours = team.reduce((s, m) => s + (ffDailyHours[m.id]?.[di] ?? 0), 0);
+                      const ffDayRatio = o > 0 ? ffDayHours / o : null;
                       return (
                         <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
                           <div className="text-amber-700">{Math.round(o * 100) / 100} ord</div>
+                          {ffDayRatio !== null && <div className="text-[10px] text-slate-500">{Math.round(ffDayRatio * 100) / 100} h/ord</div>}
                           {ffHasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}/ord</div>}
                         </td>
                       );
@@ -3684,9 +3690,12 @@ export function SchedulePage({
                         {days.map((_, di) => {
                           const f = Math.round(teamDailyFrames(di) * 100) / 100; const cc = teamDailyCost(di);
                           const cpo = f > 0 && cc > 0 ? cc / f : null;
+                          const designDayHours = designers.reduce((s, d) => s + getDH(d.id, di), 0);
+                          const designDayRatio = f > 0 ? designDayHours / f : null;
                           return (
                             <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
                               <div className="text-indigo-700">{f}f</div>
+                              {designDayRatio !== null && <div className="text-[10px] text-slate-500">{Math.round(designDayRatio * 100) / 100} h/f</div>}
                               {hasRates && cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}</div>}
                             </td>
                           );
