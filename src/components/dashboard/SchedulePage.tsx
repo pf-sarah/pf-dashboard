@@ -1461,9 +1461,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     _mon.setDate(_today.getDate() + _daysToMon + presThisWeekOffset * 7);
     const d = new Date(_mon.getFullYear(), _mon.getMonth(), _mon.getDate(), 12, 0, 0);
     let dayIdx = 0;
-    while (days.length < 5) {
+    while (days.length < 7) {
       const dow = d.getDay();
-      if (dow !== 0 && dow !== 6) {
+      if (true || dow !== 0 && dow !== 6) { // include all 7 days
         const iso = d.toISOString().split('T')[0];
         const pct = (dayPcts[dayIdx] ?? 0) / 100;
         const utahDefault = Math.round(totalUtahLoaded * pct);
@@ -1551,7 +1551,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresHoursChange(newHours);
   }
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
-    const newHours = { ...presDailyHours, [memberId]: [...(presDailyHours[memberId] ?? Array(5).fill(0))] };
+    const newHours = { ...presDailyHours, [memberId]: [...(presDailyHours[memberId] ?? Array(7).fill(0))] };
     newHours[memberId][dayIdx] = val;
     onPresDailyHoursChange(newHours);
   }
@@ -1589,7 +1589,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   }
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
-  const dayTotals = Array.from({ length: 5 }, (_, di) =>
+  const dayTotals = Array.from({ length: 7 }, (_, di) =>
     team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[m.id]?.[di] ?? 0) / m.ratio : 0), 0)
   );
 
@@ -2538,7 +2538,7 @@ function getWeekdays(weekOffset: number): { iso: string; label: string; dateStr:
   const monday = new Date(today);
   monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + weekOffset * 7);
   monday.setHours(0,0,0,0);
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     days.push({
