@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
       .order('full_name');
 
     if (location)   query = query.eq('location', location);
-    if (department) query = query.eq('department', department);
+    // department filter omitted intentionally — workers can flex across depts
     if (search)     query = query.ilike('full_name', `%${search}%`);
 
     const { data, error } = await query;

@@ -545,6 +545,9 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
 const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
   { id: 'ut-p1', name: 'Katelyn Wilson', ratio: 0.7, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
   { id: 'ut-p2', name: 'Emma Dunakey',   ratio: 0.5, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), role: 'senior' as const },
+  { id: 'ut-p5', name: 'Chloe Jensen',    ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
+  { id: 'ut-p6', name: 'Audrey Windsor',    ratio: 1.1,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
+  { id: 'ut-p7', name: 'Preslee Peterson',  ratio: 0.92, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
   { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
   { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];

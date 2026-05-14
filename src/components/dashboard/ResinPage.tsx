@@ -892,7 +892,7 @@ function ResinHistoricalsSection({
       await fetch('/api/actuals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dept: 'resin', ...updated }),
+        body: JSON.stringify({ type: 'resin', weekOf: updated.weekOf, memberName: updated.memberName, actualHours: updated.hours, actualUnits: updated.units }),
       });
       setSaveState('saved');
       setTimeout(() => setSaveState('idle'), 2000);
