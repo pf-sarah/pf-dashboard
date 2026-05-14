@@ -1190,7 +1190,7 @@ function useDraggableOrder<T extends { id: string }>(
 function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
   team: PresTeamMember[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
-  onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
+  onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
@@ -1249,6 +1249,14 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
                   className="w-20 border border-amber-200 rounded px-2 py-1 text-xs text-center text-slate-700 bg-amber-50 focus:outline-none focus:ring-1 focus:ring-amber-300" />
               </div>
             )}
+            <div className="ml-6 flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-[10px] text-slate-500 cursor-pointer">
+                <input type="checkbox" checked={!!(presRoster[m.id] as {excludeFromCost?: boolean})?.excludeFromCost}
+                  onChange={e => onUpdateRoster(m.id, 'excludeFromCost', e.target.checked)}
+                  className="rounded" />
+                Exclude from CPO cost (flex from another dept)
+              </label>
+            </div>
           </div>
           );
         })}
@@ -1554,7 +1562,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresHoursChange(newHours);
   }
 
-  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) {
+  function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) {
     const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member', payType: 'hourly' as const, annualSalary: 0 };
     onPresRosterChange({ ...presRoster, [memberId]: { ...existing, [field]: val } });
   }
@@ -1859,7 +1867,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const est = location === 'Utah' ? d.utahEst : d.gaEst;
                         const diff = cap - est;
                         const dayCost = team.reduce((s, m) => {
-                          if (m.rate === 0 && m.annualSalary === 0) return s; // exclude uncosted members (e.g. GM helping out)
+                          if (m.rate === 0 && m.annualSalary === 0) return s;
+                          if ((presRoster[m.id] as {excludeFromCost?: boolean})?.excludeFromCost) return s;
                           const prodH = presDailyHours[m.id]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
