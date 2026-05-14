@@ -548,15 +548,12 @@ const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
   { id: 'ut-p5', name: 'Chloe Jensen',    ratio: 1.0,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
   { id: 'ut-p6', name: 'Audrey Windsor',    ratio: 1.1,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
   { id: 'ut-p7', name: 'Preslee Peterson',  ratio: 0.92, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0), role: 'specialist' as const },
-  { id: 'ut-p3', name: 'Flex',           ratio: 1.0, pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
-  { id: 'ut-p4', name: 'On Call',        ratio: 1.0, pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
 ];
 
 const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
   { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
   { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), role: 'senior' as const },
-  { id: 'ga-p3', name: 'Flex',          ratio: 1.0,  pay: 'flex'   as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
-  { id: 'ga-p4', name: 'On Call',       ratio: 1.0,  pay: 'oncall' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(0) },
+
 ];
 
 const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
@@ -1190,7 +1187,7 @@ function useDraggableOrder<T extends { id: string }>(
 }
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
-function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
   team: PresTeamMember[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role', val: string | number) => void;
@@ -1198,6 +1195,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
   deptLocation?: string;
+  employeeRates?: Record<string, { hourlyRate: number }>;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1207,42 +1205,55 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
         <span /><span>Name</span><span className="text-center">Role</span><span className="text-center">Ratio</span><span />
       </div>
       <div className="space-y-2">
-        {team.map((m) => (
-          <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
-            onDragOver={e => handleDragOver(e, m.id)}
-            onDrop={() => handleDrop(m.id)}>
-            <span
-              draggable
-              onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
-              onDragEnd={handleDragEnd}
-              className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-            <EmployeeAutocomplete
-              value={m.name}
-              location={deptLocation ?? 'Utah'}
-              department="Preservation"
-              onChange={val => onUpdateRoster(m.id, 'name', val)}
-              onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); onUpdateRoster(m.id, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(m.id, 'payType', emp.pay_type); onUpdateRoster(m.id, 'annualSalary', emp.annual_salary ?? 0); }}
-            />
-            <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="specialist">Specialist</option>
-              <option value="senior">Senior</option>
-              <option value="master">Master</option>
-            </select>
-            <div className="flex items-center gap-1">
-              <input type="number" value={m.ratio} step="0.05" min="0.05"
-                onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
-                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
-                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
+        {team.map((m) => {
+          const inRippling = !!(employeeRates[m.name] || employeeRates[m.name?.toLowerCase()]);
+          return (
+          <div key={m.id} className="space-y-1">
+            <div
+              className={`grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+              onDragOver={e => handleDragOver(e, m.id)}
+              onDrop={() => handleDrop(m.id)}>
+              <span
+                draggable
+                onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
+                onDragEnd={handleDragEnd}
+                className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
+              <EmployeeAutocomplete
+                value={m.name}
+                location={deptLocation ?? 'Utah'}
+                department="Preservation"
+                onChange={val => onUpdateRoster(m.id, 'name', val)}
+                onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); onUpdateRoster(m.id, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(m.id, 'payType', emp.pay_type); onUpdateRoster(m.id, 'annualSalary', emp.annual_salary ?? 0); }}
+              />
+              <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
+                className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                <option value="specialist">Specialist</option>
+                <option value="senior">Senior</option>
+                <option value="master">Master</option>
+              </select>
+              <div className="flex items-center gap-1">
+                <input type="number" value={m.ratio} step="0.05" min="0.05"
+                  onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
+                  className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+                  className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
+              </div>
+              <button onClick={() => onRemove(m.id)}
+                className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
             </div>
-            <button onClick={() => onRemove(m.id)}
-              className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+            {!inRippling && m.name && m.name.length > 1 && (
+              <div className="ml-6 flex items-center gap-2">
+                <span className="text-[10px] text-amber-600">Not in Rippling — set hourly rate:</span>
+                <input type="number" value={m.rate || ''} step="0.01" min="0" placeholder="$/hr"
+                  onChange={e => onUpdateRoster(m.id, 'rate', parseFloat(e.target.value) || 0)}
+                  className="w-20 border border-amber-200 rounded px-2 py-1 text-xs text-center text-slate-700 bg-amber-50 focus:outline-none focus:ring-1 focus:ring-amber-300" />
+              </div>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
-      <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload.</p>
+      <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload. Members not in Rippling can have rates set manually.</p>
     </div>
   );
 }
@@ -1504,11 +1515,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // Build team including any added members from presRoster that aren't in defaultTeam
   const team: PresTeamMember[] = (() => {
-    const base = defaultTeam.map(m => {
-      const roster = presRoster[m.id];
-      const hours  = presHours[m.id] ?? Array(WEEKS).fill(m.hours[0] ?? 0);
-      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), hours };
-    });
+    const base = defaultTeam
+      .filter(m => !(presRoster[m.id] as {_removed?: boolean})?._removed)
+      .map(m => {
+        const roster = presRoster[m.id];
+        const hours  = presHours[m.id] ?? Array(WEEKS).fill(m.hours[0] ?? 0);
+        return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), hours };
+      });
     // Add any custom members stored in presRoster not in defaultTeam
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(presRoster).forEach(([id, r]) => {
@@ -1554,12 +1567,17 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   function handleRemoveMember(id: string) {
     const newRoster = { ...presRoster };
-    delete newRoster[id];
+    const isDefault = defaultTeam.some(m => m.id === id);
+    if (isDefault) {
+      // Mark default member as removed so they're excluded from team
+      newRoster[id] = { ...(newRoster[id] ?? { ratio: 1, rate: 0, name: '' }), _removed: true } as typeof newRoster[string];
+    } else {
+      delete newRoster[id];
+    }
     const newHours = { ...presHours };
     delete newHours[id];
     onPresRosterChange(newRoster);
     onPresHoursChange(newHours);
-    // Also clear from defaultTeam overrides if needed — id is always reliable
   }
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
@@ -1732,6 +1750,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   deptLocation={location}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveMember}
+                  employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
                     try {
                       const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
@@ -2319,6 +2338,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   onUpdateName={updateFfRosterName}
                   onUpdateRoster={updateRoster}
                   onRemove={handleRemoveFfMember}
+                  employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
                     try {
                       const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
