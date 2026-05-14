@@ -43,7 +43,7 @@ function parseEmployeesXLSX(file: File): Promise<EmployeeRow[]> {
       try {
         const wb   = XLSX.read(new Uint8Array(e.target!.result as ArrayBuffer), { type: 'array', cellDates: true });
         const rows = XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-        const depts = new Set(['Design','Preservation','Fulfillment','design','preservation','fulfillment']);
+        const depts = new Set(['Design','Preservation','Fulfillment','Resin','design','preservation','fulfillment','resin']);
         const parsed = rows
           .filter(r => r['Full name'] && r['Full name'] !== 'All' && depts.has(String(r['Department'] ?? '')))
           .map(r => ({
@@ -75,7 +75,7 @@ function parseHoursXLSX(file: File): Promise<HoursRow[]> {
       try {
         const wb   = XLSX.read(new Uint8Array(e.target!.result as ArrayBuffer), { type: 'array', cellDates: true });
         const rows = XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-        const depts = new Set(['Design','Preservation','Fulfillment','design','preservation','fulfillment']);
+        const depts = new Set(['Design','Preservation','Fulfillment','Resin','design','preservation','fulfillment','resin']);
         const parsed = rows
           .filter(r => r['Employee'] && r['Time entry clock in date'] && depts.has(String(r['Department (Worked)'] ?? '')))
           .map(r => ({
