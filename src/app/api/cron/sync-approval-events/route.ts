@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth }                      from '@clerk/nextjs/server';
 import { supabase }                  from '@/lib/supabase';
 
+export const maxDuration = 300;
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 const CRON_SECRET = process.env.CRON_SECRET ?? '';
 
