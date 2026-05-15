@@ -95,15 +95,13 @@ export async function GET(req: NextRequest) {
 
   try {
     // Fetch all events in range
-    let query = supabase
+    // We don't filter by location in the DB because location is often null.
+    // The UI filters by memberNames (roster) which are location-specific.
+    const query = supabase
       .from('designer_approval_events')
       .select('designer_name, event_type, week_of, comment, location')
       .gte('week_of', fromIso)
       .order('week_of', { ascending: true });
-
-    if (locationParam !== 'all') {
-      query = query.eq('location', locationParam);
-    }
 
     const { data, error } = await query;
     if (error) throw error;
