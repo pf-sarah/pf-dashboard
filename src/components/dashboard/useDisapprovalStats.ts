@@ -26,6 +26,7 @@ export interface DesignerStats {
   ytdDisapprovalRate: number | null;
   allComments:        string[];
   location:           string | null;
+  isActive:           boolean;
 }
 
 export interface DisapprovalStatsData {

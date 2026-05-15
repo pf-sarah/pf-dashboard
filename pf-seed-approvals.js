@@ -22,7 +22,6 @@ async function sbFetch(path, opts = {}) {
 }
 
 async function main() {
-  // Auth
   const authRes = await fetch(PF_BASE + 'Authentication/Login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -32,11 +31,25 @@ async function main() {
   const token = authJson.jwt ?? authJson.token ?? authJson.accessToken ?? authJson.access_token;
   console.log('Auth OK');
 
-  // Get all approved/disapproved order_nums from Supabase
-  const rows = await sbFetch('/rest/v1/order_status_history?select=order_num,status&or=(status.eq.approved,status.eq.disapproved)&limit=5000');
-  const orderNums = [...new Set(rows.map(r => r.order_num))];
-  const currentlyDisapproved = new Set(rows.filter(r => r.status === 'disapproved').map(r => r.order_num));
-  console.log('Orders to process:', orderNums.length);
+  // Source 1: order_status_history (historical approved/disapproved)
+  const histRows = await sbFetch('/rest/v1/order_status_history?select=order_num,status&or=(status.eq.approved,status.eq.disapproved)&limit=5000');
+  const histOrderNums = new Set(histRows.map(r => r.order_num));
+
+  // Source 2: uuid_location_cache current status (catches recent orders)
+  const cacheRows = await sbFetch('/rest/v1/uuid_location_cache?select=order_num,status&or=(status.eq.approved,status.eq.disapproved)&limit=5000');
+  const cacheOrderNums = new Set(cacheRows.map(r => r.order_num));
+
+  // Currently disapproved from both sources
+  const currentlyDisapproved = new Set([
+    ...histRows.filter(r => r.status === 'disapproved').map(r => r.order_num),
+    ...cacheRows.filter(r => r.status === 'disapproved').map(r => r.order_num),
+  ]);
+
+  const orderNums = [...new Set([...histOrderNums, ...cacheOrderNums])];
+  console.log(`Orders from order_status_history: ${histOrderNums.size}`);
+  console.log(`Orders from uuid_location_cache: ${cacheOrderNums.size}`);
+  console.log(`Total unique orders to process: ${orderNums.length}`);
+  console.log(`Currently disapproved: ${currentlyDisapproved.size}`);
 
   const events = [];
   let processed = 0;
@@ -84,7 +97,7 @@ async function main() {
     await new Promise(r => setTimeout(r, 50));
   }
 
-  console.log(`Done. ${processed} orders, ${failed} failed, ${events.length} events.`);
+  console.log(`Done fetching. ${processed} orders, ${failed} failed, ${events.length} events.`);
 
   // Upsert in chunks of 500
   const CHUNK = 500;
@@ -99,7 +112,7 @@ async function main() {
       },
       body: JSON.stringify(chunk)
     });
-    console.log(`Upserted chunk ${i}-${i+chunk.length}: ${res.status}`);
+    console.log(`Upserted chunk ${i}-${i+chunk.length}: HTTP ${res.status}`);
   }
   console.log('Seed complete!');
 }

@@ -64,6 +64,7 @@ interface DesignerStats {
   ytdDisapprovalRate: number | null;
   allComments:       string[];
   location:          string | null;
+  isActive:          boolean;
 }
 
 // ── GET /api/disapproval-stats ────────────────────────────────────────────────
@@ -95,8 +96,20 @@ export async function GET(req: NextRequest) {
 
   try {
     // Fetch all events in range
+    // Load designer → location map from rippling_employees (source of truth)
+    const { data: empData } = await supabase
+      .from('rippling_employees')
+      .select('full_name, location, department');
+
+    const designerLocationMap: Record<string, string> = {};
+    const activeDesigners = new Set<string>();
+    for (const emp of empData ?? []) {
+      designerLocationMap[emp.full_name] = emp.location;
+      activeDesigners.add(emp.full_name);
+    }
+
     // We don't filter by location in the DB because location is often null.
-    // The UI filters by memberNames (roster) which are location-specific.
+    // Instead we use rippling_employees to determine location per designer.
     const query = supabase
       .from('designer_approval_events')
       .select('designer_name, event_type, week_of, comment, location')
@@ -117,6 +130,12 @@ export async function GET(req: NextRequest) {
 
     for (const row of rows) {
       const name = row.designer_name;
+      // Resolve location from rippling (authoritative) or fall back to row location
+      const resolvedLocation = designerLocationMap[name] ?? row.location ?? null;
+
+      // Skip if location filter is set and doesn't match
+      if (locationParam !== 'all' && resolvedLocation !== locationParam) continue;
+
       if (!designers[name]) {
         designers[name] = {
           weekly:             {},
@@ -125,7 +144,8 @@ export async function GET(req: NextRequest) {
           ytdDisapprovals:    0,
           ytdDisapprovalRate: null,
           allComments:        [],
-          location:           row.location,
+          location:           resolvedLocation,
+          isActive:           activeDesigners.has(name),
         };
       }
 

@@ -134,6 +134,7 @@ interface DisapprovalRateSectionProps {
 
 export function DisapprovalRateSection({ location, memberNames }: DisapprovalRateSectionProps) {
   const { data, loading, error } = useDisapprovalStats(location);
+  const [showPast, setShowPast] = useState(false);
 
   const allWeeks = data?.weeks ?? [];
   const allMonths = data?.months ?? [];
@@ -189,12 +190,22 @@ export function DisapprovalRateSection({ location, memberNames }: DisapprovalRat
     return normalized;
   }, [data]);
 
-  // All designers to show: roster first, then any others from data
+  // All designers to show: roster first, then active extras, then past (if toggled)
   const allDisplayNames = useMemo(() => {
     if (!normalizedDesigners) return memberNames;
     const rosterSet = new Set(memberNames);
     const extras = Object.keys(normalizedDesigners).filter(n => !rosterSet.has(n));
-    return [...memberNames, ...extras];
+    const activeExtras = extras.filter(n => normalizedDesigners[n]?.isActive !== false);
+    const pastExtras   = extras.filter(n => normalizedDesigners[n]?.isActive === false);
+    return [...memberNames, ...activeExtras, ...(showPast ? pastExtras : [])];
+  }, [memberNames, normalizedDesigners, showPast]);
+
+  // Count past employees for toggle label
+  const pastCount = useMemo(() => {
+    if (!normalizedDesigners) return 0;
+    const rosterSet = new Set(memberNames);
+    return Object.entries(normalizedDesigners)
+      .filter(([n, s]) => !rosterSet.has(n) && s.isActive === false).length;
   }, [memberNames, normalizedDesigners]);
 
   if (loading) return (
@@ -210,14 +221,24 @@ export function DisapprovalRateSection({ location, memberNames }: DisapprovalRat
 
       {/* ── WEEKLY TABLE ── */}
       <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-700">Disapproval Rate — Weekly · {location}</h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            disapprovals ÷ approvals per week.{' '}
-            <span className="text-green-600 font-medium">Green ≤15%</span>{' '}
-            <span className="text-amber-600 font-medium">Amber ≤30%</span>{' '}
-            <span className="text-red-600 font-medium">Red &gt;30%</span>
-          </p>
+        <div className="px-5 py-3 border-b border-slate-100 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">Disapproval Rate — Weekly · {location}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              disapprovals ÷ approvals per week.{' '}
+              <span className="text-green-600 font-medium">Green ≤15%</span>{' '}
+              <span className="text-amber-600 font-medium">Amber ≤30%</span>{' '}
+              <span className="text-red-600 font-medium">Red &gt;30%</span>
+            </p>
+          </div>
+          {pastCount > 0 && (
+            <button
+              onClick={() => setShowPast(p => !p)}
+              className="text-xs px-2.5 py-1 rounded border border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors whitespace-nowrap shrink-0"
+            >
+              {showPast ? `Hide past employees` : `Show ${pastCount} past employee${pastCount === 1 ? '' : 's'}`}
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs border-collapse">
