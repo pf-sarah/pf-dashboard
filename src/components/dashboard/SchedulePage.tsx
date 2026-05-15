@@ -6,6 +6,7 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
+import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings } from './useScheduleSettings';
 
@@ -4065,13 +4066,19 @@ export function SchedulePage({
 
           {/* ── HISTORICALS TAB ─────────────────────────────────────────────── */}
           {activeTab === 'historicals' && (
-            <HistoricalsSection
-              department="design"
-              location={location}
-              members={designers.map(d => ({ id: d.id, name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, excludeFromCPO: (d as {excludeFromCPO?:boolean}).excludeFromCPO }))}
-              ordersLabel="frames"
-              excludeFromCPONames={['Zac Williams', 'Lauren Boyd']}
-            />
+            <>
+              <HistoricalsSection
+                department="design"
+                location={location}
+                members={designers.map(d => ({ id: d.id, name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, excludeFromCPO: (d as {excludeFromCPO?:boolean}).excludeFromCPO }))}
+                ordersLabel="frames"
+                excludeFromCPONames={['Zac Williams', 'Lauren Boyd']}
+              />
+              <DisapprovalRateSection
+                location={location}
+                memberNames={designers.map(d => d.name)}
+              />
+            </>
           )}
 
         </>
