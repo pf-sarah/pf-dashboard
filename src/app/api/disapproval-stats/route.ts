@@ -125,11 +125,19 @@ export async function GET(req: NextRequest) {
     const allWeeks  = getAllWeeksSince(fromIso);
     const allMonths = [...new Set(allWeeks.map(getMonthKey))];
 
+    // Name normalization — PF API names → Rippling/roster names
+    const PF_NAME_MAP: Record<string, string> = {
+      'Chloe Leonard':  'Chloe Jensen',
+      'Mia Legas':      'Mia Legas Boots',
+      'Kathryn Hill':   'Kathryn Sonntag',
+    };
+
     // Aggregate per designer
     const designers: Record<string, DesignerStats> = {};
 
     for (const row of rows) {
-      const name = row.designer_name;
+      // Normalize PF API name to roster name before location lookup
+      const name = PF_NAME_MAP[row.designer_name] ?? row.designer_name;
       // Resolve location from rippling (authoritative) or fall back to row location
       const resolvedLocation = designerLocationMap[name] ?? row.location ?? null;
 
