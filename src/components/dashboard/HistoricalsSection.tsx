@@ -310,7 +310,9 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                   </td>
                   {allWeeks.map(w => {
                     const isPast = new Date(w + 'T12:00:00') <= today;
-                    const val = receivedEdits[w] ?? presActuals[w] ?? 0;
+                    const weekTotal = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+                    const isOverridden = receivedEdits[w] !== undefined || presActuals[w] !== undefined;
+                    const val = receivedEdits[w] ?? presActuals[w] ?? weekTotal;
                     const isSavingThis = savingReceived === w;
                     const isFirst = allWeeks.filter(x => getMonthKey(x) === getMonthKey(w))[0] === w;
                     return (
@@ -321,7 +323,7 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                             value={val > 0 ? val : ''}
                             placeholder=""
                             onChange={ev => handleReceivedEdit(w, parseInt(ev.target.value) || 0)}
-                            className="hist-input w-full px-2 py-2 text-center text-[11px] font-semibold bg-transparent border-none outline-none focus:bg-emerald-100 text-emerald-700"
+                            className={`hist-input w-full px-2 py-2 text-center text-[11px] font-semibold bg-transparent border-none outline-none focus:bg-emerald-100 ${isOverridden ? 'text-emerald-700' : 'text-indigo-400'}`}
                           />
                         ) : (
                           <span className="block text-center text-slate-200 py-2">—</span>
