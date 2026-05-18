@@ -109,19 +109,25 @@ export async function GET(req: NextRequest) {
       activeDesigners.add(emp.full_name);
     }
 
-    // We don't filter by location in the DB because location is often null.
-    // Instead we use rippling_employees to determine location per designer.
-    const query = supabase
-      .from('designer_approval_events')
-      .select('designer_name, event_type, week_of, comment, location')
-      .gte('week_of', fromIso)
-      .order('week_of', { ascending: true })
-      .limit(10000); // Override Supabase default 1000 row limit
+    // Paginate to get all rows (Supabase caps at 1000 per request)
+    const allRows: EventRow[] = [];
+    const PAGE_SIZE = 1000;
+    let page = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from('designer_approval_events')
+        .select('designer_name, event_type, week_of, comment, location')
+        .gte('week_of', fromIso)
+        .order('week_of', { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (error) throw error;
+      const batch = (data ?? []) as EventRow[];
+      allRows.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      page++;
+    }
 
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const rows = (data ?? []) as EventRow[];
+    const rows = allRows;
 
     // Build week and month lists
     const allWeeks  = getAllWeeksSince(fromIso);
