@@ -21,6 +21,8 @@ interface HistoricalsSectionProps {
   members:       TeamMember[];
   ordersLabel:   string;
   onRatioUpdate?: (memberId: string, ratio: number) => void;
+  presActuals?:  Record<string, number>;
+  onReceivedSaved?: () => void;
 }
 
 function fmt$(n: number): string {
@@ -58,12 +60,33 @@ function getAllWeeks(): string[] {
   return weeks;
 }
 
-export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate, excludeFromCPONames = [] }: HistoricalsSectionProps) {
+export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate, excludeFromCPONames = [], presActuals = {}, onReceivedSaved }: HistoricalsSectionProps) {
   const { enrichedActuals, loading, refresh, getWeekCosts } = useActualsWithPayroll(location);
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [managerHours, setManagerHours] = useState<Record<string, number>>({});
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const [receivedEdits, setReceivedEdits] = useState<Record<string, number>>({});
+  const [savingReceived, setSavingReceived] = useState<string | null>(null);
+  const receivedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  function handleReceivedEdit(weekOf: string, val: number) {
+    setReceivedEdits(prev => ({ ...prev, [weekOf]: val }));
+    if (receivedTimers.current[weekOf]) clearTimeout(receivedTimers.current[weekOf]);
+    receivedTimers.current[weekOf] = setTimeout(async () => {
+      setSavingReceived(weekOf);
+      try {
+        await fetch('/api/actuals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'preservation', location, weekOf, received: val }),
+        });
+        onReceivedSaved?.();
+      } catch {}
+      setSavingReceived(null);
+    }, 800);
+  }
 
   const allWeeks = useMemo(() => getAllWeeks(), []);
   const today = getMondayDate(0);
@@ -278,6 +301,36 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                   </tr>
                 );
               })}
+
+              {/* Bouquets received row — preservation only */}
+              {department === 'preservation' && (
+                <tr className="bg-emerald-50/40 border-t-2 border-emerald-100">
+                  <td className="sticky left-0 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700 border-r border-slate-200 whitespace-nowrap">
+                    Bouquets received
+                  </td>
+                  {allWeeks.map(w => {
+                    const isPast = new Date(w + 'T12:00:00') <= today;
+                    const val = receivedEdits[w] ?? presActuals[w] ?? 0;
+                    const isSavingThis = savingReceived === w;
+                    const isFirst = allWeeks.filter(x => getMonthKey(x) === getMonthKey(w))[0] === w;
+                    return (
+                      <td key={w} className={`p-0 ${isFirst ? 'border-l-2 border-l-slate-300' : 'border-l border-l-slate-100'} ${isSavingThis ? 'opacity-50' : ''}`}>
+                        {isPast ? (
+                          <input
+                            type="number" min="0"
+                            value={val > 0 ? val : ''}
+                            placeholder=""
+                            onChange={ev => handleReceivedEdit(w, parseInt(ev.target.value) || 0)}
+                            className="hist-input w-full px-2 py-2 text-center text-[11px] font-semibold bg-transparent border-none outline-none focus:bg-emerald-100 text-emerald-700"
+                          />
+                        ) : (
+                          <span className="block text-center text-slate-200 py-2">—</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
 
               {/* Week totals */}
               <tr className="bg-slate-50 font-semibold border-t-2 border-slate-200">

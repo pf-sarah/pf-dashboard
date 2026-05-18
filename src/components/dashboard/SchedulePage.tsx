@@ -1327,7 +1327,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {} }: {
+  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1345,6 +1345,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
   onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
   weeklyEstimates:       Record<string, { ut: number; ga: number }>;
+  presActuals?:          Record<string, number>;
+  onReceivedSaved?:      () => void;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -2084,7 +2086,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType ?? 'hourly', hourlyRate: m.rate, annualSalary: m.annualSalary ?? 0, isManager: m.isManager, excludeFromCPO: (m as {excludeFromCPO?:boolean}).excludeFromCPO }))}
           ordersLabel="bouquets"
           excludeFromCPONames={['Zac Williams', 'Lauren Boyd']}
-
+          presActuals={presActuals}
+          onReceivedSaved={onReceivedSaved}
         />
       )}
     </div>
@@ -3464,6 +3467,17 @@ export function SchedulePage({
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
           employeeRates={employeeRates}
           weeklyEstimates={weeklyEstimates}
+          presActuals={presActuals}
+          onReceivedSaved={() => {
+            fetch(`/api/actuals?location=${location}&type=preservation&weeks=52`)
+              .then(r => r.json())
+              .then((d: { preservationActuals?: { week_of: string; received: number }[] }) => {
+                const map: Record<string, number> = {};
+                (d.preservationActuals ?? []).forEach(row => { map[row.week_of] = row.received; });
+                setPresActuals(map);
+              })
+              .catch(() => {});
+          }}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=all&weeks=52`)
               .then(r => r.json())

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const since      = new Date();
   since.setDate(since.getDate() - Math.max(weeks, 52) * 7);
   // Always look back at least to start of 2026 data
-  const hardFloor  = '2025-12-28';
+  const hardFloor  = '2025-09-01';
   const sinceIso   = since.toISOString().split('T')[0] < hardFloor ? since.toISOString().split('T')[0] : hardFloor;
 
   try {
