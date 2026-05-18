@@ -79,6 +79,7 @@ interface DesignerStats {
 //     months:    string[],   // all month keys in range ("2026-03")
 //   }
 
+// v2
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
