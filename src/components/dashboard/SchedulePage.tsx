@@ -3303,11 +3303,16 @@ export function SchedulePage({
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
     const hardcoded = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
-    // Merge: presActuals override hardcoded; include any actuals weeks not in hardcoded
-    const allWeeks = new Set([...hardcoded.map(h => h.weekOf), ...Object.keys(presActuals)]);
+    // Compute week totals from teamActuals (preservation dept) as a fallback
+    const teamActualsByWeek: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'preservation').forEach(r => {
+      teamActualsByWeek[r.week_of] = (teamActualsByWeek[r.week_of] ?? 0) + r.actual_orders;
+    });
+    // Merge: presActuals override hardcoded; teamActuals fallback for newer weeks
+    const allWeeks = new Set([...hardcoded.map(h => h.weekOf), ...Object.keys(presActuals), ...Object.keys(teamActualsByWeek)]);
     const historicalIntake = [...allWeeks].sort().map(weekOf => ({
       weekOf,
-      actual: presActuals[weekOf] ?? hardcoded.find(h => h.weekOf === weekOf)?.actual ?? 0,
+      actual: presActuals[weekOf] ?? hardcoded.find(h => h.weekOf === weekOf)?.actual ?? teamActualsByWeek[weekOf] ?? 0,
     })).filter(h => h.actual > 0);
     if (!historicalIntake.length) return [];
     const today = getMondayDate(0);
