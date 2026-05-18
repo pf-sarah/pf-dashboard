@@ -103,7 +103,6 @@ const GEORGIA_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
 const DEFAULT_UTAH_DESIGNERS: Designer[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',  ratio: 1.4, payType: 'salary', hourlyRate: 0, annualSalary: 0, isManager: true, role: 'master' as const },
   { id: 'ut-1',   name: 'Deanna Haug',   ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
-  { id: 'ut-2',   name: 'Sarah Handy', ratio: 1.8, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-3',   name: 'Kathryn Sonntag',     ratio: 1.4, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-4',   name: 'Mia Legas Boots',        ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ut-5',   name: 'Sloane James',     ratio: 1.2, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
@@ -2504,7 +2503,6 @@ interface StaffMember {
 const UTAH_STAFF: StaffMember[] = [
   { id: 'ut-mgr', name: 'Jennika Merrill',       homeDept: 'design',       onCall: false },
   { id: 'ut-1',   name: 'Deanna Haug',         homeDept: 'design',       onCall: false },
-  { id: 'ut-2',   name: 'Sarah Handy',        homeDept: 'design',       onCall: false },
   { id: 'ut-3',   name: 'Kathryn Sonntag',            homeDept: 'design',       onCall: false },
   { id: 'ut-4',   name: 'Mia Legas Boots',               homeDept: 'design',       onCall: false },
   { id: 'ut-5',   name: 'Sloane James',            homeDept: 'design',       onCall: false },
