@@ -205,25 +205,27 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   // Auto-save week total as received for any past week not yet in Supabase
   useEffect(() => {
     if (department !== 'preservation') return;
+    if (loading) return;
     const todayIso = getMondayDate(0).toISOString().split('T')[0];
     const weeksToSave = getAllWeeks().filter(w => {
       if (w >= todayIso) return false;
       if (presActuals[w] !== undefined) return false;
       if (autoSavedWeeks.current.has(w)) return false;
-      const total = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+      // Use raw deptActuals directly to avoid calling getEntry before it's stable
+      const total = deptActuals.filter(r => r.week_of === w).reduce((s, r) => s + r.actual_orders, 0);
       return total > 0;
     });
     if (weeksToSave.length === 0) return;
     weeksToSave.forEach(w => {
       autoSavedWeeks.current.add(w);
-      const total = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+      const total = deptActuals.filter(r => r.week_of === w).reduce((s, r) => s + r.actual_orders, 0);
       fetch('/api/actuals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'preservation', location, weekOf: w, received: total }),
       }).then(() => onReceivedSaved?.()).catch(() => {});
     });
-  }, [department, presActuals, deptActuals, localEdits]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [department, presActuals, deptActuals, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
