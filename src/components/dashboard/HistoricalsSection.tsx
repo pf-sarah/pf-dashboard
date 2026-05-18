@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useActualsWithPayroll } from './useActualsWithPayroll';
 import type { EnrichedActual } from './useActualsWithPayroll';
 
@@ -70,6 +70,7 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   const [receivedEdits, setReceivedEdits] = useState<Record<string, number>>({});
   const [savingReceived, setSavingReceived] = useState<string | null>(null);
   const receivedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const autoSavedWeeks = useRef<Set<string>>(new Set());
 
   function handleReceivedEdit(weekOf: string, val: number) {
     setReceivedEdits(prev => ({ ...prev, [weekOf]: val }));
@@ -200,6 +201,29 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   if (loading) return <div className="text-xs text-slate-400 p-4">Loading historicals…</div>;
 
   const allDisplayMembers = [...members.map(m => m.name), ...flexNames];
+
+  // Auto-save week total as received for any past week not yet in Supabase
+  useEffect(() => {
+    if (department !== 'preservation') return;
+    const todayIso = getMondayDate(0).toISOString().split('T')[0];
+    const weeksToSave = getAllWeeks().filter(w => {
+      if (w >= todayIso) return false;
+      if (presActuals[w] !== undefined) return false;
+      if (autoSavedWeeks.current.has(w)) return false;
+      const total = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+      return total > 0;
+    });
+    if (weeksToSave.length === 0) return;
+    weeksToSave.forEach(w => {
+      autoSavedWeeks.current.add(w);
+      const total = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+      fetch('/api/actuals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'preservation', location, weekOf: w, received: total }),
+      }).then(() => onReceivedSaved?.()).catch(() => {});
+    });
+  }, [department, presActuals, deptActuals, localEdits]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
