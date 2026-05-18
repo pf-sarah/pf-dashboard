@@ -114,7 +114,8 @@ export async function GET(req: NextRequest) {
       .from('designer_approval_events')
       .select('designer_name, event_type, week_of, comment, location')
       .gte('week_of', fromIso)
-      .order('week_of', { ascending: true });
+      .order('week_of', { ascending: true })
+      .limit(10000); // Override Supabase default 1000 row limit
 
     const { data, error } = await query;
     if (error) throw error;

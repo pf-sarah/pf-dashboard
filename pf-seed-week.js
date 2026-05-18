@@ -4,8 +4,8 @@ const PF_BASE = process.env.PF_API_URL.endsWith('/') ? process.env.PF_API_URL : 
 const SB_URL  = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SB_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const WEEK_START = '2026-04-27';
-const WEEK_END   = '2026-05-03';
+const WEEK_START = '2026-05-11';
+const WEEK_END   = '2026-05-17';
 
 function toMondayWeek(dateStr) {
   const d = new Date(dateStr);
