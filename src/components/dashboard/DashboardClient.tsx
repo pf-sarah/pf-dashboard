@@ -7,6 +7,8 @@ import { SortedLocationSection } from './SortedLocationSection';
 import ScorecardTab from "./ScorecardTab";
 import { SchedulePage } from './SchedulePage';
 import ResinPage from './ResinPage';
+import UserManagementPage from './UserManagementPage';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 interface PipelineCount {
   status: string;
@@ -21,7 +23,8 @@ interface LocationCounts {
 }
 
 export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
-  const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards'>('dashboard');
+  const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'team'>('dashboard');
+  const { user } = useCurrentUser();
 
   // ── Shared location counts (used by both SortedLocationSection and SchedulePage) ──
   const [locationCounts, setLocationCounts] = useState<LocationCounts | null>(null);
@@ -70,6 +73,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
           ['dashboard',  'Department Dashboard'],
           ['scheduling', 'Scheduling'],
           ['scorecards',  'Scorecards'],
+          ...(user?.permissions.canManageUsers ? [['team', 'Team Access'] as const] : []),
         ] as const).map(([id, label]) => (
           <button
             key={id}
@@ -115,6 +119,8 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
 
       {/* ── SCORECARDS TAB ──────────────────────────────────────────────────── */}
       {mainTab === 'scorecards' && <ScorecardTab />}
+      {/* ── TEAM ACCESS TAB ─────────────────────────────────────────────────── */}
+      {mainTab === 'team' && <UserManagementPage />}
       {/* ── SCHEDULING TAB ───────────────────────────────────────────────────── */}
       {mainTab === 'scheduling' && (
         <SchedulePage
