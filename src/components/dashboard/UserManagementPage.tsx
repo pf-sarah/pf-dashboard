@@ -120,10 +120,15 @@ export default function UserManagementPage() {
     fetchUsers();
   };
 
-  const handleImpersonate = async (targetId: string) => {
+  const handleImpersonate = async (target: UserProfile) => {
     try {
-      await startImpersonating(targetId);
-      router.refresh();
+      await startImpersonating(target.clerk_user_id);
+      // Navigate to the right page for their role
+      if (target.role === "user") {
+        router.push("/my-dashboard");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (err: any) {
       setError(err.message ?? "Could not impersonate user");
     }
@@ -381,7 +386,7 @@ export default function UserManagementPage() {
                       </button>
                       {u.clerk_user_id !== realUser?.profile.clerk_user_id && (
                         <button
-                          onClick={() => handleImpersonate(u.clerk_user_id)}
+                          onClick={() => handleImpersonate(u)}
                           className="text-xs px-3 py-1 rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors"
                         >
                           View as
