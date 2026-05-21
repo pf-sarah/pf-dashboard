@@ -34,8 +34,8 @@ export default async function DashboardPage() {
   const pipeline = await getPipelineCounts();
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header />
       <ImpersonationBanner />
+      <Header />
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {!pipeline ? (
           <div className="text-center py-20 text-slate-500">
