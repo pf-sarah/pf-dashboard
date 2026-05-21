@@ -347,7 +347,7 @@ function HistoricalsTab({ designers, location, teamActuals, onActualsSaved, canV
   const teamCost   = weekData.reduce((s, r) => s + r.cost,   0);
   const teamRatio  = teamFrames > 0 && teamHours > 0 ? teamHours / teamFrames : null;
   const teamCPO    = teamFrames > 0 && teamCost  > 0 ? teamCost  / teamFrames : null;
-  const hasCost    = designers.some(d =>
+  const hasCost    = canViewCPO && designers.some(d =>
     (d.payType === 'hourly' && d.hourlyRate > 0) || (d.payType === 'salary' && d.annualSalary > 0)
   );
 
@@ -1603,7 +1603,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   );
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
-  const hasRates = team.some(m => m.rate > 0);
+  const hasRates = canViewCPO && team.some(m => m.rate > 0);
 
   const tagStyle: Record<string, string> = {
     hourly: 'bg-slate-100 text-slate-600',
@@ -2203,7 +2203,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   const weekCost   = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
   const teamCPO    = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
-  const hasRates   = team.some(m => m.rate > 0);
+  const hasRates   = canViewCPO && team.some(m => m.rate > 0);
 
   return (
     <div className="space-y-4">
@@ -2260,7 +2260,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         }, 0);
         const teamDailyCost = (di: number) => team.reduce((s, m) => s + ffDailyCost(m, di), 0);
         const teamWeekOrders = days.reduce((s, _, di) => s + teamDailyOrders(di), 0);
-        const ffHasRates = team.some(m => m.rate > 0 || m.annualSalary > 0);
+        const ffHasRates = canViewCPO && team.some(m => m.rate > 0 || m.annualSalary > 0);
         return (
           <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
@@ -3400,7 +3400,7 @@ export function SchedulePage({
   }, [location, designableQueue, weeklyTotals, presActuals]);
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
-  const hasRates    = designers.some(d =>
+  const hasRates    = canViewCPO && designers.some(d =>
     (d.payType === 'hourly' && d.hourlyRate > 0) ||
     (d.payType === 'salary' && d.annualSalary > 0)
   );
