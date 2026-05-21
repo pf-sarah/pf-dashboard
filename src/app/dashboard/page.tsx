@@ -4,6 +4,7 @@ import { Header } from '@/components/dashboard/Header';
 import { DashboardClient } from '@/components/dashboard/DashboardClient';
 import { pfGet } from '@/lib/pf-api';
 import { createClient } from '@supabase/supabase-js';
+import { ImpersonationBanner } from '@/components/dashboard/ImpersonationBanner';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,6 +34,7 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
+      <ImpersonationBanner />
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {!pipeline ? (
           <div className="text-center py-20 text-slate-500">

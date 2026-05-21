@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 import { Header } from '@/components/dashboard/Header';
 import MyDashboardClient from '@/components/dashboard/MyDashboardClient';
+import { ImpersonationBanner } from '@/components/dashboard/ImpersonationBanner';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,6 +28,7 @@ export default async function MyDashboardPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
+      <ImpersonationBanner />
       <main className="max-w-4xl mx-auto px-6 py-8">
         <MyDashboardClient profile={profile} />
       </main>

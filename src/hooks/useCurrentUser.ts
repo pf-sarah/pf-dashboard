@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 export type UserRole = "admin" | "general_manager" | "manager" | "user";
 
@@ -35,12 +35,19 @@ interface CurrentUser {
 
 interface UseCurrentUserResult {
   user: CurrentUser | null;
+  realUser: CurrentUser | null;
   loading: boolean;
   error: string | null;
+  isImpersonating: boolean;
+  startImpersonating: (targetId: string) => Promise<void>;
+  stopImpersonating: () => void;
 }
 
+const IMPERSONATION_KEY = "pf_impersonating_id";
+
 export function useCurrentUser(): UseCurrentUserResult {
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [realUser, setRealUser] = useState<CurrentUser | null>(null);
+  const [impersonatedUser, setImpersonatedUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +57,23 @@ export function useCurrentUser(): UseCurrentUserResult {
         if (!res.ok) throw new Error("Failed to load user profile");
         return res.json();
       })
-      .then((data) => {
-        setUser(data);
+      .then(async (data) => {
+        setRealUser(data);
+        // Check if there is an active impersonation session
+        const impersonatingId = sessionStorage.getItem(IMPERSONATION_KEY);
+        if (impersonatingId) {
+          try {
+            const res = await fetch(`/api/users/${impersonatingId}/profile`);
+            if (res.ok) {
+              const impData = await res.json();
+              setImpersonatedUser(impData);
+            } else {
+              sessionStorage.removeItem(IMPERSONATION_KEY);
+            }
+          } catch {
+            sessionStorage.removeItem(IMPERSONATION_KEY);
+          }
+        }
         setLoading(false);
       })
       .catch((err) => {
@@ -60,5 +82,29 @@ export function useCurrentUser(): UseCurrentUserResult {
       });
   }, []);
 
-  return { user, loading, error };
+  const startImpersonating = useCallback(async (targetId: string) => {
+    const res = await fetch(`/api/users/${targetId}/profile`);
+    if (!res.ok) throw new Error("Cannot impersonate this user");
+    const data = await res.json();
+    sessionStorage.setItem(IMPERSONATION_KEY, targetId);
+    setImpersonatedUser(data);
+  }, []);
+
+  const stopImpersonating = useCallback(() => {
+    sessionStorage.removeItem(IMPERSONATION_KEY);
+    setImpersonatedUser(null);
+  }, []);
+
+  const isImpersonating = impersonatedUser !== null;
+  const user = isImpersonating ? impersonatedUser : realUser;
+
+  return {
+    user,
+    realUser,
+    loading,
+    error,
+    isImpersonating,
+    startImpersonating,
+    stopImpersonating,
+  };
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useRouter } from "next/navigation";
 
 type UserRole = "admin" | "general_manager" | "manager" | "user";
 
@@ -35,7 +36,8 @@ const roleBadgeColor = (role: UserRole) => {
 };
 
 export default function UserManagementPage() {
-  const { user } = useCurrentUser();
+  const { user, startImpersonating, realUser } = useCurrentUser();
+  const router = useRouter();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -115,6 +117,15 @@ export default function UserManagementPage() {
     if (!confirm("Remove this user? They will lose access immediately.")) return;
     await fetch(`/api/users/${id}`, { method: "DELETE" });
     fetchUsers();
+  };
+
+  const handleImpersonate = async (targetId: string) => {
+    try {
+      await startImpersonating(targetId);
+      router.refresh();
+    } catch (err: any) {
+      setError(err.message ?? "Could not impersonate user");
+    }
   };
 
   if (!user?.permissions.canManageUsers) {
@@ -366,7 +377,15 @@ export default function UserManagementPage() {
                       >
                         Edit
                       </button>
-                      {u.clerk_user_id !== user?.profile.clerk_user_id && (
+                      {u.clerk_user_id !== realUser?.profile.clerk_user_id && (
+                        <button
+                          onClick={() => handleImpersonate(u.clerk_user_id)}
+                          className="text-xs px-3 py-1 rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors"
+                        >
+                          View as
+                        </button>
+                      )}
+                      {u.clerk_user_id !== realUser?.profile.clerk_user_id && (
                         <button
                           onClick={() => deleteUser(u.clerk_user_id)}
                           className="text-xs px-3 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 transition-colors"
