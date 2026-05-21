@@ -3,6 +3,12 @@ import { redirect } from 'next/navigation';
 import { Header } from '@/components/dashboard/Header';
 import { DashboardClient } from '@/components/dashboard/DashboardClient';
 import { pfGet } from '@/lib/pf-api';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 async function getPipelineCounts() {
   try {
@@ -14,8 +20,16 @@ export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect('/sign-in');
 
-  const pipeline = await getPipelineCounts();
+  // Check role — users get their own personal dashboard
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('role')
+    .eq('clerk_user_id', userId)
+    .single();
 
+  if (profile?.role === 'user') redirect('/my-dashboard');
+
+  const pipeline = await getPipelineCounts();
   return (
     <div className="min-h-screen bg-slate-50">
       <Header />
