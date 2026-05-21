@@ -64,7 +64,7 @@ export async function GET(
     canViewAllLocations: target.role === "admin" || targetIsGM || targetIsViewer,
     canEditSchedule:     !targetIsUser && !targetIsViewer,
     canEditHistoricals:  !targetIsUser && !targetIsViewer,
-    canViewScheduling:   !targetIsUser && !targetIsViewer,
+    canViewScheduling:   !targetIsUser,
     canViewScorecards:   !targetIsUser && !targetIsViewer,
     isUserRole:          targetIsUser,
     isViewerRole:        targetIsViewer,
