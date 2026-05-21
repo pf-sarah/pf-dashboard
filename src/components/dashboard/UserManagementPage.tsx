@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useRouter } from "next/navigation";
+import { TeamMemberSelect } from "./TeamMemberSelect";
 
 type UserRole = "admin" | "general_manager" | "manager" | "user";
 
@@ -217,12 +218,13 @@ export default function UserManagementPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Schedule Name</label>
-              <input
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#703C2E]/30"
-                placeholder="Matches name in scheduling system"
+              <TeamMemberSelect
                 value={inviteTeamMemberName}
-                onChange={e => setInviteTeamMemberName(e.target.value)}
+                onChange={setInviteTeamMemberName}
+                location={inviteLocation}
+                department={inviteDepartment}
               />
+              <p className="text-xs text-gray-400 mt-1">Must match their name in the scheduling system exactly.</p>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Manager</label>
