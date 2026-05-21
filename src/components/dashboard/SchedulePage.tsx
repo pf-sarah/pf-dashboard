@@ -274,11 +274,12 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
 
 // ─── HistoricalsTab ────────────────────────────────────────────────────────────
 
-function HistoricalsTab({ designers, location, teamActuals, onActualsSaved }: {
+function HistoricalsTab({ designers, location, teamActuals, onActualsSaved, canViewCPO = true }: {
   designers:      Designer[];
   location:       'Utah' | 'Georgia';
   teamActuals:    { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved: () => void;
+  canViewCPO?:    boolean;
 }) {
   const HIST_WEEKS  = 12;
   const weekOptions = pastWeeks(HIST_WEEKS);
@@ -1327,7 +1328,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved }: {
+  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1347,6 +1348,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   weeklyEstimates:       Record<string, { ut: number; ga: number }>;
   presActuals?:          Record<string, number>;
   onReceivedSaved?:      () => void;
+  canViewCPO?:           boolean;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -2098,7 +2100,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
   ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {},
-  ffDailyHoursProp, onFfDailyHoursChange }: {
+  ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
@@ -2113,6 +2115,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   ffDailyHoursProp?:     Record<string, number[]>;
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
+  canViewCPO?:           boolean;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
@@ -3488,6 +3491,7 @@ export function SchedulePage({
           preservationQueue={preservationQueue}
           countsLoading={countsLoading}
           teamActuals={teamActuals}
+          canViewCPO={canViewCPO}
           presHours={settings.presHours}
           presDailyHours={presDailyHours}
           onPresDailyHoursChange={(h) => { setPresDailyHours(h); update('presDailyHours', h); }}
@@ -3535,6 +3539,7 @@ export function SchedulePage({
           fulfillmentQueue={fulfillmentQueue}
           countsLoading={countsLoading}
           teamActuals={teamActuals}
+          canViewCPO={canViewCPO}
           ffHours={settings.ffHours}
           ffRoster={settings.ffRoster}
           mgrTotalHours={settings.mgrTotalHours}
