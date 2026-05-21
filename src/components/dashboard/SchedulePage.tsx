@@ -2972,6 +2972,12 @@ interface SchedulePageProps {
   utahFulfillment?:   number;
   georgiaFulfillment?: number;
   countsLoading?:     boolean;
+  canEditUtah?:       boolean;
+  canEditGeorgia?:    boolean;
+  canViewCPO?:        boolean;
+  userLocation?:      string | null;
+  userDepartment?:    string | null;
+  userRole?:          string;
 }
 
 // ─── Main SchedulePage ─────────────────────────────────────────────────────────
@@ -2984,9 +2990,17 @@ export function SchedulePage({
   utahFulfillment   = 0,
   georgiaFulfillment = 0,
   countsLoading     = false,
+  canEditUtah       = true,
+  canEditGeorgia    = true,
+  canViewCPO        = true,
+  userLocation      = null,
+  userDepartment    = null,
+  userRole          = 'admin',
 }: SchedulePageProps) {
 
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
+  // Permission derived from current location
+  const canEditCurrent = location === 'Utah' ? canEditUtah : canEditGeorgia;
   const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>('design');
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
@@ -3109,7 +3123,7 @@ export function SchedulePage({
       };
     }),
   });
-  const hasAnyRates = [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
+  const hasAnyRates = canViewCPO && [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
     const anyM = m as {rate?: number; hourlyRate?: number; annualSalary?: number; payType?: string};
     return (anyM.rate ?? anyM.hourlyRate ?? 0) > 0 || (anyM.annualSalary ?? 0) > 0;
   });
@@ -3439,15 +3453,22 @@ export function SchedulePage({
             <span className="text-xs text-red-500">Save failed — check connection</span>
           )}
         </div>
-        <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
-          {(['Utah', 'Georgia'] as const).map(loc => (
-            <button key={loc} onClick={() => setLocation(loc)}
-              className={`px-5 py-2 transition-colors ${
-                location === loc ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
-              }`}>
-              {loc}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+            {(['Utah', 'Georgia'] as const).map(loc => (
+              <button key={loc} onClick={() => setLocation(loc)}
+                className={`px-5 py-2 transition-colors ${
+                  location === loc ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
+                }`}>
+                {loc}
+              </button>
+            ))}
+          </div>
+          {!canEditCurrent && (
+            <span className="text-xs bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full">
+              View only
+            </span>
+          )}
         </div>
       </div>
 

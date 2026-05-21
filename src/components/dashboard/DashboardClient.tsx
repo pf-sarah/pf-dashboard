@@ -131,6 +131,12 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
           utahFulfillment={utahFulfillment}
           georgiaFulfillment={georgiaFulfillment}
           countsLoading={locationCounts === null}
+          canEditUtah={user?.permissions.canEditUtah ?? false}
+          canEditGeorgia={user?.permissions.canEditGeorgia ?? false}
+          canViewCPO={user?.permissions.canViewCPO ?? true}
+          userLocation={user?.profile.location ?? null}
+          userDepartment={user?.profile.department ?? null}
+          userRole={user?.profile.role ?? 'admin'}
         />
       )}
 
