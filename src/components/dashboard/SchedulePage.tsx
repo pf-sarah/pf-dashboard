@@ -1328,7 +1328,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true }: {
+  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1349,6 +1349,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   presActuals?:          Record<string, number>;
   onReceivedSaved?:      () => void;
   canViewCPO?:           boolean;
+  userRole?:             string;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -1650,7 +1651,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
       {/* Tabs: This Week | Schedule | Historicals */}
       <div className="flex border-b border-slate-200">
-        {(['schedule', 'historicals'] as const).map(t => (
+        {(['schedule', 'historicals'] as const).filter(t => userRole !== 'viewer' || t === 'schedule').map(t => (
           <button key={t} onClick={() => setPresTab(t)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -1792,7 +1793,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
           {/* Weekly / 52-week toggle */}
           <div className="flex gap-1">
-            {(['weekly', '52week'] as const).map(t => (
+            {(['weekly', '52week'] as const).filter(t => userRole !== 'viewer').map(t => (
               <button key={t} onClick={() => { setActivePresTab(t); if (t === '52week' && Object.keys(weeklyShopify).length === 0) loadWeeklyShopify(); }}
                 className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                   activePresTab === t ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -2100,7 +2101,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
   ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {},
-  ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true }: {
+  ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true, userRole = 'admin' }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
@@ -2116,6 +2117,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   ffDailyHoursProp?:     Record<string, number[]>;
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
   canViewCPO?:           boolean;
+  userRole?:             string;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
@@ -2234,7 +2236,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       </div>
 
       <div className="flex border-b border-slate-200">
-        {(['thisweek', 'schedule', 'historicals'] as const).map(t => (
+        {(['thisweek', 'schedule', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
           <button key={t} onClick={() => setFfTab(t)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               ffTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
@@ -3437,6 +3439,9 @@ export function SchedulePage({
               if (userRole === 'manager' && userDepartment) {
                 return id === userDepartment;
               }
+              if (userRole === 'viewer') {
+                return ['design', 'preservation', 'resin'].includes(id);
+              }
               return true;
             }).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
@@ -3643,7 +3648,10 @@ export function SchedulePage({
               ['queue',       'Queue & Turnaround'],
               ['monthly',     'Monthly Summary'],
               ['historicals', 'Historicals'],
-            ] as const).map(([id, label]) => (
+            ] as const).filter(([id]) => {
+              if (userRole === 'viewer') return ['thisweek', 'queue'].includes(id);
+              return true;
+            }).map(([id, label]) => (
               <button key={id} onClick={() => setActiveTab(id)}
                 className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   activeTab === id
