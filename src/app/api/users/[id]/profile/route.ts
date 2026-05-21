@@ -49,21 +49,25 @@ export async function GET(
   }
 
   // Build permissions for target user
-  const targetIsUser = target.role === "user";
+  const targetIsUser    = target.role === "user";
+  const targetIsViewer  = target.role === "viewer";
   const targetIsManager = target.role === "manager";
-  const targetIsGM = target.role === "general_manager";
+  const targetIsGM      = target.role === "general_manager";
 
   const permissions = {
-    canEditUtah: !targetIsUser && (target.role === "admin" || (targetIsGM && target.location === "Utah") || (targetIsManager && target.location === "Utah")),
-    canEditGeorgia: !targetIsUser && (target.role === "admin" || (targetIsGM && target.location === "Georgia") || (targetIsManager && target.location === "Georgia")),
-    canViewUtah: target.role === "admin" || targetIsGM || (targetIsManager && target.location === "Utah") || (targetIsUser && target.location === "Utah"),
-    canViewGeorgia: target.role === "admin" || targetIsGM || (targetIsManager && target.location === "Georgia") || (targetIsUser && target.location === "Georgia"),
-    canViewCPO: !targetIsUser,
-    canManageUsers: target.role === "admin",
-    canViewAllLocations: target.role === "admin" || targetIsGM,
-    canEditSchedule: !targetIsUser,
-    canEditHistoricals: !targetIsUser,
-    isUserRole: targetIsUser,
+    canEditUtah:         !targetIsUser && !targetIsViewer && (target.role === "admin" || (targetIsGM && target.location === "Utah") || (targetIsManager && target.location === "Utah")),
+    canEditGeorgia:      !targetIsUser && !targetIsViewer && (target.role === "admin" || (targetIsGM && target.location === "Georgia") || (targetIsManager && target.location === "Georgia")),
+    canViewUtah:         target.role === "admin" || targetIsGM || targetIsViewer || (targetIsManager && target.location === "Utah") || (targetIsUser && target.location === "Utah"),
+    canViewGeorgia:      target.role === "admin" || targetIsGM || targetIsViewer || (targetIsManager && target.location === "Georgia") || (targetIsUser && target.location === "Georgia"),
+    canViewCPO:          !targetIsUser && !targetIsViewer,
+    canManageUsers:      target.role === "admin",
+    canViewAllLocations: target.role === "admin" || targetIsGM || targetIsViewer,
+    canEditSchedule:     !targetIsUser && !targetIsViewer,
+    canEditHistoricals:  !targetIsUser && !targetIsViewer,
+    canViewScheduling:   !targetIsUser && !targetIsViewer,
+    canViewScorecards:   !targetIsUser && !targetIsViewer,
+    isUserRole:          targetIsUser,
+    isViewerRole:        targetIsViewer,
   };
 
   return NextResponse.json({ profile: target, permissions });

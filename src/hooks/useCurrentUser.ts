@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 
-export type UserRole = "admin" | "general_manager" | "manager" | "user";
+export type UserRole = "admin" | "general_manager" | "manager" | "user" | "viewer";
 
 export interface UserProfile {
   clerk_user_id: string;
@@ -25,7 +25,10 @@ export interface UserPermissions {
   canViewAllLocations: boolean;
   canEditSchedule: boolean;
   canEditHistoricals: boolean;
+  canViewScheduling: boolean;
+  canViewScorecards: boolean;
   isUserRole: boolean;
+  isViewerRole: boolean;
 }
 
 interface CurrentUser {

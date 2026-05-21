@@ -29,6 +29,7 @@ export default async function DashboardPage() {
     .single();
 
   if (profile?.role === 'user') redirect('/my-dashboard');
+  // viewers, managers, GMs, admins all stay on main dashboard
 
   const pipeline = await getPipelineCounts();
   return (

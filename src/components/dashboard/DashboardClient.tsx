@@ -24,6 +24,7 @@ interface LocationCounts {
 
 export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
   const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'team'>('dashboard');
+  // Redirect user role to personal dashboard handled server-side
   const { user } = useCurrentUser();
 
   // ── Shared location counts (used by both SortedLocationSection and SchedulePage) ──
@@ -71,9 +72,9 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
       <div className="flex border-b border-slate-200">
         {([
           ['dashboard',  'Department Dashboard'],
-          ['scheduling', 'Scheduling'],
-          ['scorecards',  'Scorecards'],
-          ...(user?.permissions.canManageUsers ? [['team', 'Team Access'] as const] : []),
+          ...(user?.permissions.canViewScheduling ? [['scheduling', 'Scheduling'] as const] : []),
+          ...(user?.permissions.canViewScorecards ? [['scorecards',  'Scorecards'] as const] : []),
+          ...(user?.permissions.canManageUsers    ? [['team', 'Team Access'] as const] : []),
         ] as const).map(([id, label]) => (
           <button
             key={id}
