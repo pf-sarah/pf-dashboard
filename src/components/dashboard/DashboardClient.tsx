@@ -72,8 +72,8 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
       <div className="flex border-b border-slate-200">
         {([
           ['dashboard',  'Department Dashboard'],
-          ...(user?.permissions.canViewScheduling ? [['scheduling', 'Scheduling'] as const] : []),
-          ...(user?.permissions.canViewScorecards ? [['scorecards',  'Scorecards'] as const] : []),
+          ...((user?.permissions.canViewScheduling ?? true) ? [['scheduling', 'Scheduling'] as const] : []),
+          ...((user?.permissions.canViewScorecards ?? true) ? [['scorecards',  'Scorecards'] as const] : []),
           ...(user?.permissions.canManageUsers    ? [['team', 'Team Access'] as const] : []),
         ] as const).map(([id, label]) => (
           <button
