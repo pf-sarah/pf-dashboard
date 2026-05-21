@@ -111,7 +111,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
               ))}
             </div>
           </div>
-          <PipelineSection pipeline={pipeline} location={location} />
+          <PipelineSection pipeline={pipeline} location={location} departmentFilter={user?.profile.role === 'manager' ? user?.profile.department : null} />
           <SortedLocationSection />
           <EventDateSection />
           <ResponseTimeSection location={location} />

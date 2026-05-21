@@ -3001,7 +3001,7 @@ export function SchedulePage({
   const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
   // Permission derived from current location
   const canEditCurrent = location === 'Utah' ? canEditUtah : canEditGeorgia;
-  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>('design');
+  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>((userDepartment as 'design' | 'preservation' | 'fulfillment') ?? 'design');
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
@@ -3428,7 +3428,12 @@ export function SchedulePage({
               ['master',       'Master Schedule'],
               ['payroll',      'Payroll Upload'],
               ['resin',        'Resin'],
-            ] as const).map(([id, label]) => (
+            ] as const).filter(([id]) => {
+              if (userRole === 'manager' && userDepartment) {
+                return id === userDepartment;
+              }
+              return true;
+            }).map(([id, label]) => (
               <button key={id} onClick={() => setDept(id)}
                 className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                   dept === id

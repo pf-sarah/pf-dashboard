@@ -59,7 +59,7 @@ type ShopifyFlagRow = {
   flags: string[];
 };
 
-export function PipelineSection({ pipeline, location }: { pipeline: PipelineCount[] | null; location: string }) {
+export function PipelineSection({ pipeline, location, departmentFilter }: { pipeline: PipelineCount[] | null; location: string; departmentFilter?: string | null }) {
   type OrderRow = { id: string; num: string; name: string; variant: string; orderDate: string; eventDate: string; staff: string; enteredAt: string; days: number; daysLabel: string };
 
   const [expanded, setExpanded]     = useState<string | null>(null);
@@ -293,7 +293,7 @@ export function PipelineSection({ pipeline, location }: { pipeline: PipelineCoun
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {Object.entries(DEPT_STATUSES).map(([dept, statuses]) => {
+        {Object.entries(DEPT_STATUSES).filter(([dept]) => !departmentFilter || dept.toLowerCase() === departmentFilter.toLowerCase()).map(([dept, statuses]) => {
           const total = statuses.reduce((s, st) => s + (counts[st] ?? 0), 0);
           return (
             <Card key={dept} className={`border ${DEPT_COLORS[dept]}`}>
