@@ -96,6 +96,7 @@ export function useCurrentUser(): UseCurrentUserResult {
   const stopImpersonating = useCallback(() => {
     sessionStorage.removeItem(IMPERSONATION_KEY);
     setImpersonatedUser(null);
+    window.location.href = "/dashboard";
   }, []);
 
   const isImpersonating = impersonatedUser !== null;

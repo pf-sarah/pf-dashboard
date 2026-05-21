@@ -125,9 +125,9 @@ export default function UserManagementPage() {
       await startImpersonating(target.clerk_user_id);
       // Navigate to the right page for their role
       if (target.role === "user") {
-        router.push("/my-dashboard");
+        window.location.href = "/my-dashboard";
       } else {
-        router.push("/dashboard");
+        window.location.href = "/dashboard";
       }
     } catch (err: any) {
       setError(err.message ?? "Could not impersonate user");
