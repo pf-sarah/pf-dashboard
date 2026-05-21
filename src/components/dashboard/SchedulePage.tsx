@@ -2990,15 +2990,16 @@ export function SchedulePage({
   utahFulfillment   = 0,
   georgiaFulfillment = 0,
   countsLoading     = false,
-  canEditUtah       = true,
-  canEditGeorgia    = true,
+  canEditUtah       = false,
+  canEditGeorgia    = false,
   canViewCPO        = true,
   userLocation      = null,
   userDepartment    = null,
   userRole          = 'admin',
 }: SchedulePageProps) {
 
-  const [location, setLocation] = useState<'Utah' | 'Georgia'>('Utah');
+  const defaultLocation = (userLocation === 'Georgia' ? 'Georgia' : 'Utah') as 'Utah' | 'Georgia';
+  const [location, setLocation] = useState<'Utah' | 'Georgia'>(defaultLocation);
   // Permission derived from current location
   const canEditCurrent = location === 'Utah' ? canEditUtah : canEditGeorgia;
   const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>((userDepartment as 'design' | 'preservation' | 'fulfillment') ?? 'design');
