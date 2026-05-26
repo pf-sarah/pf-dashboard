@@ -28,8 +28,7 @@ export default async function DashboardPage() {
     .eq('clerk_user_id', userId)
     .single();
 
-  if (profile?.role === 'user') redirect('/my-dashboard');
-  // viewers, managers, GMs, admins all stay on main dashboard
+  // All roles use /dashboard — content is scoped client-side based on role
 
   const pipeline = await getPipelineCounts();
   return (

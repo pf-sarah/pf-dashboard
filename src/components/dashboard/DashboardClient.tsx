@@ -8,6 +8,7 @@ import ScorecardTab from "./ScorecardTab";
 import { SchedulePage } from './SchedulePage';
 import ResinPage from './ResinPage';
 import UserManagementPage from './UserManagementPage';
+import MyDashboardClient from './MyDashboardClient';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 interface PipelineCount {
@@ -25,14 +26,7 @@ interface LocationCounts {
 export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
   const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'team'>('dashboard');
   // Redirect user role to personal dashboard handled server-side
-  const { user, isImpersonating } = useCurrentUser();
-
-  // If impersonating a user role, redirect to their personal dashboard
-  useEffect(() => {
-    if (isImpersonating && user?.profile.role === 'user') {
-      window.location.replace('/my-dashboard');
-    }
-  }, [isImpersonating, user?.profile.role]);
+  const { user } = useCurrentUser();
 
   // ── Shared location counts (used by both SortedLocationSection and SchedulePage) ──
   const [locationCounts, setLocationCounts] = useState<LocationCounts | null>(null);
@@ -71,6 +65,11 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
                            + (locationCounts?.Utah?.glued       ?? 0);
   const georgiaFulfillment = (locationCounts?.Georgia?.approved    ?? 0)
                            + (locationCounts?.Georgia?.glued       ?? 0);
+
+  // User role sees their personal dashboard inline
+  if (user && user.profile.role === 'user') {
+    return <MyDashboardClient profile={user.profile as any} />;
+  }
 
   return (
     <div className="space-y-6">
