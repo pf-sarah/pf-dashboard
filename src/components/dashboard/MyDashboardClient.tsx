@@ -116,13 +116,23 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-4">
                 <StatCard label="Scheduled Hours" value={fmt(data?.thisWeek?.scheduledHours ?? null)} sub="this week" />
-                <StatCard label="Orders Assigned" value={fmt(data?.thisWeek?.ordersAssigned ?? null, 0)} sub="this week" />
+                <StatCard
+                  label="Frames This Week"
+                  value={data?.thisWeek?.scheduledHours && data?.thisWeek?.targetRatio
+                    ? String(Math.round(data.thisWeek.scheduledHours / data.thisWeek.targetRatio))
+                    : "—"}
+                  sub={data?.thisWeek?.targetRatio ? `based on ${data.thisWeek.targetRatio} hrs/frame ratio` : "based on scheduled hours"}
+                />
                 <StatCard label="Target Ratio" value={fmt(data?.thisWeek?.targetRatio ?? null)} sub="hrs / order" />
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-sm font-semibold text-gray-700 mb-4">Weekly Schedule</h2>
-                <WeekGrid dailyHours={data?.dailyHours ?? []} />
+                <WeekGrid dailyHours={data?.dailyHours ?? []} ratio={data?.thisWeek?.targetRatio ?? null} />
               </div>
+              <RatioCalculator
+                scheduledHours={data?.thisWeek?.scheduledHours ?? null}
+                currentRatio={data?.thisWeek?.targetRatio ?? null}
+              />
             </div>
           )}
 
@@ -242,7 +252,84 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub: st
   );
 }
 
-function WeekGrid({ dailyHours }: { dailyHours: number[] }) {
+function RatioCalculator({ scheduledHours, currentRatio }: {
+  scheduledHours: number | null;
+  currentRatio: number | null;
+}) {
+  const [goalRatio, setGoalRatio] = useState<string>("");
+  const [goalFrames, setGoalFrames] = useState<string>("");
+
+  const frames = scheduledHours && currentRatio
+    ? Math.round(scheduledHours / currentRatio)
+    : null;
+
+  const hoursNeeded = goalRatio && frames
+    ? Math.round(frames * parseFloat(goalRatio) * 10) / 10
+    : null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-gray-700">What-If Calculator</h2>
+        <p className="text-xs text-gray-400 mt-0.5">Plan your week around a target ratio</p>
+      </div>
+
+      <div className="bg-indigo-50 rounded-lg p-4">
+        <p className="text-xs font-medium text-indigo-700 mb-3">
+          📐 If I want to complete {frames ?? "—"} frames at a goal ratio of...
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            type="number" step="0.1" min="0.5" max="3" placeholder="e.g. 1.1"
+            value={goalRatio} onChange={e => setGoalRatio(e.target.value)}
+            className="w-28 border border-indigo-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <span className="text-sm text-gray-500">hrs/frame</span>
+          {hoursNeeded !== null && (
+            <div className="ml-2 text-sm font-semibold text-indigo-700">
+              → I would need <span className="text-lg">{hoursNeeded}h</span> this week
+            </div>
+          )}
+        </div>
+        {hoursNeeded !== null && scheduledHours && (
+          <p className="text-xs text-indigo-500 mt-2">
+            {hoursNeeded > scheduledHours
+              ? `That's ${Math.round((hoursNeeded - scheduledHours) * 10) / 10}h more than your scheduled ${scheduledHours}h`
+              : `That's ${Math.round((scheduledHours - hoursNeeded) * 10) / 10}h less than your scheduled ${scheduledHours}h`}
+          </p>
+        )}
+      </div>
+
+      <div className="bg-rose-50 rounded-lg p-4">
+        <p className="text-xs font-medium text-rose-700 mb-3">
+          🎯 Working my scheduled {scheduledHours ?? "—"}h, to hit a ratio of...
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            type="number" step="0.1" min="0.5" max="3" placeholder="e.g. 1.0"
+            value={goalFrames} onChange={e => setGoalFrames(e.target.value)}
+            className="w-28 border border-rose-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300"
+          />
+          <span className="text-sm text-gray-500">hrs/frame</span>
+          {goalFrames && scheduledHours && (
+            <div className="ml-2 text-sm font-semibold text-rose-700">
+              → I need to complete <span className="text-lg">{Math.round(scheduledHours / parseFloat(goalFrames))}f</span> this week
+            </div>
+          )}
+        </div>
+        {goalFrames && scheduledHours && frames !== null && (
+          <p className="text-xs text-rose-500 mt-2">
+            {Math.round(scheduledHours / parseFloat(goalFrames)) > frames
+              ? `That's ${Math.round(scheduledHours / parseFloat(goalFrames)) - frames} more frames than your current target of ${frames}f`
+              : `That's ${frames - Math.round(scheduledHours / parseFloat(goalFrames))} fewer frames than your current target of ${frames}f`}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WeekGrid({ dailyHours, ratio }: { dailyHours: number[]; ratio: number | null }) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
   // Get dates for this week
   const monday = new Date();
@@ -264,6 +351,9 @@ function WeekGrid({ dailyHours }: { dailyHours: number[] }) {
             <div className={`text-sm font-semibold ${hours ? "text-gray-800" : "text-gray-300"}`}>
               {hours ? `${hours}h` : "—"}
             </div>
+            {hours && ratio ? (
+              <div className="text-xs text-indigo-500 mt-0.5">{Math.round(hours / ratio)}f</div>
+            ) : null}
           </div>
         );
       })}
