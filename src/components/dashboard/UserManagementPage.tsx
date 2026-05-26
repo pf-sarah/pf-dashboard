@@ -124,11 +124,11 @@ export default function UserManagementPage() {
     try {
       await startImpersonating(target.clerk_user_id);
       // Small delay to ensure sessionStorage is written before navigation
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
       if (target.role === "user") {
-        window.location.href = "/my-dashboard";
+        window.location.replace("/my-dashboard");
       } else {
-        window.location.href = "/dashboard";
+        window.location.replace("/dashboard");
       }
     } catch (err: any) {
       setError(err.message ?? "Could not impersonate user");

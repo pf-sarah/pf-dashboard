@@ -63,7 +63,7 @@ export function useCurrentUser(): UseCurrentUserResult {
       .then(async (data) => {
         setRealUser(data);
         // Check if there is an active impersonation session
-        const impersonatingId = sessionStorage.getItem(IMPERSONATION_KEY);
+        const impersonatingId = localStorage.getItem(IMPERSONATION_KEY);
         if (impersonatingId) {
           try {
             const res = await fetch(`/api/users/${impersonatingId}/profile`);
@@ -71,10 +71,10 @@ export function useCurrentUser(): UseCurrentUserResult {
               const impData = await res.json();
               setImpersonatedUser(impData);
             } else {
-              sessionStorage.removeItem(IMPERSONATION_KEY);
+              localStorage.removeItem(IMPERSONATION_KEY);
             }
           } catch {
-            sessionStorage.removeItem(IMPERSONATION_KEY);
+            localStorage.removeItem(IMPERSONATION_KEY);
           }
         }
         setLoading(false);
@@ -89,12 +89,12 @@ export function useCurrentUser(): UseCurrentUserResult {
     const res = await fetch(`/api/users/${targetId}/profile`);
     if (!res.ok) throw new Error("Cannot impersonate this user");
     const data = await res.json();
-    sessionStorage.setItem(IMPERSONATION_KEY, targetId);
+    localStorage.setItem(IMPERSONATION_KEY, targetId);
     setImpersonatedUser(data);
   }, []);
 
   const stopImpersonating = useCallback(() => {
-    sessionStorage.removeItem(IMPERSONATION_KEY);
+    localStorage.removeItem(IMPERSONATION_KEY);
     setImpersonatedUser(null);
     window.location.href = "/dashboard";
   }, []);
