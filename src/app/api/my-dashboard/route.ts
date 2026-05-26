@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
+import { DESIGNER_IDS } from "@/lib/teamMembers";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -94,10 +95,35 @@ export async function GET(req: NextRequest) {
       : null,
   }));
 
+  // Get scheduled hours from schedule_settings
+  const scheduleKey = department === 'design' ? 'designHours' :
+                      department === 'preservation' ? 'presHours' : 'ffHours';
+
+  const { data: scheduleRow } = await supabase
+    .from("schedule_settings")
+    .select("value")
+    .eq("location", location)
+    .eq("key", scheduleKey)
+    .single();
+
+  const designerId = DESIGNER_IDS[memberName] ?? null;
+  let weeklyHours: number[] = [];
+
+  if (scheduleRow?.value && designerId) {
+    try {
+      const parsed = typeof scheduleRow.value === "string"
+        ? JSON.parse(scheduleRow.value)
+        : scheduleRow.value;
+      weeklyHours = parsed[designerId] ?? [];
+    } catch { /* ignore */ }
+  }
+
   const upcomingWeeks = Array.from({ length: 8 }, (_, i) => ({
     weekOf: getMondayOfWeek(i),
-    scheduledHours: null as number | null,
+    scheduledHours: weeklyHours[i] ?? null,
   }));
+
+  const thisWeekScheduledHours = weeklyHours[0] ?? null;
 
   return NextResponse.json({
     memberName,
@@ -105,7 +131,7 @@ export async function GET(req: NextRequest) {
     department,
     thisWeek: {
       weekOf:         thisWeekOf,
-      scheduledHours: null,
+      scheduledHours: thisWeekScheduledHours,
       ordersAssigned: thisWeekRow?.actual_orders ?? null,
       actualHours:    thisWeekRow?.actual_hours  ?? null,
       targetRatio,

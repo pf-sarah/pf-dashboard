@@ -40,6 +40,38 @@ export const TEAM_MEMBERS: TeamMember[] = [
   { name: 'Shantel Phifer',        location: 'Georgia', department: 'fulfillment' },
 ];
 
+export const DESIGNER_IDS: Record<string, string> = {
+  // Utah Design
+  'Jennika Merrill':       'ut-mgr',
+  'Deanna Haug':           'ut-1',
+  'Kathryn Sonntag':       'ut-3',
+  'Mia Legas Boots':       'ut-4',
+  'Sloane James':          'ut-5',
+  'Audrey Windsor':        'ut-6',
+  'Chloe Jensen':          'ut-7',
+  // Georgia Design
+  'Katherine Piper':       'ga-1',
+  'Allanna Harlan':        'ga-2',
+  'Erin Webb':             'ga-3',
+  'Rachel Tucker':         'ga-4',
+  'Celt Stewart':          'ga-5',
+  // Utah Preservation
+  'Katelyn Wilson':        'ut-p1',
+  'Emma Dunakey':          'ut-p2',
+  'Preslee Peterson':      'ut-p7',
+  // Georgia Preservation
+  'Amber Garrett':         'ga-p1',
+  // Utah Fulfillment
+  'Bella DePrima':         'ut-f1',
+  'Warner Neuenschwander': 'ut-f2',
+  'Owen Shaw':             'ut-f3',
+  'Emma Van Dyke':         'ut-f4',
+  // Georgia Fulfillment
+  'Yann Jean-Louis':       'ga-f1',
+  'Nahid Knight':          'ga-f2',
+  'Shantel Phifer':        'ga-f3',
+};
+
 export function getTeamMembers(location?: string, department?: string): TeamMember[] {
   return TEAM_MEMBERS.filter(m => {
     if (location && m.location !== location) return false;
