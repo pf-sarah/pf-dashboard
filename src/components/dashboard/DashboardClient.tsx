@@ -25,7 +25,14 @@ interface LocationCounts {
 export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
   const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'team'>('dashboard');
   // Redirect user role to personal dashboard handled server-side
-  const { user } = useCurrentUser();
+  const { user, isImpersonating } = useCurrentUser();
+
+  // If impersonating a user role, redirect to their personal dashboard
+  useEffect(() => {
+    if (isImpersonating && user?.profile.role === 'user') {
+      window.location.replace('/my-dashboard');
+    }
+  }, [isImpersonating, user?.profile.role]);
 
   // ── Shared location counts (used by both SortedLocationSection and SchedulePage) ──
   const [locationCounts, setLocationCounts] = useState<LocationCounts | null>(null);
