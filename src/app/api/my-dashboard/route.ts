@@ -96,8 +96,10 @@ export async function GET(req: NextRequest) {
   }));
 
   // Get scheduled hours from schedule_settings
-  const scheduleKey = department === 'design' ? 'designHours' :
-                      department === 'preservation' ? 'presHours' : 'ffHours';
+  const scheduleKey      = department === 'design' ? 'designHours' :
+                           department === 'preservation' ? 'presHours' : 'ffHours';
+  const dailyScheduleKey = department === 'design' ? 'designDailyHours' :
+                           department === 'preservation' ? 'presDailyHours' : 'ffDailyHours';
 
   const { data: scheduleRow } = await supabase
     .from("schedule_settings")
@@ -108,6 +110,7 @@ export async function GET(req: NextRequest) {
 
   const designerId = DESIGNER_IDS[memberName] ?? null;
   let weeklyHours: number[] = [];
+  let dailyHours: number[] = [];
 
   if (scheduleRow?.value && designerId) {
     try {
@@ -115,6 +118,23 @@ export async function GET(req: NextRequest) {
         ? JSON.parse(scheduleRow.value)
         : scheduleRow.value;
       weeklyHours = parsed[designerId] ?? [];
+    } catch { /* ignore */ }
+  }
+
+  // Get daily hours
+  const { data: dailyRow } = await supabase
+    .from("schedule_settings")
+    .select("value")
+    .eq("location", location)
+    .eq("key", dailyScheduleKey)
+    .single();
+
+  if (dailyRow?.value && designerId) {
+    try {
+      const parsed = typeof dailyRow.value === "string"
+        ? JSON.parse(dailyRow.value)
+        : dailyRow.value;
+      dailyHours = parsed[designerId] ?? [];
     } catch { /* ignore */ }
   }
 
@@ -129,6 +149,7 @@ export async function GET(req: NextRequest) {
     memberName,
     location,
     department,
+    dailyHours,
     thisWeek: {
       weekOf:         thisWeekOf,
       scheduledHours: thisWeekScheduledHours,

@@ -32,6 +32,7 @@ interface UpcomingWeek {
 }
 
 interface DashboardData {
+  dailyHours: number[];
   memberName: string;
   location: string;
   department: string;
@@ -120,7 +121,7 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-sm font-semibold text-gray-700 mb-4">Weekly Schedule</h2>
-                <WeekGrid />
+                <WeekGrid dailyHours={data?.dailyHours ?? []} />
               </div>
             </div>
           )}
@@ -241,16 +242,31 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub: st
   );
 }
 
-function WeekGrid() {
+function WeekGrid({ dailyHours }: { dailyHours: number[] }) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+  // Get dates for this week
+  const monday = new Date();
+  const day = monday.getDay();
+  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
+
   return (
     <div className="grid grid-cols-5 gap-3">
-      {days.map(day => (
-        <div key={day} className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-center">
-          <div className="text-xs font-medium text-gray-500 mb-2">{day}</div>
-          <div className="text-sm text-gray-400">—</div>
-        </div>
-      ))}
+      {days.map((dayName, i) => {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        const dateLabel = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        const hours = dailyHours[i] ?? null;
+        const isToday = d.toDateString() === new Date().toDateString();
+        return (
+          <div key={dayName} className={`rounded-lg border p-3 text-center ${isToday ? "border-[#703C2E]/30 bg-[#703C2E]/5" : "border-gray-100 bg-gray-50"}`}>
+            <div className={`text-xs font-medium mb-0.5 ${isToday ? "text-[#703C2E]" : "text-gray-500"}`}>{dayName}</div>
+            <div className="text-xs text-gray-400 mb-2">{dateLabel}</div>
+            <div className={`text-sm font-semibold ${hours ? "text-gray-800" : "text-gray-300"}`}>
+              {hours ? `${hours}h` : "—"}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
