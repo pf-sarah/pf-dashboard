@@ -1650,14 +1650,16 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
       </div>
 
       {/* Tabs: This Week | Schedule | Historicals */}
-      <div className="flex border-b border-slate-200">
-        {(['schedule', 'historicals'] as const).filter(t => userRole !== 'viewer' || t === 'schedule').map(t => (
-          <button key={t} onClick={() => setPresTab(t)}
-            className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}>{t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
-        ))}
-      </div>
+      {userRole !== 'viewer' && (
+        <div className="flex border-b border-slate-200">
+          {(['schedule', 'historicals'] as const).map(t => (
+            <button key={t} onClick={() => setPresTab(t)}
+              className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}>{t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
+          ))}
+        </div>
+      )}
 
       {presTab === 'schedule' && (
         <div className="space-y-4">
@@ -2082,7 +2084,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
       )}
 
       {/* ── HISTORICALS TAB ── */}
-      {presTab === 'historicals' && (
+      {presTab === 'historicals' && userRole !== 'viewer' && (
         <HistoricalsSection
           department="preservation"
           location={location}
