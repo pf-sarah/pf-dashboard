@@ -123,7 +123,8 @@ export default function UserManagementPage() {
   const handleImpersonate = async (target: UserProfile) => {
     try {
       await startImpersonating(target.clerk_user_id);
-      // Navigate to the right page for their role
+      // Small delay to ensure sessionStorage is written before navigation
+      await new Promise(resolve => setTimeout(resolve, 100));
       if (target.role === "user") {
         window.location.href = "/my-dashboard";
       } else {
