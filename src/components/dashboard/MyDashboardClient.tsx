@@ -65,11 +65,15 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
   const department = profile.department ?? "";
 
   useEffect(() => {
-    fetch("/api/my-dashboard")
+    const params = new URLSearchParams();
+    if (profile.team_member_name) params.set("memberName", profile.team_member_name);
+    if (profile.location)         params.set("location",   profile.location);
+    if (profile.department)       params.set("department", profile.department);
+    fetch(`/api/my-dashboard?${params.toString()}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [profile.team_member_name, profile.location, profile.department]);
 
   return (
     <div className="space-y-6">
