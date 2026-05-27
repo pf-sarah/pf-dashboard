@@ -62,6 +62,7 @@ export interface ScheduleSettings {
   // Resin scheduling
   resinRoster:        unknown;
   resinHours:         unknown;
+  resinDailyHours:    unknown;
 }
 
 const DEFAULTS: ScheduleSettings = {
@@ -79,13 +80,14 @@ const DEFAULTS: ScheduleSettings = {
   ffDailyHours: {},
   resinRoster: null,
   resinHours: null,
+  resinDailyHours: null,
 };
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
   'ffHours','ffRoster','masterAvailability','flexRows','avgIntake','weeklyEstimates',
   'mgrTotalHours','designDailyHours','ffDailyHours','presDailyHours',
-  'resinRoster','resinHours',
+  'resinRoster','resinHours','resinDailyHours',
 ];
 
 export function useScheduleSettings(location: 'Utah' | 'Georgia') {

@@ -82,7 +82,13 @@ function useResinSettings() {
       .catch(() => {});
   }, []);
 
-  const roster: ResinMember[] = Array.isArray(settings.resinRoster)
+  const resinDailyHours: Record<string, number[]> = (settings.resinDailyHours && typeof settings.resinDailyHours === 'object' && !Array.isArray(settings.resinDailyHours))
+    ? (settings.resinDailyHours as Record<string, number[]>)
+    : {};
+
+  function setResinDailyHours(h: Record<string, number[]>) { update('resinDailyHours', h as unknown); }
+
+    const roster: ResinMember[] = Array.isArray(settings.resinRoster)
     ? (settings.resinRoster as unknown as ResinMember[])
     : DEFAULT_RESIN_ROSTER;
 
@@ -93,7 +99,7 @@ function useResinSettings() {
   function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
   function setHours(h: WeekSchedule[])  { update('resinHours',  h as unknown); }
 
-  return { roster, setRoster, hours, setHours, actuals, setActualsState, loading, saveState };
+  return { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState };
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   const [moveLoading, setMoveLoading] = useState(false);
   const [moveResult, setMoveResult] = useState<string | null>(null);
 
-  const { roster, setRoster, hours, setHours, actuals, setActualsState, loading, saveState } =
+  const { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState } =
     useResinSettings();
 
   // Fetch queue summary
@@ -487,34 +493,48 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               </thead>
               <tbody>
                 {roster.map((m, mi) => {
-                  const weekHours = hours[thisWeekOffset]?.[m.id] ?? 0;
-                  const units = m.ratio > 0 ? weekHours / m.ratio : 0;
-                  const dailyH = weekHours / 5;
+                  const weekTotal = [0,1,2,3,4,5,6].reduce((s, di) => s + (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                  const units = m.ratio > 0 ? weekTotal / m.ratio : 0;
                   return (
                     <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                       <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
                         {m.name}
                         <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
                       </td>
-                      {[0,1,2,3,4,5,6].map(di => (
-                        <td key={di} className="px-2 py-1.5 text-center text-[11px] text-slate-400">
-                          {di < 5 && dailyH > 0 ? dailyH.toFixed(1) : '—'}
-                        </td>
-                      ))}
-                      <td className="px-2 py-1.5 text-center">
-                        <input type="number" defaultValue={weekHours || ''} placeholder="0" min={0} step={0.5}
-                          key={`${thisWeekOffset}-${m.id}-${weekHours}`}
-                          onBlur={e => updateHours(thisWeekOffset, m.id, parseFloat(e.target.value) || 0)}
-                          className="w-16 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
-                        {weekHours > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{units.toFixed(1)}u</div>}
+                      {[0,1,2,3,4,5,6].map(di => {
+                        const dayVal = resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0;
+                        return (
+                          <td key={di} className={`px-1 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/20' : ''}`}>
+                            <input type="number" value={dayVal || ''} placeholder="0" min={0} step={0.5}
+                              onChange={e => {
+                                const key = `${thisWeekOffset}-${m.id}`;
+                                const prev = resinDailyHours[key] ?? Array(7).fill(0);
+                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? (parseFloat(e.target.value) || 0) : h) };
+                                setResinDailyHours(next);
+                              }}
+                              className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 text-center text-xs font-medium text-indigo-700">
+                        {weekTotal > 0 ? weekTotal.toFixed(1) : '—'}
+                        {units > 0 && <div className="text-[10px] text-slate-400">{units.toFixed(1)}u</div>}
                       </td>
                     </tr>
                   );
                 })}
                 <tr className="bg-purple-50 border-t border-purple-100 font-medium">
-                  <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Week total</td>
-                  {[0,1,2,3,4,5,6].map(di => <td key={di} className="px-3 py-2 text-center text-slate-300 text-xs">—</td>)}
-                  <td className="px-3 py-2 text-center text-xs text-purple-700">
+                  <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Day total</td>
+                  {[0,1,2,3,4,5,6].map(di => {
+                    const dayTotal = roster.reduce((s, m) => s + (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                    const dayUnits = roster.reduce((s, m) => s + (m.ratio > 0 ? (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0);
+                    return (
+                      <td key={di} className="px-2 py-2 text-center text-xs text-purple-700">
+                        {dayTotal > 0 ? <><div>{dayTotal.toFixed(1)}h</div><div className="text-[10px]">{dayUnits.toFixed(1)}u</div></> : <span className="text-slate-300">—</span>}
+                      </td>
+                    );
+                  })}
+                  <td className="px-2 py-2 text-center text-xs text-purple-700">
                     {weeklyCapacity(thisWeekOffset) > 0 ? `${weeklyCapacity(thisWeekOffset).toFixed(0)}u` : <span className="text-slate-300">—</span>}
                   </td>
                 </tr>
