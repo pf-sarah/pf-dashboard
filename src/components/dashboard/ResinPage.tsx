@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useScheduleSettings } from './useScheduleSettings';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,58 +72,26 @@ function isoDate(d: Date): string {
 // ─── Persistence helpers ───────────────────────────────────────────────────────
 
 function useResinSettings() {
-  const [roster,    setRosterState]  = useState<ResinMember[]>(DEFAULT_RESIN_ROSTER);
-  const [hours,     setHoursState]   = useState<WeekSchedule[]>(() =>
-    Array.from({ length: WEEKS }, () => ({ 'resin-1': 0 }))
-  );
-  const [actuals,   setActualsState] = useState<{ weekOf: string; memberId: string; memberName: string; hours: number; units: number }[]>([]);
-  const [loading,   setLoading]      = useState(true);
-  const [saveState, setSaveState]    = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const { settings, loading, saveState, update } = useScheduleSettings('Utah');
+  const [actuals, setActualsState] = useState<{ weekOf: string; memberId: string; memberName: string; hours: number; units: number }[]>([]);
 
   useEffect(() => {
-    async function load() {
-      try {
-        const [settingsRes, actualsRes] = await Promise.all([
-          fetch('/api/schedule-settings?location=Resin'),
-          fetch('/api/actuals?dept=resin'),
-        ]);
-        const settings = await settingsRes.json();
-        const actualsData = await actualsRes.json();
-
-        if (settings.resinRoster) {
-          const r = typeof settings.resinRoster === 'string' ? JSON.parse(settings.resinRoster) : settings.resinRoster;
-          setRosterState(r);
-        }
-        if (settings.resinHours) {
-          const h = typeof settings.resinHours === 'string' ? JSON.parse(settings.resinHours) : settings.resinHours;
-          setHoursState(h);
-        }
-        if (actualsData.actuals)   setActualsState(actualsData.actuals);
-      } catch { /* use defaults */ }
-      finally { setLoading(false); }
-    }
-    load();
+    fetch('/api/actuals?dept=resin')
+      .then(r => r.json())
+      .then(d => { if (d.actuals) setActualsState(d.actuals); })
+      .catch(() => {});
   }, []);
 
-  function persist(key: string, value: unknown) {
-    if (timers.current[key]) clearTimeout(timers.current[key]);
-    timers.current[key] = setTimeout(async () => {
-      setSaveState('saving');
-      try {
-        await fetch('/api/schedule-settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ location: 'Resin', key, value: typeof value === 'string' ? value : JSON.stringify(value) }),
-        });
-        setSaveState('saved');
-        setTimeout(() => setSaveState('idle'), 2000);
-      } catch { setSaveState('error'); }
-    }, 500);
-  }
+  const roster: ResinMember[] = Array.isArray(settings.resinRoster)
+    ? (settings.resinRoster as unknown as ResinMember[])
+    : DEFAULT_RESIN_ROSTER;
 
-  function setRoster(r: ResinMember[]) { setRosterState(r); persist('resinRoster', r); }
-  function setHours(h: WeekSchedule[]) { setHoursState(h);  persist('resinHours',  h); }
+  const hours: WeekSchedule[] = Array.isArray(settings.resinHours)
+    ? (settings.resinHours as unknown as WeekSchedule[])
+    : Array.from({ length: WEEKS }, () => ({ 'resin-1': 0 }));
+
+  function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
+  function setHours(h: WeekSchedule[])  { update('resinHours',  h as unknown); }
 
   return { roster, setRoster, hours, setHours, actuals, setActualsState, loading, saveState };
 }
@@ -134,7 +103,8 @@ interface ResinPageProps {
 }
 
 export default function ResinPage({ resinQueue }: ResinPageProps) {
-  const [activeTab, setActiveTab] = useState<'schedule' | 'queue' | 'historicals'>('schedule');
+  const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'historicals'>('thisweek');
+  const [thisWeekOffset, setThisWeekOffset] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
   const [showCPO, setShowCPO] = useState(false);
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
@@ -267,7 +237,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   const hasRates = roster.some(m => m.hourlyRate > 0 || m.annualSalary > 0);
 
   const TABS = [
-    { id: 'schedule'    as const, label: 'Weekly Schedule' },
+    { id: 'thisweek'    as const, label: 'This week' },
+    { id: 'schedule'    as const, label: '52-week planner' },
     { id: 'queue'       as const, label: 'Queue & Turnaround' },
     { id: 'historicals' as const, label: 'Historicals' },
   ];
