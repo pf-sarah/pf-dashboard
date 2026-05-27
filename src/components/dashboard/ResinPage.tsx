@@ -502,7 +502,9 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                         </td>
                       ))}
                       <td className="px-2 py-1.5 text-center">
-                        <input type="number" value={weekHours || ''} placeholder="0" min={0} step={0.5}
+                        <input type="number" defaultValue={weekHours || ''} placeholder="0" min={0} step={0.5}
+                          key={`${thisWeekOffset}-${m.id}`}
+                          onBlur={e => updateHours(thisWeekOffset, m.id, parseFloat(e.target.value) || 0)}
                           onChange={e => updateHours(thisWeekOffset, m.id, parseFloat(e.target.value) || 0)}
                           className="w-16 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
                         {weekHours > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{units.toFixed(1)}u</div>}
