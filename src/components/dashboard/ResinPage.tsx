@@ -378,9 +378,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                       <input
                         type="number"
                         value={m.ratio}
-                        min={0.01}
                         step={0.01}
-                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0.01)}
+                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0)}
                         className="w-16 text-center bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
                       />
                     </td>
@@ -461,7 +460,70 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
         </div>
       </div>
 
-      {/* ── WEEKLY SCHEDULE TAB ───────────────────────────────────────────────── */}
+      {/* ── THIS WEEK TAB ────────────────────────────────────────────────────── */}
+      {activeTab === 'thisweek' && (
+        <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-700">
+              Hours — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}
+            </h3>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0}
+                className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
+              <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4}
+                className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team Member</th>
+                  {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+                    <th key={d} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[70px]">{d}</th>
+                  ))}
+                  <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Week total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {roster.map((m, mi) => {
+                  const weekHours = hours[thisWeekOffset]?.[m.id] ?? 0;
+                  const units = m.ratio > 0 ? weekHours / m.ratio : 0;
+                  const dailyH = weekHours / 5;
+                  return (
+                    <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                      <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
+                        {m.name}
+                        <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
+                      </td>
+                      {[0,1,2,3,4,5,6].map(di => (
+                        <td key={di} className="px-2 py-1.5 text-center text-[11px] text-slate-400">
+                          {di < 5 && dailyH > 0 ? dailyH.toFixed(1) : '—'}
+                        </td>
+                      ))}
+                      <td className="px-2 py-1.5 text-center">
+                        <input type="number" value={weekHours || ''} placeholder="0" min={0} step={0.5}
+                          onChange={e => updateHours(thisWeekOffset, m.id, parseFloat(e.target.value) || 0)}
+                          className="w-16 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
+                        {weekHours > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{units.toFixed(1)}u</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="bg-purple-50 border-t border-purple-100 font-medium">
+                  <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Week total</td>
+                  {[0,1,2,3,4,5,6].map(di => <td key={di} className="px-3 py-2 text-center text-slate-300 text-xs">—</td>)}
+                  <td className="px-3 py-2 text-center text-xs text-purple-700">
+                    {weeklyCapacity(thisWeekOffset) > 0 ? `${weeklyCapacity(thisWeekOffset).toFixed(0)}u` : <span className="text-slate-300">—</span>}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── 52-WEEK PLANNER TAB ─────────────────────────────────────────────── */}
       {activeTab === 'schedule' && (
         <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-wrap gap-2">
