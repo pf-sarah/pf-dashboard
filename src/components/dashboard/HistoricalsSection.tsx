@@ -345,6 +345,17 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                 <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600 border-r border-slate-200">Week total</td>
                 {allWeeks.map(w => {
                   const totalOrders = allDisplayMembers.reduce((s, name) => s + getEntry(w, name).orders, 0);
+                  const nonMgrOrders = allDisplayMembers.reduce((s, name) => {
+                    const m = members.find(m => m.name === name);
+                    if (m?.isManager) return s;
+                    return s + getEntry(w, name).orders;
+                  }, 0);
+                  const nonMgrHours = allDisplayMembers.reduce((s, name) => {
+                    const m = members.find(m => m.name === name);
+                    if (m?.isManager) return s;
+                    return s + getEntry(w, name).hours;
+                  }, 0);
+                  const weekRatio = nonMgrOrders > 0 && nonMgrHours > 0 ? nonMgrHours / nonMgrOrders : null;
                   // Get total dept cost from weekly_labor_cost via getWeekCosts, plus salary managers
                   const weekCosts = getWeekCosts(w);
                   const deptKey = department.charAt(0).toUpperCase() + department.slice(1);
@@ -366,6 +377,11 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                       {totalOrders > 0 ? (
                         <>
                           <div className="text-indigo-700">{totalOrders}</div>
+                          {weekRatio !== null && (
+                            <div className={`text-[9px] ${weekRatio <= 1.0 ? 'text-green-700' : weekRatio <= 2.0 ? 'text-amber-700' : 'text-red-700'}`}>
+                              {weekRatio.toFixed(2)} h/ord
+                            </div>
+                          )}
                           {hasRates && teamCPO !== null && (
                             <div className={`text-[9px] font-semibold ${allActual ? 'text-green-700' : 'text-amber-600'}`}>
                               {fmt$(teamCPO)}
