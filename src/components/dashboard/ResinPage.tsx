@@ -90,8 +90,14 @@ function useResinSettings() {
         const settings = await settingsRes.json();
         const actualsData = await actualsRes.json();
 
-        if (settings.resinRoster)  setRosterState(settings.resinRoster);
-        if (settings.resinHours)   setHoursState(settings.resinHours);
+        if (settings.resinRoster) {
+          const r = typeof settings.resinRoster === 'string' ? JSON.parse(settings.resinRoster) : settings.resinRoster;
+          setRosterState(r);
+        }
+        if (settings.resinHours) {
+          const h = typeof settings.resinHours === 'string' ? JSON.parse(settings.resinHours) : settings.resinHours;
+          setHoursState(h);
+        }
         if (actualsData.actuals)   setActualsState(actualsData.actuals);
       } catch { /* use defaults */ }
       finally { setLoading(false); }
@@ -107,7 +113,7 @@ function useResinSettings() {
         await fetch('/api/schedule-settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ location: 'Resin', key, value }),
+          body: JSON.stringify({ location: 'Resin', key, value: typeof value === 'string' ? value : JSON.stringify(value) }),
         });
         setSaveState('saved');
         setTimeout(() => setSaveState('idle'), 2000);
@@ -401,9 +407,9 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                       <input
                         type="number"
                         value={m.ratio}
-                        min={0.1}
-                        step={0.1}
-                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 1)}
+                        min={0.01}
+                        step={0.01}
+                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0.01)}
                         className="w-16 text-center bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
                       />
                     </td>
