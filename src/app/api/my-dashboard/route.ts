@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
     .eq("location", location)
     .in("key", rosterKeyList);
 
-  const rosterMap: Record<string, Record<string, { name?: string; ratio?: number }>> = {};
+  const rosterMap: Record<string, Record<string, { name?: string; ratio?: number; _removed?: boolean }>> = {};
   for (const row of rosterRows ?? []) {
     try {
       const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
@@ -162,6 +162,7 @@ export async function GET(req: NextRequest) {
     const roster = rosterMap[rosterKey] ?? {};
     const nameLower = name.trim().toLowerCase();
     for (const [id, member] of Object.entries(roster)) {
+      if (member?._removed) continue;
       if (member?.name?.trim().toLowerCase() === nameLower) return id;
     }
     return null;
