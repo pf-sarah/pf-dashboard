@@ -134,18 +134,52 @@ export async function GET(req: NextRequest) {
   const dailyHours: number[] = designerId
     ? (scheduleMap[homeDeptConfig.daily]?.[designerId] ?? []).slice(0, 5) : [];
 
-  // Cross-dept hours (any dept where this person has scheduled hours, excluding home)
-  // Check both weekly planner AND daily hours grid
+  // Cross-dept hours — look up by name across each dept's roster, not by home designerId
+  // Each dept roster is stored under e.g. presRoster, ffRoster, designRoster, resinRoster
+  const ROSTER_KEYS: Record<string, string> = {
+    design:       'designRoster',
+    preservation: 'presRoster',
+    fulfillment:  'ffRoster',
+    resin:        'resinRoster',
+  };
+
+  // Fetch all roster keys too
+  const rosterKeyList = Object.values(ROSTER_KEYS);
+  const { data: rosterRows } = await supabase
+    .from("schedule_settings")
+    .select("key, value")
+    .eq("location", location)
+    .in("key", rosterKeyList);
+
+  const rosterMap: Record<string, Record<string, { name?: string }>> = {};
+  for (const row of rosterRows ?? []) {
+    try {
+      const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
+      rosterMap[row.key] = parsed;
+    } catch { /* ignore */ }
+  }
+
+  // Helper: find a person's ID in a given dept roster by name match
+  function findIdInRoster(rosterKey: string, name: string): string | null {
+    const roster = rosterMap[rosterKey] ?? {};
+    const nameLower = name.trim().toLowerCase();
+    for (const [id, member] of Object.entries(roster)) {
+      if (member?.name?.trim().toLowerCase() === nameLower) return id;
+    }
+    return null;
+  }
+
   const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
   for (const dk of ALL_DEPT_KEYS) {
     if (dk.dept === homeDeptNorm) continue;
-    const deptWeekly: number[] = designerId
-      ? (scheduleMap[dk.weekly]?.[designerId] ?? []) : [];
-    // Also check daily hours — sum the 5 daily values into a single "this week" total
-    const deptDaily: number[] = designerId
-      ? (scheduleMap[dk.daily]?.[designerId] ?? []) : [];
+    // Find this person's ID in the cross-dept roster by name
+    const crossId = findIdInRoster(ROSTER_KEYS[dk.dept] ?? '', memberName);
+    if (!crossId) continue;
+
+    const deptWeekly: number[] = scheduleMap[dk.weekly]?.[crossId] ?? [];
+    const deptDaily: number[]  = scheduleMap[dk.daily]?.[crossId]  ?? [];
     const dailyThisWeekTotal = deptDaily.reduce((s, h) => s + (h ?? 0), 0);
-    // Use weekly if available, otherwise fall back to daily total for week 0
+
     const mergedForDept = [...deptWeekly];
     if (dailyThisWeekTotal > 0 && (mergedForDept[0] ?? 0) === 0) {
       mergedForDept[0] = Math.round(dailyThisWeekTotal * 10) / 10;
