@@ -136,7 +136,7 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
                     : "—"}
                   sub={data?.thisWeek?.targetRatio ? `based on ${data.thisWeek.targetRatio} hrs/frame ratio` : "based on scheduled hours"}
                 />
-                <StatCard label="Target Ratio" value={fmt(data?.thisWeek?.targetRatio ?? null)} sub="hrs / order" />
+                <StatCard label="Target Ratio" value={fmt(data?.thisWeek?.targetRatio ?? null, 2)} sub="hrs / order" />
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-sm font-semibold text-gray-700 mb-4">Weekly Schedule</h2>
