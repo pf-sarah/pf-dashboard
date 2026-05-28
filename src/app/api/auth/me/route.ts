@@ -36,7 +36,7 @@ export async function GET() {
     canViewUtah: isAdmin || isGM || (isManager && profile.location === "Utah") || (isUser && profile.location === "Utah"),
     canViewGeorgia: isAdmin || isGM || (isManager && profile.location === "Georgia") || (isUser && profile.location === "Georgia"),
     canViewCPO: !isUser,
-    canManageUsers: isAdmin,
+    canManageUsers: isAdmin || isGM || isManager,
     canViewAllLocations: isAdmin || isGM,
     canEditSchedule: isAdmin || isGM || isManager,
     canEditHistoricals: isAdmin || isGM || isManager,

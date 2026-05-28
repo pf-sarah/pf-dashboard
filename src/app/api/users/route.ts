@@ -19,7 +19,7 @@ export async function GET() {
     .eq("clerk_user_id", userId)
     .single();
 
-  if (requestor?.role !== "admin") {
+  if (!["admin", "general_manager", "manager"].includes(requestor?.role ?? "")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

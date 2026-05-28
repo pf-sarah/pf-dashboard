@@ -60,7 +60,7 @@ export async function GET(
     canViewUtah:         target.role === "admin" || targetIsGM || targetIsViewer || (targetIsManager && target.location === "Utah") || (targetIsUser && target.location === "Utah"),
     canViewGeorgia:      target.role === "admin" || targetIsGM || targetIsViewer || (targetIsManager && target.location === "Georgia") || (targetIsUser && target.location === "Georgia"),
     canViewCPO:          !targetIsUser && !targetIsViewer,
-    canManageUsers:      target.role === "admin",
+    canManageUsers:      target.role === "admin" || target.role === "general_manager" || target.role === "manager",
     canViewAllLocations: target.role === "admin" || targetIsGM || targetIsViewer,
     canEditSchedule:     !targetIsUser && !targetIsViewer,
     canEditHistoricals:  !targetIsUser && !targetIsViewer,
