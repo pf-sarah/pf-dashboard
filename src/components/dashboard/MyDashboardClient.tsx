@@ -18,6 +18,7 @@ interface ThisWeek {
   actualHours: number | null;
   targetRatio: number | null;
   crossDeptHours?: { dept: string; hours: number }[];
+  crossDeptDaily?: { dept: string; daily: number[] }[];
 }
 
 interface HistoricalRow {
@@ -139,7 +140,12 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-6">
                 <h2 className="text-sm font-semibold text-gray-700 mb-4">Weekly Schedule</h2>
-                <WeekGrid dailyHours={data?.dailyHours ?? []} ratio={data?.thisWeek?.targetRatio ?? null} />
+                <WeekGrid
+                  dailyHours={data?.dailyHours ?? []}
+                  ratio={data?.thisWeek?.targetRatio ?? null}
+                  crossDeptDaily={data?.thisWeek?.crossDeptDaily ?? []}
+                  homeDept={data?.homeDepartment ?? data?.department ?? ""}
+                />
               </div>
               <RatioCalculator
                 scheduledHours={data?.thisWeek?.scheduledHours ?? null}
@@ -359,9 +365,13 @@ function RatioCalculator({ scheduledHours, currentRatio }: {
   );
 }
 
-function WeekGrid({ dailyHours, ratio }: { dailyHours: number[]; ratio: number | null }) {
+function WeekGrid({ dailyHours, ratio, crossDeptDaily, homeDept }: {
+  dailyHours: number[];
+  ratio: number | null;
+  crossDeptDaily?: { dept: string; daily: number[] }[];
+  homeDept?: string;
+}) {
   const days = ["Mon", "Tue", "Wed", "Thu", "Fri"];
-  // Get dates for this week
   const monday = new Date();
   const day = monday.getDay();
   monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1));
@@ -372,18 +382,35 @@ function WeekGrid({ dailyHours, ratio }: { dailyHours: number[]; ratio: number |
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const dateLabel = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-        const hours = dailyHours[i] ?? null;
+        const homeHours = dailyHours[i] ?? 0;
         const isToday = d.toDateString() === new Date().toDateString();
+        const crossToday = (crossDeptDaily ?? [])
+          .map(cd => ({ dept: cd.dept, hours: cd.daily[i] ?? 0 }))
+          .filter(cd => cd.hours > 0);
+        const totalHours = homeHours + crossToday.reduce((s, cd) => s + cd.hours, 0);
         return (
           <div key={dayName} className={`rounded-lg border p-3 text-center ${isToday ? "border-[#703C2E]/30 bg-[#703C2E]/5" : "border-gray-100 bg-gray-50"}`}>
             <div className={`text-xs font-medium mb-0.5 ${isToday ? "text-[#703C2E]" : "text-gray-500"}`}>{dayName}</div>
             <div className="text-xs text-gray-400 mb-2">{dateLabel}</div>
-            <div className={`text-sm font-semibold ${hours ? "text-gray-800" : "text-gray-300"}`}>
-              {hours ? `${hours}h` : "—"}
-            </div>
-            {hours && ratio ? (
-              <div className="text-xs text-indigo-500 mt-0.5">{Math.round(hours / ratio)}f</div>
-            ) : null}
+            {totalHours > 0 ? (
+              <div className="space-y-1">
+                {homeHours > 0 && (
+                  <div className="text-sm font-semibold text-gray-800">
+                    {homeHours}h <span className="text-xs font-normal text-gray-400 capitalize">{homeDept}</span>
+                  </div>
+                )}
+                {crossToday.map((cd, j) => (
+                  <div key={j} className="text-sm font-semibold text-amber-700">
+                    {cd.hours}h <span className="text-xs font-normal capitalize">{cd.dept}</span>
+                  </div>
+                ))}
+                {homeHours > 0 && ratio ? (
+                  <div className="text-xs text-indigo-500">{Math.round(homeHours / ratio)}f</div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="text-sm font-semibold text-gray-300">—</div>
+            )}
           </div>
         );
       })}

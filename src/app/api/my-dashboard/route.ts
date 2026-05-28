@@ -198,6 +198,18 @@ export async function GET(req: NextRequest) {
     return total > 0 ? Math.round(total * 10) / 10 : null;
   });
 
+  // Also store daily breakdown for each cross-dept (for the weekly grid)
+  const crossDeptDaily: { dept: string; daily: number[] }[] = [];
+  for (const dk of ALL_DEPT_KEYS) {
+    if (dk.dept === homeDeptNorm) continue;
+    const crossId = findIdInRoster(ROSTER_KEYS[dk.dept] ?? '', memberName);
+    if (!crossId) continue;
+    const deptDaily: number[] = scheduleMap[dk.daily]?.[crossId] ?? [];
+    if (deptDaily.some(h => h > 0)) {
+      crossDeptDaily.push({ dept: dk.dept, daily: deptDaily.slice(0, 5) });
+    }
+  }
+
   const thisWeekCrossDeptHours = crossDeptWeekly
     .filter(d => (d.hours[0] ?? 0) > 0)
     .map(d => ({ dept: d.dept, hours: d.hours[0] }));
@@ -224,6 +236,7 @@ export async function GET(req: NextRequest) {
       actualHours:    thisWeekRow?.actual_hours  ?? null,
       targetRatio,
       crossDeptHours: thisWeekCrossDeptHours,
+      crossDeptDaily,
     },
     historicals,
     upcomingWeeks,
