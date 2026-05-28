@@ -24,6 +24,7 @@ interface HistoricalRow {
   hours: number | null;
   orders: number | null;
   ratio: number | null;
+  department?: string | null;
 }
 
 interface UpcomingWeek {
@@ -41,6 +42,7 @@ interface DashboardData {
   upcomingWeeks: UpcomingWeek[];
   avgHours: number | null;
   avgOrders: number | null;
+  homeDepartment?: string | null;
 }
 
 const TABS = ["This Week", "52-Week Planner", "My Historicals", "My Scorecard"] as const;
@@ -170,20 +172,33 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
                     <thead>
                       <tr className="border-b border-gray-100">
                         <th className="text-left py-2 text-xs font-medium text-gray-400 uppercase">Week</th>
+                        <th className="text-left py-2 text-xs font-medium text-gray-400 uppercase">Dept</th>
                         <th className="text-right py-2 text-xs font-medium text-gray-400 uppercase">Hours</th>
                         <th className="text-right py-2 text-xs font-medium text-gray-400 uppercase">Orders</th>
                         <th className="text-right py-2 text-xs font-medium text-gray-400 uppercase">Ratio</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(data?.historicals ?? []).map((r, i) => (
-                        <tr key={i} className="border-b border-gray-50 last:border-0">
-                          <td className="py-2 text-gray-600">Week of {fmtDate(r.weekOf)}</td>
-                          <td className="py-2 text-right text-gray-700">{fmt(r.hours)}</td>
-                          <td className="py-2 text-right text-gray-700">{fmt(r.orders, 0)}</td>
-                          <td className="py-2 text-right text-gray-700">{fmt(r.ratio)}</td>
-                        </tr>
-                      ))}
+                      {(data?.historicals ?? []).map((r, i) => {
+                        const isHome = !r.department || r.department?.toLowerCase() === (data?.homeDepartment ?? department).toLowerCase();
+                        return (
+                          <tr key={i} className="border-b border-gray-50 last:border-0">
+                            <td className="py-2 text-gray-600">Week of {fmtDate(r.weekOf)}</td>
+                            <td className="py-2">
+                              {isHome ? (
+                                <span className="text-xs text-gray-400 capitalize">{r.department ?? department}</span>
+                              ) : (
+                                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 capitalize">{r.department}</span>
+                              )}
+                            </td>
+                            <td className="py-2 text-right text-gray-700">{fmt(r.hours)}</td>
+                            <td className="py-2 text-right text-gray-700">{fmt(r.orders, 0)}</td>
+                            <td className="py-2 text-right text-gray-700">
+                              {isHome ? fmt(r.ratio) : <span className="text-gray-400">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

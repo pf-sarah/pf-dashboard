@@ -68,32 +68,39 @@ export async function GET(req: NextRequest) {
 
   const { data: actuals } = await supabase
     .from("team_member_week_actuals")
-    .select("week_of, actual_hours, actual_orders")
+    .select("week_of, actual_hours, actual_orders, department")
     .eq("location", location)
-    .eq("department", department)
     .eq("member_name", memberName)
     .gte("week_of", sinceIso)
     .order("week_of", { ascending: false });
 
   const rows = actuals ?? [];
   const thisWeekOf  = getMondayOfWeek(0);
-  const thisWeekRow = rows.find(r => r.week_of === thisWeekOf);
 
-  const ratioData   = rows.filter(r => r.actual_hours > 0 && r.actual_orders > 0);
+  // Averages/ratio/this week all based on home department
+  const homeDeptRowsEarly = rows.filter(r => r.department?.toLowerCase() === department?.toLowerCase());
+  const thisWeekRow = homeDeptRowsEarly.find(r => r.week_of === thisWeekOf);
+
+  const ratioData   = homeDeptRowsEarly.filter(r => r.actual_hours > 0 && r.actual_orders > 0);
   const totalHours  = ratioData.reduce((s, r) => s + (r.actual_hours ?? 0), 0);
   const totalOrders = ratioData.reduce((s, r) => s + (r.actual_orders ?? 0), 0);
   const targetRatio = totalHours > 0 && totalOrders > 0
     ? Math.round((totalHours / totalOrders) * 100) / 100
     : null;
 
-  const historicals = rows.slice(0, 12).map(r => ({
-    weekOf:  r.week_of,
-    hours:   r.actual_hours,
-    orders:  r.actual_orders,
-    ratio:   r.actual_hours > 0 && r.actual_orders > 0
+  // All rows sorted newest first, include department
+  const historicals = rows.slice(0, 24).map(r => ({
+    weekOf:     r.week_of,
+    hours:      r.actual_hours,
+    orders:     r.actual_orders,
+    department: r.department,
+    ratio:      r.actual_hours > 0 && r.actual_orders > 0
       ? Math.round((r.actual_hours / r.actual_orders) * 100) / 100
       : null,
   }));
+
+  // Home dept rows only for averages + ratio baseline
+  const homeDeptRows = rows.filter(r => r.department?.toLowerCase() === department?.toLowerCase());
 
   // Get scheduled hours from schedule_settings
   const scheduleKey      = department === 'design' ? 'designHours' :
@@ -161,5 +168,6 @@ export async function GET(req: NextRequest) {
     upcomingWeeks,
     avgHours:  ratioData.length > 0 ? Math.round((totalHours  / ratioData.length) * 10) / 10 : null,
     avgOrders: ratioData.length > 0 ? Math.round((totalOrders / ratioData.length) * 10) / 10 : null,
+    homeDepartment: department,
   });
 }
