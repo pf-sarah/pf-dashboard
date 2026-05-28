@@ -84,9 +84,7 @@ export async function GET(req: NextRequest) {
   const ratioData   = homeDeptRowsEarly.filter(r => r.actual_hours > 0 && r.actual_orders > 0);
   const totalHours  = ratioData.reduce((s, r) => s + (r.actual_hours ?? 0), 0);
   const totalOrders = ratioData.reduce((s, r) => s + (r.actual_orders ?? 0), 0);
-  const targetRatio = totalHours > 0 && totalOrders > 0
-    ? Math.round((totalHours / totalOrders) * 100) / 100
-    : null;
+
 
   // All rows sorted newest first, include department
   const historicals = rows.slice(0, 24).map(r => ({
@@ -151,7 +149,7 @@ export async function GET(req: NextRequest) {
     .eq("location", location)
     .in("key", rosterKeyList);
 
-  const rosterMap: Record<string, Record<string, { name?: string }>> = {};
+  const rosterMap: Record<string, Record<string, { name?: string; ratio?: number }>> = {};
   for (const row of rosterRows ?? []) {
     try {
       const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
@@ -168,6 +166,12 @@ export async function GET(req: NextRequest) {
     }
     return null;
   }
+  // Target ratio comes from the roster, not actuals
+  const homeRosterKey = ROSTER_KEYS[homeDeptNorm] ?? null;
+  const homeRosterId = homeRosterKey ? findIdInRoster(homeRosterKey, memberName) : null;
+  const targetRatio: number | null = homeRosterId && homeRosterKey
+    ? (rosterMap[homeRosterKey]?.[homeRosterId]?.ratio ?? null)
+    : null;
 
   const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
   for (const dk of ALL_DEPT_KEYS) {
