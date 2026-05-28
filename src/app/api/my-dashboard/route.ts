@@ -99,58 +99,74 @@ export async function GET(req: NextRequest) {
       : null,
   }));
 
-  // Home dept rows only for averages + ratio baseline
-  const homeDeptRows = rows.filter(r => r.department?.toLowerCase() === department?.toLowerCase());
-
-  // Get scheduled hours from schedule_settings
-  const scheduleKey      = department === 'design' ? 'designHours' :
-                           department === 'preservation' ? 'presHours' : 'ffHours';
-  const dailyScheduleKey = department === 'design' ? 'designDailyHours' :
-                           department === 'preservation' ? 'presDailyHours' : 'ffDailyHours';
-
-  const { data: scheduleRow } = await supabase
-    .from("schedule_settings")
-    .select("value")
-    .eq("location", location)
-    .eq("key", scheduleKey)
-    .single();
+  // Fetch scheduled hours for ALL departments (including resin) for this person
+  const ALL_DEPT_KEYS = [
+    { dept: 'design',       weekly: 'designHours',    daily: 'designDailyHours' },
+    { dept: 'preservation', weekly: 'presHours',       daily: 'presDailyHours'   },
+    { dept: 'fulfillment',  weekly: 'ffHours',         daily: 'ffDailyHours'     },
+    { dept: 'resin',        weekly: 'resinHours',      daily: 'resinDailyHours'  },
+  ];
 
   const designerId = DESIGNER_IDS[memberName] ?? null;
-  let weeklyHours: number[] = [];
-  let dailyHours: number[] = [];
 
-  if (scheduleRow?.value && designerId) {
-    try {
-      const parsed = typeof scheduleRow.value === "string"
-        ? JSON.parse(scheduleRow.value)
-        : scheduleRow.value;
-      weeklyHours = parsed[designerId] ?? [];
-    } catch { /* ignore */ }
-  }
-
-  // Get daily hours
-  const { data: dailyRow } = await supabase
+  // Fetch all schedule keys in one query
+  const allKeys = ALL_DEPT_KEYS.flatMap(d => [d.weekly, d.daily]);
+  const { data: scheduleRows } = await supabase
     .from("schedule_settings")
-    .select("value")
+    .select("key, value")
     .eq("location", location)
-    .eq("key", dailyScheduleKey)
-    .single();
+    .in("key", allKeys);
 
-  if (dailyRow?.value && designerId) {
+  const scheduleMap: Record<string, Record<string, number[]>> = {};
+  for (const row of scheduleRows ?? []) {
     try {
-      const parsed = typeof dailyRow.value === "string"
-        ? JSON.parse(dailyRow.value)
-        : dailyRow.value;
-      dailyHours = parsed[designerId] ?? [];
+      const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
+      scheduleMap[row.key] = parsed;
     } catch { /* ignore */ }
   }
 
-  const upcomingWeeks = Array.from({ length: 8 }, (_, i) => ({
+  // Home dept config
+  const homeDeptNorm = department?.toLowerCase() ?? '';
+  const homeDeptConfig = ALL_DEPT_KEYS.find(d => d.dept === homeDeptNorm) ?? ALL_DEPT_KEYS[0];
+
+  const homeWeeklyHours: number[] = designerId
+    ? (scheduleMap[homeDeptConfig.weekly]?.[designerId] ?? []) : [];
+  const dailyHours: number[] = designerId
+    ? (scheduleMap[homeDeptConfig.daily]?.[designerId] ?? []).slice(0, 5) : [];
+
+  // Cross-dept hours (any dept where this person has scheduled hours, excluding home)
+  const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
+  for (const dk of ALL_DEPT_KEYS) {
+    if (dk.dept === homeDeptNorm) continue;
+    const deptWeekly: number[] = designerId
+      ? (scheduleMap[dk.weekly]?.[designerId] ?? []) : [];
+    if (deptWeekly.some(h => h > 0)) {
+      crossDeptWeekly.push({ dept: dk.dept, hours: deptWeekly });
+    }
+  }
+
+  // Merged weekly totals (home + all cross-dept)
+  const NUM_WEEKS = 8;
+  const mergedWeeklyHours = Array.from({ length: NUM_WEEKS }, (_, i) => {
+    const home  = homeWeeklyHours[i] ?? 0;
+    const cross = crossDeptWeekly.reduce((s, d) => s + (d.hours[i] ?? 0), 0);
+    const total = home + cross;
+    return total > 0 ? Math.round(total * 10) / 10 : null;
+  });
+
+  const thisWeekCrossDeptHours = crossDeptWeekly
+    .filter(d => (d.hours[0] ?? 0) > 0)
+    .map(d => ({ dept: d.dept, hours: d.hours[0] }));
+
+  const upcomingWeeks = Array.from({ length: NUM_WEEKS }, (_, i) => ({
     weekOf: getMondayOfWeek(i),
-    scheduledHours: weeklyHours[i] ?? null,
+    scheduledHours: mergedWeeklyHours[i] ?? null,
+    crossDept: crossDeptWeekly
+      .filter(d => (d.hours[i] ?? 0) > 0)
+      .map(d => ({ dept: d.dept, hours: d.hours[i] })),
   }));
 
-  const thisWeekScheduledHours = weeklyHours[0] ?? null;
+  const thisWeekScheduledHours = mergedWeeklyHours[0] ?? null;
 
   return NextResponse.json({
     memberName,
@@ -163,6 +179,7 @@ export async function GET(req: NextRequest) {
       ordersAssigned: thisWeekRow?.actual_orders ?? null,
       actualHours:    thisWeekRow?.actual_hours  ?? null,
       targetRatio,
+      crossDeptHours: thisWeekCrossDeptHours,
     },
     historicals,
     upcomingWeeks,

@@ -17,6 +17,7 @@ interface ThisWeek {
   ordersAssigned: number | null;
   actualHours: number | null;
   targetRatio: number | null;
+  crossDeptHours?: { dept: string; hours: number }[];
 }
 
 interface HistoricalRow {
@@ -30,6 +31,7 @@ interface HistoricalRow {
 interface UpcomingWeek {
   weekOf: string;
   scheduledHours: number | null;
+  crossDept?: { dept: string; hours: number }[];
 }
 
 interface DashboardData {
@@ -116,8 +118,16 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
           {/* This Week */}
           {tab === "This Week" && (
             <div className="space-y-4">
+              {(data?.thisWeek?.crossDeptHours ?? []).length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span>⚠ Scheduled in multiple departments this week:</span>
+                  {(data?.thisWeek?.crossDeptHours ?? []).map((cd, i) => (
+                    <span key={i} className="font-medium capitalize">{cd.dept} ({cd.hours}h)</span>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-4">
-                <StatCard label="Scheduled Hours" value={fmt(data?.thisWeek?.scheduledHours ?? null)} sub="this week" />
+                <StatCard label="Scheduled Hours" value={fmt(data?.thisWeek?.scheduledHours ?? null)} sub="all depts this week" />
                 <StatCard
                   label="Frames This Week"
                   value={data?.thisWeek?.scheduledHours && data?.thisWeek?.targetRatio
@@ -147,9 +157,16 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
                 {(data?.upcomingWeeks ?? []).map((w, i) => (
                   <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                     <span className="text-sm text-gray-600">Week of {fmtDate(w.weekOf)}</span>
-                    <span className="text-sm text-gray-500">
-                      {w.scheduledHours !== null ? `${w.scheduledHours} hrs scheduled` : "— hrs scheduled"}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {(w.crossDept ?? []).map((cd, j) => (
+                        <span key={j} className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 capitalize">
+                          +{cd.hours}h {cd.dept}
+                        </span>
+                      ))}
+                      <span className="text-sm text-gray-500">
+                        {w.scheduledHours !== null ? `${w.scheduledHours} hrs total` : "— hrs scheduled"}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -193,9 +210,7 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
                             </td>
                             <td className="py-2 text-right text-gray-700">{fmt(r.hours)}</td>
                             <td className="py-2 text-right text-gray-700">{fmt(r.orders, 0)}</td>
-                            <td className="py-2 text-right text-gray-700">
-                              {isHome ? fmt(r.ratio) : <span className="text-gray-400">—</span>}
-                            </td>
+                            <td className="py-2 text-right text-gray-700">{fmt(r.ratio)}</td>
                           </tr>
                         );
                       })}
