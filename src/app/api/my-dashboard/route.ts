@@ -135,13 +135,23 @@ export async function GET(req: NextRequest) {
     ? (scheduleMap[homeDeptConfig.daily]?.[designerId] ?? []).slice(0, 5) : [];
 
   // Cross-dept hours (any dept where this person has scheduled hours, excluding home)
+  // Check both weekly planner AND daily hours grid
   const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
   for (const dk of ALL_DEPT_KEYS) {
     if (dk.dept === homeDeptNorm) continue;
     const deptWeekly: number[] = designerId
       ? (scheduleMap[dk.weekly]?.[designerId] ?? []) : [];
-    if (deptWeekly.some(h => h > 0)) {
-      crossDeptWeekly.push({ dept: dk.dept, hours: deptWeekly });
+    // Also check daily hours — sum the 5 daily values into a single "this week" total
+    const deptDaily: number[] = designerId
+      ? (scheduleMap[dk.daily]?.[designerId] ?? []) : [];
+    const dailyThisWeekTotal = deptDaily.reduce((s, h) => s + (h ?? 0), 0);
+    // Use weekly if available, otherwise fall back to daily total for week 0
+    const mergedForDept = [...deptWeekly];
+    if (dailyThisWeekTotal > 0 && (mergedForDept[0] ?? 0) === 0) {
+      mergedForDept[0] = Math.round(dailyThisWeekTotal * 10) / 10;
+    }
+    if (mergedForDept.some(h => h > 0)) {
+      crossDeptWeekly.push({ dept: dk.dept, hours: mergedForDept });
     }
   }
 
