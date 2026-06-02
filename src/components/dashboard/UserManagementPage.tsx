@@ -22,6 +22,12 @@ const ROLES: UserRole[] = ["admin", "general_manager", "manager", "user"];
 const LOCATIONS = ["Utah", "Georgia"];
 const DEPARTMENTS = ["design", "preservation", "fulfillment"];
 
+// Returns true if the current user has strictly higher rank than the target
+function outranks(currentRole: UserRole | undefined, targetRole: UserRole): boolean {
+  if (!currentRole) return false;
+  return ROLES.indexOf(currentRole) < ROLES.indexOf(targetRole);
+}
+
 const roleLabel = (role: UserRole) => {
   if (role === "general_manager") return "General Manager";
   if (role === "admin") return "Admin";
@@ -385,7 +391,8 @@ export default function UserManagementPage() {
                       >
                         Edit
                       </button>
-                      {u.clerk_user_id !== realUser?.profile.clerk_user_id && (
+                      {u.clerk_user_id !== realUser?.profile.clerk_user_id &&
+                       outranks(user?.profile.role as UserRole, u.role) && (
                         <button
                           onClick={() => handleImpersonate(u)}
                           className="text-xs px-3 py-1 rounded-lg border border-amber-200 text-amber-600 hover:bg-amber-50 transition-colors"
@@ -393,7 +400,8 @@ export default function UserManagementPage() {
                           View as
                         </button>
                       )}
-                      {u.clerk_user_id !== realUser?.profile.clerk_user_id && (
+                      {u.clerk_user_id !== realUser?.profile.clerk_user_id &&
+                       outranks(user?.profile.role as UserRole, u.role) && (
                         <button
                           onClick={() => deleteUser(u.clerk_user_id)}
                           className="text-xs px-3 py-1 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 transition-colors"

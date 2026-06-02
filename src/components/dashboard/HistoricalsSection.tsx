@@ -70,6 +70,15 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   const [receivedEdits, setReceivedEdits] = useState<Record<string, number>>({});
   const [savingReceived, setSavingReceived] = useState<string | null>(null);
   const receivedTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  // Compute sum of presSettings.dailyReceived for a given week
+  // (passed in via presActuals prop pathway — we use a simple sum of Mon-Fri)
+  function getDailySum(weekOf: string): number | null {
+    // presActuals keyed by week_of won't have daily data here;
+    // daily sums are computed from presSettings.dailyReceived passed via parent
+    // For now we return null (parent can override via presActuals)
+    return null;
+  }
+
   function handleReceivedEdit(weekOf: string, val: number) {
     setReceivedEdits(prev => ({ ...prev, [weekOf]: val }));
     if (receivedTimers.current[weekOf]) clearTimeout(receivedTimers.current[weekOf]);

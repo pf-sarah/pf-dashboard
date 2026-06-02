@@ -1339,11 +1339,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onPresDailyHoursChange:(h: Record<string, number[]>) => void;
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
-  presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> };
+  presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } };
   mgrTotalHours:         Record<string, number[]>;
   onPresHoursChange:     (h: Record<string, number[]>) => void;
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
-  onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }> }) => void;
+  onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } }) => void;
   onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
   weeklyEstimates:       Record<string, { ut: number; ga: number }>;
   presActuals?:          Record<string, number>;
@@ -1370,6 +1370,63 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const dayPcts = presSettings.dayPcts ?? [20, 25, 25, 20, 10];
   const dayOverrides = presSettings.dayOverrides ?? {};
   const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+
+  // ── Check settings + daily received ──────────────────────────────────────
+  const dailyReceived: Record<string, number> = presSettings.dailyReceived ?? {};
+  const checkSettings = presSettings.checkSettings ?? {};
+  const c1Min  = checkSettings.c1Min  ?? 2;
+  const c1Max  = checkSettings.c1Max  ?? 3;
+  const c2Min  = checkSettings.c2Min  ?? 5;
+  const c2Max  = checkSettings.c2Max  ?? 6;
+  const c3Min  = checkSettings.c3Min  ?? 8;
+  const c3Max  = checkSettings.c3Max  ?? 9;
+  const c1Mins = checkSettings.c1Mins ?? (location === 'Georgia' ? 10   : 3);
+  const c2Mins = checkSettings.c2Mins ?? (location === 'Georgia' ? 5.5  : 2);
+  const c3Mins = checkSettings.c3Mins ?? (location === 'Georgia' ? 3    : 1);
+  const [showCheckSettings, setShowCheckSettings] = useState(false);
+
+  function setDailyReceived(iso: string, val: number) {
+    const next = { ...dailyReceived, [iso]: val };
+    onPresSettingsChange({ ...presSettings, dailyReceived: next });
+  }
+
+  function setCheckSetting(field: string, val: number) {
+    onPresSettingsChange({ ...presSettings, checkSettings: { ...checkSettings, [field]: val } });
+  }
+
+  // For a given day ISO, compute how many bouquets need each check type
+  // based on prior dailyReceived entries
+  function checksOnDay(dayIso: string): { c1: [number, number]; c2: [number, number]; c3: [number, number] } {
+    // Count bouquets received on days where this day falls in the check window
+    // (skipping weekends already since fiveDays only has weekdays)
+    let c1 = 0, c2 = 0, c3 = 0;
+    // We need to look back far enough to cover c3Max days + weekends
+    for (let lookback = 1; lookback <= c3Max + 4; lookback++) {
+      const d = new Date(dayIso + 'T12:00:00');
+      d.setDate(d.getDate() - lookback);
+      // Skip weekends in the received date (we only record Mon-Fri anyway)
+      const dow = d.getDay();
+      if (dow === 0 || dow === 6) continue;
+      const srcIso = d.toISOString().split('T')[0];
+      const count = dailyReceived[srcIso] ?? 0;
+      if (count === 0) continue;
+      // Count business days between srcIso and dayIso
+      let bizDays = 0;
+      const cur = new Date(srcIso + 'T12:00:00');
+      cur.setDate(cur.getDate() + 1);
+      const target = new Date(dayIso + 'T12:00:00');
+      while (cur <= target) {
+        const wd = cur.getDay();
+        if (wd !== 0 && wd !== 6) bizDays++;
+        cur.setDate(cur.getDate() + 1);
+      }
+      if (bizDays >= c1Min && bizDays <= c1Max) c1 += count;
+      if (bizDays >= c2Min && bizDays <= c2Max) c2 += count;
+      if (bizDays >= c3Min && bizDays <= c3Max) c3 += count;
+    }
+    // Return as ranges (same value both ends since we're looking at actuals not estimates)
+    return { c1: [c1, c1], c2: [c2, c2], c3: [c3, c3] };
+  }
 
   function setDayPct(i: number, val: number) {
     const next = [...dayPcts]; next[i] = val;
@@ -1793,6 +1850,54 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
             )}
           </div>
 
+          {/* Check settings accordion */}
+          <div className="border border-slate-100 rounded-xl bg-white overflow-hidden">
+            <button
+              onClick={() => setShowCheckSettings(s => !s)}
+              className="w-full flex items-center justify-between px-4 py-3 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              <span className="font-medium">Check schedule settings</span>
+              <span className="text-slate-400 text-xs">{showCheckSettings ? '▲ Hide' : '▼ Edit'} check windows & times</span>
+            </button>
+            {showCheckSettings && (
+              <div className="px-5 pb-5 border-t border-slate-100 space-y-4">
+                <p className="text-xs text-slate-400 pt-3">
+                  Define how many business days after delivery each check falls, and how many minutes each check takes.
+                  Weekends are automatically skipped.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {([
+                    { label: 'Check 1', minKey: 'c1Min', maxKey: 'c1Max', minsKey: 'c1Mins', minVal: c1Min, maxVal: c1Max, minsVal: c1Mins, color: 'text-violet-600' },
+                    { label: 'Check 2', minKey: 'c2Min', maxKey: 'c2Max', minsKey: 'c2Mins', minVal: c2Min, maxVal: c2Max, minsVal: c2Mins, color: 'text-blue-600' },
+                    { label: 'Check 3', minKey: 'c3Min', maxKey: 'c3Max', minsKey: 'c3Mins', minVal: c3Min, maxVal: c3Max, minsVal: c3Mins, color: 'text-indigo-600' },
+                  ] as const).map(({ label, minKey, maxKey, minsKey, minVal, maxVal, minsVal, color }) => (
+                    <div key={label} className="space-y-2">
+                      <p className={`text-xs font-semibold ${color}`}>{label}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 w-20">Day window</span>
+                        <input type="number" min="1" max="30" value={minVal}
+                          onChange={e => setCheckSetting(minKey, parseInt(e.target.value) || 1)}
+                          className="w-12 border border-slate-200 rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <span className="text-xs text-slate-400">–</span>
+                        <input type="number" min="1" max="30" value={maxVal}
+                          onChange={e => setCheckSetting(maxKey, parseInt(e.target.value) || 1)}
+                          className="w-12 border border-slate-200 rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <span className="text-xs text-slate-400">biz days</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 w-20">Minutes each</span>
+                        <input type="number" min="0.5" max="60" step="0.5" value={minsVal}
+                          onChange={e => setCheckSetting(minsKey, parseFloat(e.target.value) || 1)}
+                          className="w-16 border border-slate-200 rounded px-1.5 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <span className="text-xs text-slate-400">min</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Weekly / 52-week toggle */}
           <div className="flex gap-1">
             {(['weekly', '52week'] as const).filter(t => userRole !== 'viewer').map(t => (
@@ -1904,6 +2009,58 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         return <td key={di} className="px-2 py-1.5 text-center text-[10px] text-slate-400">{est || '—'}</td>;
                       })}
                     </tr>
+                    {/* ── Actual received row ── */}
+                    <tr className="bg-emerald-50/40 border-t border-slate-100">
+                      <td className="sticky left-0 bg-emerald-50/40 px-4 py-1.5">
+                        <div className="text-[10px] font-medium text-emerald-700">Actual received</div>
+                        <div className="text-[9px] text-slate-400">bouquets delivered</div>
+                      </td>
+                      {fiveDays.map((d, di) => {
+                        const val = dailyReceived[d.iso] ?? '';
+                        return (
+                          <td key={di} className="px-2 py-1.5 text-center">
+                            <input
+                              type="number" min="0" placeholder="0"
+                              value={val}
+                              onChange={e => setDailyReceived(d.iso, parseInt(e.target.value) || 0)}
+                              className="w-14 border border-emerald-200 rounded px-1.5 py-1 text-center text-[11px] text-emerald-800 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* ── Check load rows ── */}
+                    {[
+                      { label: 'Check 1', key: 'c1' as const, color: 'text-violet-600', bg: 'bg-violet-50/30', mins: c1Mins, min: c1Min, max: c1Max },
+                      { label: 'Check 2', key: 'c2' as const, color: 'text-blue-600',   bg: 'bg-blue-50/30',   mins: c2Mins, min: c2Min, max: c2Max },
+                      { label: 'Check 3', key: 'c3' as const, color: 'text-indigo-600', bg: 'bg-indigo-50/30', mins: c3Mins, min: c3Min, max: c3Max },
+                    ].map(({ label, key, color, bg, mins, min, max }) => (
+                      <tr key={key} className={`${bg} border-t border-slate-50`}>
+                        <td className={`sticky left-0 ${bg} px-4 py-1.5`}>
+                          <div className={`text-[10px] font-medium ${color}`}>{label}</div>
+                          <div className="text-[9px] text-slate-400">day {min}–{max} · {mins} min ea</div>
+                        </td>
+                        {fiveDays.map((d, di) => {
+                          const checks = checksOnDay(d.iso);
+                          const [lo, hi] = checks[key];
+                          const totalMins = lo * mins;
+                          return (
+                            <td key={di} className="px-2 py-1.5 text-center">
+                              {lo > 0 ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <span className={`text-[11px] font-semibold ${color}`}>
+                                    {lo === hi ? lo : `${lo}–${hi}`}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400">{Math.round(totalMins)} min</span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-200">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
