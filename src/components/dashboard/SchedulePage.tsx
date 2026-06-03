@@ -2076,8 +2076,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                             (key === 'c2' && bizDays >= c2Min && bizDays <= c2Max) ||
                                             (key === 'c3' && bizDays >= c3Min && bizDays <= c3Max);
                             if (inRange) {
-                              const origDow = new Date(d.iso + 'T12:00:00').getDay();
-                              sourceDates.push({ srcIso, count, snapped: origDow === 0 || origDow === 6, actualDay: bizDays });
+                              // Check if the snapped target differs from the original column date
+                              const snapped = snapToWeekday(d.iso) !== d.iso;
+                              sourceDates.push({ srcIso, count, snapped, actualDay: bizDays });
                             }
                           }
                           const fmtSrc = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
