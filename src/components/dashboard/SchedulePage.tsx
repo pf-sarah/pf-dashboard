@@ -2049,6 +2049,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           <div className="text-[9px] text-slate-400">day {min}–{max} · {mins} min ea</div>
                         </td>
                         {fiveDays.map((d, di) => {
+                          const dow = new Date(d.iso + 'T12:00:00').getDay();
+                          const isWeekend = dow === 0 || dow === 6;
+                          if (isWeekend) return <td key={di} className="px-2 py-1.5 text-center"><span className="text-[10px] text-slate-100">—</span></td>;
                           const checks = checksOnDay(d.iso);
                           const [lo, hi] = checks[key];
                           const totalMins = lo * mins;
