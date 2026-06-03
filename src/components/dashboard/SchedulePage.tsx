@@ -2076,8 +2076,19 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                             (key === 'c2' && bizDays >= c2Min && bizDays <= c2Max) ||
                                             (key === 'c3' && bizDays >= c3Min && bizDays <= c3Max);
                             if (inRange) {
-                              // Check if the snapped target differs from the original column date
-                              const snapped = snapToWeekday(d.iso) !== d.iso;
+                              // Compute the natural (unsnapped) check day from srcIso + bizDays business days
+                              // to see if it would have landed on a weekend
+                              const naturalDay = (() => {
+                                const nd = new Date(srcIso + 'T12:00:00');
+                                let biz = 0;
+                                while (biz < bizDays) {
+                                  nd.setDate(nd.getDate() + 1);
+                                  if (nd.getDay() !== 0 && nd.getDay() !== 6) biz++;
+                                }
+                                return nd;
+                              })();
+                              const naturalDow = naturalDay.getDay();
+                              const snapped = naturalDow === 0 || naturalDow === 6;
                               sourceDates.push({ srcIso, count, snapped, actualDay: bizDays });
                             }
                           }
