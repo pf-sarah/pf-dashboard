@@ -2055,10 +2055,42 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           const checks = checksOnDay(d.iso);
                           const [lo, hi] = checks[key];
                           const totalMins = lo * mins;
+                          // Find which source date(s) contributed to this check
+                          const sourceDates: { srcIso: string; count: number; snapped: boolean; actualDay: number }[] = [];
+                          for (let lb = 1; lb <= c3Max + 4; lb++) {
+                            const sd = new Date(d.iso + 'T12:00:00');
+                            sd.setDate(sd.getDate() - lb);
+                            const sdow = sd.getDay();
+                            if (sdow === 0 || sdow === 6) continue;
+                            const srcIso = sd.toISOString().split('T')[0];
+                            const count = dailyReceived[srcIso] ?? 0;
+                            if (count === 0) continue;
+                            // Count biz days to snapped target
+                            const targetIso = snapToWeekday(d.iso);
+                            let bizDays = 0;
+                            const cur2 = new Date(srcIso + 'T12:00:00');
+                            cur2.setDate(cur2.getDate() + 1);
+                            const tgt2 = new Date(targetIso + 'T12:00:00');
+                            while (cur2 <= tgt2) { if (cur2.getDay() !== 0 && cur2.getDay() !== 6) bizDays++; cur2.setDate(cur2.getDate() + 1); }
+                            const inRange = (key === 'c1' && bizDays >= c1Min && bizDays <= c1Max) ||
+                                            (key === 'c2' && bizDays >= c2Min && bizDays <= c2Max) ||
+                                            (key === 'c3' && bizDays >= c3Min && bizDays <= c3Max);
+                            if (inRange) {
+                              const origDow = new Date(d.iso + 'T12:00:00').getDay();
+                              sourceDates.push({ srcIso, count, snapped: origDow === 0 || origDow === 6, actualDay: bizDays });
+                            }
+                          }
+                          const fmtSrc = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                           return (
                             <td key={di} className="px-2 py-1.5 text-center">
                               {lo > 0 ? (
                                 <div className="flex flex-col items-center gap-0.5">
+                                  {sourceDates.map(s => (
+                                    <div key={s.srcIso} className="flex flex-col items-center">
+                                      <span className="text-[9px] text-slate-400">from {fmtSrc(s.srcIso)}</span>
+                                      {s.snapped && <span className="text-[8px] text-amber-500" title="Originally fell on a weekend — moved to nearest weekday">* day {s.actualDay}</span>}
+                                    </div>
+                                  ))}
                                   <span className={`text-[11px] font-semibold ${color}`}>
                                     {lo === hi ? lo : `${lo}–${hi}`}
                                   </span>
