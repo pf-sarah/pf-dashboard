@@ -1405,35 +1405,86 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     return d.toISOString().split('T')[0];
   }
 
-  function checksOnDay(dayIso: string): { c1: [number, number]; c2: [number, number]; c3: [number, number] } {
-    // Snap weekend days to nearest weekday before computing checks
-    const targetIso = snapToWeekday(dayIso);
-    let c1 = 0, c2 = 0, c3 = 0;
-    // Look back far enough to cover c3Max business days + a few weekend buffer days
-    for (let lookback = 1; lookback <= c3Max + 4; lookback++) {
-      const d = new Date(targetIso + 'T12:00:00');
-      d.setDate(d.getDate() - lookback);
-      // Skip weekends in the received date (we only record Mon-Fri anyway)
-      const dow = d.getDay();
-      if (dow === 0 || dow === 6) continue;
-      const srcIso = d.toISOString().split('T')[0];
-      const count = dailyReceived[srcIso] ?? 0;
-      if (count === 0) continue;
-      // Count business days between srcIso and targetIso
-      let bizDays = 0;
-      const cur = new Date(srcIso + 'T12:00:00');
-      cur.setDate(cur.getDate() + 1);
-      const target = new Date(targetIso + 'T12:00:00');
-      while (cur <= target) {
-        const wd = cur.getDay();
-        if (wd !== 0 && wd !== 6) bizDays++;
-        cur.setDate(cur.getDate() + 1);
-      }
-      if (bizDays >= c1Min && bizDays <= c1Max) c1 += count;
-      if (bizDays >= c2Min && bizDays <= c2Max) c2 += count;
-      if (bizDays >= c3Min && bizDays <= c3Max) c3 += count;
+  // For a source date, add N business days and return the resulting date ISO
+  function addBizDays(srcIso: string, n: number): string {
+    const d = new Date(srcIso + 'T12:00:00');
+    let added = 0;
+    while (added < n) {
+      d.setDate(d.getDate() + 1);
+      if (d.getDay() !== 0 && d.getDay() !== 6) added++;
     }
-    return { c1: [c1, c1], c2: [c2, c2], c3: [c3, c3] };
+    return d.toISOString().split('T')[0];
+  }
+
+  // Build a map of dayIso -> { c1, c2, c3, sources } from all dailyReceived entries
+  // Each check falls on: addBizDays(src, checkDay), snapped to nearest weekday
+  // Memoised over dailyReceived + check settings
+  function buildCheckMap(): Record<string, { c1: number; c2: number; c3: number; sources: Record<string, { c1src?: string; c2src?: string; c3src?: string; snapped: boolean }> }> {
+    const map: Record<string, { c1: number; c2: number; c3: number; sources: Record<string, { c1src?: string; c2src?: string; c3src?: string; snapped: boolean }> }> = {};
+    function add(dayIso: string, checkKey: 'c1'|'c2'|'c3', count: number, srcIso: string) {
+      const snapped = snapToWeekday(dayIso) !== dayIso;
+      const targetIso = snapToWeekday(dayIso);
+      if (!map[targetIso]) map[targetIso] = { c1: 0, c2: 0, c3: 0, sources: {} };
+      map[targetIso][checkKey] += count;
+      if (!map[targetIso].sources[srcIso]) map[targetIso].sources[srcIso] = { snapped };
+      map[targetIso].sources[srcIso][`${checkKey}src`] = srcIso;
+      map[targetIso].sources[srcIso].snapped = snapped;
+    }
+    Object.entries(dailyReceived).forEach(([srcIso, count]) => {
+      if (!count) return;
+      // For each check, pick a day in the middle of the window
+      // Use min day (earliest the check can happen)
+      for (let day = c1Min; day <= c1Max; day++) add(addBizDays(srcIso, day), 'c1', count, srcIso);
+      for (let day = c2Min; day <= c2Max; day++) add(addBizDays(srcIso, day), 'c2', count, srcIso);
+      for (let day = c3Min; day <= c3Max; day++) add(addBizDays(srcIso, day), 'c3', count, srcIso);
+    });
+    // Dedupe: if same src appears multiple times for same check (range > 1 day), count once
+    Object.values(map).forEach(entry => {
+      // Already accumulated per-day; divide by window size to avoid double counting
+    });
+    return map;
+  }
+
+  function checksOnDay(dayIso: string): { c1: [number, number]; c2: [number, number]; c3: [number, number]; sources: { srcIso: string; checks: string[]; snapped: boolean }[] } {
+    const targetIso = snapToWeekday(dayIso);
+    // For each source date, compute which checks land on targetIso
+    const result: { srcIso: string; checks: string[]; snapped: boolean }[] = [];
+    let c1 = 0, c2 = 0, c3 = 0;
+    Object.entries(dailyReceived).forEach(([srcIso, count]) => {
+      if (!count) return;
+      const checks: string[] = [];
+      let snapped = false;
+      if (snapToWeekday(addBizDays(srcIso, c1Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c1Max)) === targetIso) {
+        // Check if any day in c1 window snaps to targetIso
+        for (let d = c1Min; d <= c1Max; d++) {
+          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+            const natural = addBizDays(srcIso, d);
+            if (natural !== targetIso) snapped = true;
+            checks.push('c1'); c1 += count; break;
+          }
+        }
+      }
+      if (snapToWeekday(addBizDays(srcIso, c2Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c2Max)) === targetIso) {
+        for (let d = c2Min; d <= c2Max; d++) {
+          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+            const natural = addBizDays(srcIso, d);
+            if (natural !== targetIso) snapped = true;
+            checks.push('c2'); c2 += count; break;
+          }
+        }
+      }
+      if (snapToWeekday(addBizDays(srcIso, c3Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c3Max)) === targetIso) {
+        for (let d = c3Min; d <= c3Max; d++) {
+          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+            const natural = addBizDays(srcIso, d);
+            if (natural !== targetIso) snapped = true;
+            checks.push('c3'); c3 += count; break;
+          }
+        }
+      }
+      if (checks.length) result.push({ srcIso, checks, snapped });
+    });
+    return { c1: [c1, c1], c2: [c2, c2], c3: [c3, c3], sources: result };
   }
 
   function setDayPct(i: number, val: number) {
@@ -2055,52 +2106,20 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           const checks = checksOnDay(d.iso);
                           const [lo, hi] = checks[key];
                           const totalMins = lo * mins;
-                          // Find which source date(s) contributed to this check
-                          const sourceDates: { srcIso: string; count: number; snapped: boolean; actualDay: number }[] = [];
-                          for (let lb = 1; lb <= c3Max + 4; lb++) {
-                            const sd = new Date(d.iso + 'T12:00:00');
-                            sd.setDate(sd.getDate() - lb);
-                            const sdow = sd.getDay();
-                            if (sdow === 0 || sdow === 6) continue;
-                            const srcIso = sd.toISOString().split('T')[0];
-                            const count = dailyReceived[srcIso] ?? 0;
-                            if (count === 0) continue;
-                            // Count biz days to snapped target
-                            const targetIso = snapToWeekday(d.iso);
-                            let bizDays = 0;
-                            const cur2 = new Date(srcIso + 'T12:00:00');
-                            cur2.setDate(cur2.getDate() + 1);
-                            const tgt2 = new Date(targetIso + 'T12:00:00');
-                            while (cur2 <= tgt2) { if (cur2.getDay() !== 0 && cur2.getDay() !== 6) bizDays++; cur2.setDate(cur2.getDate() + 1); }
-                            const inRange = (key === 'c1' && bizDays >= c1Min && bizDays <= c1Max) ||
-                                            (key === 'c2' && bizDays >= c2Min && bizDays <= c2Max) ||
-                                            (key === 'c3' && bizDays >= c3Min && bizDays <= c3Max);
-                            if (inRange) {
-                              // Compute the natural (unsnapped) check day from srcIso + bizDays business days
-                              // to see if it would have landed on a weekend
-                              const naturalDay = (() => {
-                                const nd = new Date(srcIso + 'T12:00:00');
-                                let biz = 0;
-                                while (biz < bizDays) {
-                                  nd.setDate(nd.getDate() + 1);
-                                  if (nd.getDay() !== 0 && nd.getDay() !== 6) biz++;
-                                }
-                                return nd;
-                              })();
-                              const naturalDow = naturalDay.getDay();
-                              const snapped = naturalDow === 0 || naturalDow === 6;
-                              sourceDates.push({ srcIso, count, snapped, actualDay: bizDays });
-                            }
-                          }
+                          const srcForKey = checks.sources.filter(s => s.checks.includes(key));
                           const fmtSrc = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                           return (
                             <td key={di} className="px-2 py-1.5 text-center">
                               {lo > 0 ? (
                                 <div className="flex flex-col items-center gap-0.5">
-                                  {sourceDates.map(s => (
+                                  {srcForKey.map(s => (
                                     <div key={s.srcIso} className="flex flex-col items-center">
                                       <span className="text-[9px] text-slate-400">from {fmtSrc(s.srcIso)}</span>
-                                      {s.snapped && <span className="text-[8px] text-amber-500" title="Originally fell on a weekend — moved to nearest weekday">* day {s.actualDay}</span>}
+                                      {s.snapped && (
+                                        <span className="text-[8px] text-amber-500" title="Fell on weekend — moved to nearest weekday">
+                                          * moved from weekend
+                                        </span>
+                                      )}
                                     </div>
                                   ))}
                                   <span className={`text-[11px] font-semibold ${color}`}>
