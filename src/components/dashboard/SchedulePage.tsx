@@ -1396,13 +1396,22 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // For a given day ISO, compute how many bouquets need each check type
   // based on prior dailyReceived entries
+  // Snap a date to the nearest weekday: Saturday -> Friday, Sunday -> Monday
+  function snapToWeekday(iso: string): string {
+    const d = new Date(iso + 'T12:00:00');
+    const dow = d.getDay();
+    if (dow === 6) d.setDate(d.getDate() - 1); // Saturday -> Friday
+    if (dow === 0) d.setDate(d.getDate() + 1); // Sunday -> Monday
+    return d.toISOString().split('T')[0];
+  }
+
   function checksOnDay(dayIso: string): { c1: [number, number]; c2: [number, number]; c3: [number, number] } {
-    // Count bouquets received on days where this day falls in the check window
-    // (skipping weekends already since fiveDays only has weekdays)
+    // Snap weekend days to nearest weekday before computing checks
+    const targetIso = snapToWeekday(dayIso);
     let c1 = 0, c2 = 0, c3 = 0;
-    // We need to look back far enough to cover c3Max days + weekends
+    // Look back far enough to cover c3Max business days + a few weekend buffer days
     for (let lookback = 1; lookback <= c3Max + 4; lookback++) {
-      const d = new Date(dayIso + 'T12:00:00');
+      const d = new Date(targetIso + 'T12:00:00');
       d.setDate(d.getDate() - lookback);
       // Skip weekends in the received date (we only record Mon-Fri anyway)
       const dow = d.getDay();
@@ -1410,11 +1419,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
       const srcIso = d.toISOString().split('T')[0];
       const count = dailyReceived[srcIso] ?? 0;
       if (count === 0) continue;
-      // Count business days between srcIso and dayIso
+      // Count business days between srcIso and targetIso
       let bizDays = 0;
       const cur = new Date(srcIso + 'T12:00:00');
       cur.setDate(cur.getDate() + 1);
-      const target = new Date(dayIso + 'T12:00:00');
+      const target = new Date(targetIso + 'T12:00:00');
       while (cur <= target) {
         const wd = cur.getDay();
         if (wd !== 0 && wd !== 6) bizDays++;
@@ -1424,7 +1433,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
       if (bizDays >= c2Min && bizDays <= c2Max) c2 += count;
       if (bizDays >= c3Min && bizDays <= c3Max) c3 += count;
     }
-    // Return as ranges (same value both ends since we're looking at actuals not estimates)
     return { c1: [c1, c1], c2: [c2, c2], c3: [c3, c3] };
   }
 
