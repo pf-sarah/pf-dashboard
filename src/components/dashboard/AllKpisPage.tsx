@@ -435,7 +435,7 @@ export default function AllKpisPage() {
           {timeWindow === 'weekly' && (
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100">
-                <div className="text-sm font-medium text-slate-700">Weekly — last {weeklyWindows.length} weeks</div>
+                <div className="text-sm font-medium text-slate-700">Weekly — {weeklyWindows.length} weeks</div>
               </div>
               <HistoricalTable windows={weeklyWindows} section={section} location={location} depts={depts} showGM={showGM} />
             </div>
@@ -445,7 +445,7 @@ export default function AllKpisPage() {
           {timeWindow === 'monthly' && (
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100">
-                <div className="text-sm font-medium text-slate-700">Monthly — last {monthlyWindows.length} months</div>
+                <div className="text-sm font-medium text-slate-700">Monthly — {monthlyWindows.length} months</div>
               </div>
               <HistoricalTable windows={monthlyWindows} section={section} location={location} depts={depts} showGM={showGM} />
             </div>
@@ -455,7 +455,7 @@ export default function AllKpisPage() {
           {timeWindow === 'quarterly' && (
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-100">
-                <div className="text-sm font-medium text-slate-700">Quarterly — last {quarterlyWindows.length} quarters</div>
+                <div className="text-sm font-medium text-slate-700">Quarterly — {quarterlyWindows.length} quarters</div>
               </div>
               <HistoricalTable windows={quarterlyWindows} section={section} location={location} depts={depts} showGM={showGM} />
             </div>

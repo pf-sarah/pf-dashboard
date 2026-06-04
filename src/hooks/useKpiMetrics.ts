@@ -18,7 +18,7 @@ export interface KpiState {
 }
 
 // Default: fetch all window types with reasonable history depths
-const DEFAULT_WINDOWS = 'mtd,qtd,ytd,weekly-12,monthly-13,quarterly-6,est-current,est-next';
+const DEFAULT_WINDOWS = 'mtd,qtd,ytd,weekly-104,monthly-36,quarterly-12,est-current,est-next';
 
 export function useKpiMetrics(windowsParam = DEFAULT_WINDOWS): KpiState {
   const [windows,   setWindows]   = useState<WindowResult[]>([]);
