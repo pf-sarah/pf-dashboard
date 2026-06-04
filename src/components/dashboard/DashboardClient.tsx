@@ -5,6 +5,7 @@ import { ResponseTimeSection } from './ResponseTimeSection';
 import { EventDateSection } from './EventDateSection';
 import { SortedLocationSection } from './SortedLocationSection';
 import ScorecardTab from "./ScorecardTab";
+import AllKpisPage from "./AllKpisPage";
 import { SchedulePage } from './SchedulePage';
 import ResinPage from './ResinPage';
 import UserManagementPage from './UserManagementPage';
@@ -24,7 +25,7 @@ interface LocationCounts {
 }
 
 export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
-  const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'team'>('dashboard');
+  const [mainTab, setMainTab] = useState<'dashboard' | 'scheduling' | 'scorecards' | 'kpis' | 'team'>('dashboard');
   // Redirect user role to personal dashboard handled server-side
   const { user } = useCurrentUser();
 
@@ -80,6 +81,7 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
           ['dashboard',  'Department Dashboard'],
           ...((user?.permissions.canViewScheduling ?? true) ? [['scheduling', 'Scheduling'] as const] : []),
           ...((user?.permissions.canViewScorecards ?? true) ? [['scorecards',  'Scorecards'] as const] : []),
+          ...((user?.permissions.canViewScorecards ?? true) ? [['kpis', 'All KPIs'] as const] : []),
           ...(user?.permissions.canManageUsers    ? [['team', 'Team Access'] as const] : []),
         ] as const).map(([id, label]) => (
           <button
@@ -126,6 +128,8 @@ export function DashboardClient({ pipeline }: { pipeline: PipelineCount[] }) {
 
       {/* ── SCORECARDS TAB ──────────────────────────────────────────────────── */}
       {mainTab === 'scorecards' && <ScorecardTab />}
+      {/* ── ALL KPIs TAB ────────────────────────────────────────────────────────── */}
+      {mainTab === 'kpis' && <AllKpisPage />}
       {/* ── TEAM ACCESS TAB ─────────────────────────────────────────────────── */}
       {mainTab === 'team' && <UserManagementPage />}
       {/* ── SCHEDULING TAB ───────────────────────────────────────────────────── */}
