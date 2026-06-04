@@ -36,7 +36,7 @@ interface SalaryManagerEntry {
 }
 
 const GEORGIA_MANAGER_HISTORY: SalaryManagerEntry[] = [
-  { name: 'Katherine Piper', location: 'Georgia', departments: ['design'],                 annualSalary: 45760, to: '2026-04-12' },
+  // Katherine Piper — pay flows through weekly_labor_cost upload
   { name: 'Amber Garrett',   location: 'Georgia', departments: ['preservation'],           annualSalary: 47008, to: '2026-04-12' },
   { name: 'Amber Garrett',   location: 'Georgia', departments: ['design','preservation'],  annualSalary: 56000, from: '2026-04-13' },
 ];

@@ -82,7 +82,7 @@ const SALARY_MANAGERS: SalaryMgr[] = [
   { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                annualSalary: 45760 },
   { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],           annualSalary: 41600 },
   // Georgia — time-aware
-  { name: 'Katherine Piper', location: 'Georgia', departments: ['Design'],                annualSalary: 45760,  to:   '2026-04-12' },
+  // Katherine Piper — pay flows through weekly_labor_cost upload
   { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],          annualSalary: 47008,  to:   '2026-04-12' },
   { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design','Preservation'], annualSalary: 56000,  from: '2026-04-13' },
 ];
