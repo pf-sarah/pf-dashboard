@@ -211,9 +211,9 @@ function computePeriodKpis(
     prodByDept[dept]  = (prodByDept[dept]  ?? 0) + row.actual_orders;
   }
 
-  function makeMetrics(dept: string): KpiMetrics {
+  function makeMetrics(dept: string, overrideProduction?: number): KpiMetrics {
     const hours      = hoursByDept[dept] ?? 0;
-    const production = prodByDept[dept]  ?? 0;
+    const production = overrideProduction ?? (prodByDept[dept] ?? 0);
     const laborCost  = laborByDept[dept] ?? 0;
     return {
       hours,
@@ -230,10 +230,12 @@ function computePeriodKpis(
   const preservation = makeMetrics('Preservation');
   const fulfillment  = makeMetrics('Fulfillment');
   const resin        = makeMetrics('Resin');
-  const ga           = makeMetrics('G&A');
 
   // Combined = Design + Preservation + Fulfillment (Resin excluded from blended CPO)
   const totalProdOrders = design.production + preservation.production + fulfillment.production;
+
+  // G&A CPO = G&A labor cost / total production orders (no production of its own)
+  const ga           = makeMetrics('G&A', totalProdOrders);
   const totalHours      = design.hours      + preservation.hours      + fulfillment.hours;
   const gaCost          = ga.laborCost;
 
