@@ -99,9 +99,20 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   const allWeeks = useMemo(() => getAllWeeks(), []);
   const today = getMondayDate(0);
 
-  // Filter to this dept
+  // Filter to this dept — for preservation also include checks_unboxing rows
   const deptActuals = useMemo(() =>
-    enrichedActuals.filter(r => r.department === department),
+    enrichedActuals.filter(r =>
+      r.department === department ||
+      (department === 'preservation' && r.department === 'checks_unboxing')
+    ),
+    [enrichedActuals, department]
+  );
+
+  // Separate checks_unboxing rows for display tinting
+  const checksUnboxingActuals = useMemo(() =>
+    department === 'preservation'
+      ? enrichedActuals.filter(r => r.department === 'checks_unboxing')
+      : [],
     [enrichedActuals, department]
   );
 
@@ -269,6 +280,10 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                     {allWeeks.map(w => {
                       const isPast = new Date(w + 'T12:00:00') <= today;
                       const e = getEntry(w, name);
+                      // Check if this member has checks_unboxing hours this week
+                      const cuHours = department === 'preservation'
+                        ? checksUnboxingActuals.filter(r => r.week_of === w && r.member_name === name).reduce((s, r) => s + r.actual_hours, 0)
+                        : 0;
                       const hasData = e.hours > 0 || e.orders > 0;
                       const isMissing = isPast && !hasData;
                       const isSaving = savingKey === `${w}:${name}`;
@@ -308,6 +323,11 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                                 onChange={ev => setManagerHours(prev => ({ ...prev, [`${w}:${name}`]: parseFloat(ev.target.value) || 0 }))}
                                 className="hist-input w-full px-2 py-0.5 text-center text-[9px] bg-violet-50 border-none outline-none border-t border-t-violet-100 text-violet-500 placeholder:text-violet-300"
                               />
+                            )}
+                            {cuHours > 0 && (
+                              <div className="w-full px-2 py-0.5 text-center text-[9px] bg-teal-50 border-t border-t-teal-100 text-teal-600 font-medium" title="Checks & Unboxing hours">
+                                +{cuHours.toFixed(1)}h C&U
+                              </div>
                             )}
                           </div>
                         </td>
@@ -362,7 +382,11 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
                   const nonMgrHours = allDisplayMembers.reduce((s, name) => {
                     const m = members.find(m => m.name === name);
                     if (m?.isManager) return s;
-                    return s + getEntry(w, name).hours;
+                    // Include checks_unboxing hours in ratio calc for preservation
+                    const cuH = department === 'preservation'
+                      ? checksUnboxingActuals.filter(r => r.week_of === w && r.member_name === name).reduce((acc, r) => acc + r.actual_hours, 0)
+                      : 0;
+                    return s + getEntry(w, name).hours + cuH;
                   }, 0);
                   const weekRatio = nonMgrOrders > 0 && nonMgrHours > 0 ? nonMgrHours / nonMgrOrders : null;
                   // Get total dept cost from weekly_labor_cost via getWeekCosts, plus salary managers

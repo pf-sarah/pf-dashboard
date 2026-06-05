@@ -1328,7 +1328,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, onPresDailyHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
+  presHours, presDailyHours, presCheckHours, onPresDailyHoursChange, onPresCheckHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1336,7 +1336,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onActualsSaved:        () => void;
   presHours:             Record<string, number[]>;
   presDailyHours:        Record<string, number[]>;
+  presCheckHours:        Record<string, number[]>;
   onPresDailyHoursChange:(h: Record<string, number[]>) => void;
+  onPresCheckHoursChange:(h: Record<string, number[]>) => void;
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } };
@@ -1677,6 +1679,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresDailyHoursChange(newHours);
   }
 
+  function updateCheckHours(memberId: string, dayIdx: number, val: number) {
+    const newHours = { ...presCheckHours, [memberId]: [...(presCheckHours[memberId] ?? Array(7).fill(0))] };
+    newHours[memberId][dayIdx] = val;
+    onPresCheckHoursChange(newHours);
+  }
+
   function applyToAllWeeks(memberId: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
     const newHours = { ...presHours, [memberId]: Array(WEEKS).fill(hours) };
@@ -1712,6 +1720,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   // Per-day hours (index 0–4 = Mon–Fri of current week)
   const dayTotals = Array.from({ length: 7 }, (_, di) =>
     team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[m.id]?.[di] ?? 0) / m.ratio : 0), 0)
+  );
+  // Total check hours scheduled per day
+  const checkDayTotals = Array.from({ length: 7 }, (_, di) =>
+    team.reduce((s, m) => s + (presCheckHours[m.id]?.[di] ?? 0), 0)
   );
 
   // Per-week totals for 52-week grid
@@ -2003,17 +2015,31 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         </td>
                         {fiveDays.map((_, di) => {
                           const prodH = presDailyHours[m.id]?.[di] ?? 0;
-                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
+                          const checkH = presCheckHours[m.id]?.[di] ?? 0;
+                          const totalProdH = prodH + checkH;
+                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? totalProdH) : totalProdH;
                           const orders = m.ratio > 0 ? prodH / m.ratio : 0;
                           const hasRate = m.rate > 0 || m.annualSalary > 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
                           const cpo = !m.isManager && hasRate && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
-                              <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
-                                title={m.isManager ? 'Production hours' : 'Hours'}
-                                onChange={e => updateDailyHours(m.id, di, parseFloat(e.target.value) || 0)}
-                                className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                              <div className="flex items-center gap-1">
+                                <div className="flex flex-col items-center">
+                                  <span className="text-[8px] text-slate-300 mb-0.5">press</span>
+                                  <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
+                                    title={m.isManager ? 'Production hours' : 'Press hours'}
+                                    onChange={e => updateDailyHours(m.id, di, parseFloat(e.target.value) || 0)}
+                                    className="w-12 border border-slate-200 rounded px-1 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                                </div>
+                                <div className="flex flex-col items-center">
+                                  <span className="text-[8px] text-teal-400 mb-0.5">chk</span>
+                                  <input type="number" value={(presCheckHours[m.id]?.[di] || '')} placeholder="0" min="0" step="0.5"
+                                    title="Check hours"
+                                    onChange={e => updateCheckHours(m.id, di, parseFloat(e.target.value) || 0)}
+                                    className="w-12 border border-teal-200 rounded px-1 py-1 text-center text-teal-700 bg-teal-50/50 focus:outline-none focus:ring-1 focus:ring-teal-300" />
+                                </div>
+                              </div>
                               {m.isManager && (
                                 <input type="number" value={totalH || ''} placeholder="total" min="0" step="0.5"
                                   title="Total hours (incl. managerial)"
@@ -2041,7 +2067,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           if (m.rate === 0 && m.annualSalary === 0) return s;
                           if ((presRoster[m.id] as {excludeFromCost?: boolean})?.excludeFromCost) return s;
                           const prodH = presDailyHours[m.id]?.[di] ?? 0;
-                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? prodH) : prodH;
+                          const chkH  = presCheckHours[m.id]?.[di] ?? 0;
+                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? (prodH + chkH)) : (prodH + chkH);
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
@@ -2055,6 +2082,25 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 {diff > 0 ? '+' : ''}{Math.round(diff * 100) / 100} vs est.
                               </div>
                             )}
+                            {(() => {
+                              const checksData = checksOnDay(d.iso);
+                              const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
+                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[m.id]?.[di] ?? 0), 0);
+                              if (checkHrsNeeded <= 0 && checkHrsScheduled <= 0) return null;
+                              const checkDiff = checkHrsScheduled - checkHrsNeeded;
+                              return (
+                                <div className="flex flex-col items-center gap-0.5 border-t border-teal-100 mt-0.5 pt-0.5">
+                                  <div className="text-[10px] text-teal-600 font-medium">
+                                    {Math.round(checkHrsScheduled * 10) / 10}h chk
+                                  </div>
+                                  {checkHrsNeeded > 0 && (
+                                    <div className={`text-[9px] font-medium ${checkDiff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                      {checkDiff >= 0 ? '+' : ''}{Math.round(checkDiff * 10) / 10} vs {Math.round(checkHrsNeeded * 10) / 10}h need
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {dayRatio !== null && <div className="text-[10px] text-slate-500">{Math.round(dayRatio * 100) / 100} h/ord</div>}
                             {dayCPO !== null && <div className="text-[10px] text-amber-600">{fmt$(dayCPO)}</div>}
                           </td>
@@ -3385,7 +3431,9 @@ export function SchedulePage({
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
   const [presDailyHours, setPresDailyHours] = useState<Record<string, number[]>>(settings.presDailyHours ?? {});
+  const [presCheckHours, setPresCheckHours] = useState<Record<string, number[]>>(settings.presCheckHours ?? {});
   useEffect(() => { if (settings.presDailyHours && Object.keys(settings.presDailyHours).length > 0) setPresDailyHours(settings.presDailyHours); }, [JSON.stringify(settings.presDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (settings.presCheckHours && Object.keys(settings.presCheckHours).length > 0) setPresCheckHours(settings.presCheckHours); }, [JSON.stringify(settings.presCheckHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (settings.designDailyHours && Object.keys(settings.designDailyHours).length > 0) setDesignDailyHours(settings.designDailyHours); }, [JSON.stringify(settings.designDailyHours)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
@@ -3732,7 +3780,9 @@ export function SchedulePage({
           canViewCPO={canViewCPO}
           presHours={settings.presHours}
           presDailyHours={presDailyHours}
+          presCheckHours={presCheckHours}
           onPresDailyHoursChange={(h) => { setPresDailyHours(h); update('presDailyHours', h); }}
+          onPresCheckHoursChange={(h) => { setPresCheckHours(h); update('presCheckHours', h); }}
           presRoster={settings.presRoster}
           presSettings={settings.presSettings}
           mgrTotalHours={settings.mgrTotalHours}

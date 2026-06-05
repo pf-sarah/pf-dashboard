@@ -58,6 +58,7 @@ export interface ScheduleSettings {
   mgrTotalHours:      HoursMap;
   designDailyHours:   HoursMap;
   presDailyHours:     HoursMap;
+  presCheckHours:     HoursMap;
   ffDailyHours:       HoursMap;
   // Resin scheduling
   resinRoster:        unknown;
@@ -77,6 +78,7 @@ const DEFAULTS: ScheduleSettings = {
   mgrTotalHours: {},
   designDailyHours: {},
   presDailyHours: {},
+  presCheckHours: {},
   ffDailyHours: {},
   resinRoster: null,
   resinHours: null,
@@ -86,7 +88,7 @@ const DEFAULTS: ScheduleSettings = {
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
   'ffHours','ffRoster','masterAvailability','flexRows','avgIntake','weeklyEstimates',
-  'mgrTotalHours','designDailyHours','ffDailyHours','presDailyHours',
+  'mgrTotalHours','designDailyHours','ffDailyHours','presDailyHours','presCheckHours',
   'resinRoster','resinHours','resinDailyHours',
 ];
 

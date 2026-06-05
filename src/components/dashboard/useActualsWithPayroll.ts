@@ -110,6 +110,8 @@ export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
     const weekRows = laborRows.filter(r => r.week_of === weekOf);
     for (const dept of depts) {
       const deptRows = weekRows.filter(r => r.department === dept ||
+        // Checks & Unboxing hours roll into Preservation cost
+        (dept === 'Preservation' && (r.department === 'Checks & Unboxing' || r.department.toLowerCase().includes('checks') || r.department.toLowerCase().includes('unboxing'))) ||
         (dept === 'G&A' && (r.department === 'G&A' || r.department.toLowerCase().includes('general') || r.department.toLowerCase().includes('admin') || r.department.toLowerCase().includes('operations'))));
       const total = deptRows.reduce((s, r) => s + r.gross_pay, 0);
       if (total > 0) costs.push({ week_of: weekOf, department: dept, totalCost: total, isActual: true });
