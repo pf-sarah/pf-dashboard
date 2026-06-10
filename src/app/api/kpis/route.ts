@@ -138,6 +138,9 @@ function getWeekMondays(start: string, end: string): string[] {
   const mondays: string[] = [];
   const startMonday = getMondayOf(start);
   const cur = new Date(startMonday + 'T12:00:00');
+  // A week belongs to the period its Monday falls in — never pull in the week
+  // containing `start` if its Monday is before `start` (first-Monday rule).
+  if (isoDate(cur) < start) cur.setDate(cur.getDate() + 7);
   while (isoDate(cur) <= end) {
     mondays.push(isoDate(cur));
     cur.setDate(cur.getDate() + 7);
