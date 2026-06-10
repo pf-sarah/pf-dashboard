@@ -36,6 +36,11 @@ const WINDOW             = 8;
 const PRESERVATION_WEEKS = 6;
 
 // ─── Historical Utah intake (actual received by week) ─────────────────────────
+// Calibration for the designed-to-date anchor: frames designed before design-historicals
+// coverage began (Dec 29, 2025). Can be negative — it also absorbs frames-vs-bouquet unit
+// differences. Utah calibrated Jun 10, 2026 so the queue front = Mar 16 intake week.
+const DESIGNED_BASELINE: Record<'Utah' | 'Georgia', number> = { Utah: -636, Georgia: 170 };
+
 const UTAH_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
   { weekOf: '2025-09-29', actual: 187 },
   { weekOf: '2025-10-06', actual: 167 },
@@ -3635,7 +3640,13 @@ export function SchedulePage({
       }
     });
     const totalFromHistory = designableCohorts.reduce((s, c) => s + c.count, 0);
-    const alreadyDesigned  = Math.max(0, totalFromHistory - designableQueue);
+    // Designed-to-date = baseline + sum of actual frames from design historicals
+    const designedActualsTotal = teamActuals
+      .filter(r => r.department === 'design')
+      .reduce((s, r) => s + (r.actual_orders ?? 0), 0);
+    const alreadyDesigned = Math.max(0, Math.min(totalFromHistory,
+      (DESIGNED_BASELINE[location] ?? 0) + designedActualsTotal));
+    const remainingQueue = Math.max(0, totalFromHistory - alreadyDesigned);
     let trimRemaining = alreadyDesigned;
     const queueCohorts: { weekOf: string; remaining: number }[] = [];
     for (const c of designableCohorts) {
@@ -3667,7 +3678,7 @@ export function SchedulePage({
       }
     }
     const queueAfterWeek: number[] = [];
-    { let q = designableQueue;
+    { let q = remainingQueue;
       for (let w = 0; w < WEEKS; w++) {
         q = Math.max(0, q - weeklyTotals[w].totalFrames);
         queueAfterWeek.push(q);
@@ -3675,7 +3686,7 @@ export function SchedulePage({
     }
     const presResults = inPreservationCohorts.map(c => {
       const joinWeek   = c.weeksLeft;
-      const queueAtJoin = joinWeek === 0 ? designableQueue : (queueAfterWeek[joinWeek - 1] ?? 0);
+      const queueAtJoin = joinWeek === 0 ? remainingQueue : (queueAfterWeek[joinWeek - 1] ?? 0);
       let remaining    = queueAtJoin + c.count;
       let designedAtWeek: number | null = null;
       for (let fw = joinWeek; fw < WEEKS; fw++) {
