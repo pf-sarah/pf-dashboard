@@ -3571,12 +3571,17 @@ export function SchedulePage({
 
   // ── Future turnaround ────────────────────────────────────────────────────────
   const futureTurnarounds = useMemo(() => {
+    const taByWeek: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'preservation').forEach(r => {
+      taByWeek[r.week_of] = (taByWeek[r.week_of] ?? 0) + r.actual_orders;
+    });
     const graduating: number[] = Array.from({ length: WEEKS }, (_, w) => {
       const graduatingDate = getMondayDate(w - PRESERVATION_WEEKS);
       const graduatingIso  = graduatingDate.toISOString().split('T')[0];
       const intakeData     = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
-      // Priority: 1) Supabase actuals, 2) hardcoded historical, 3) per-week estimate, 4) avg
+      // Priority: 1) Supabase actuals, 2) team actuals total, 3) hardcoded historical, 4) per-week estimate, 5) avg
       if (presActuals[graduatingIso] !== undefined) return presActuals[graduatingIso];
+      if (taByWeek[graduatingIso] !== undefined) return taByWeek[graduatingIso];
       const hist = intakeData.find(h => h.weekOf === graduatingIso);
       if (hist) return hist.actual;
       const _we = weeklyEstimates[graduatingIso]; if (_we !== undefined) return location === 'Utah' ? _we.ut : _we.ga;
@@ -3600,7 +3605,7 @@ export function SchedulePage({
       }
       return null;
     });
-  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location]);
+  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location, teamActuals]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -3614,7 +3619,7 @@ export function SchedulePage({
     const allWeeks = new Set([...hardcoded.map(h => h.weekOf), ...Object.keys(presActuals), ...Object.keys(teamActualsByWeek)]);
     const historicalIntake = [...allWeeks].sort().map(weekOf => ({
       weekOf,
-      actual: presActuals[weekOf] ?? hardcoded.find(h => h.weekOf === weekOf)?.actual ?? teamActualsByWeek[weekOf] ?? 0,
+      actual: presActuals[weekOf] ?? teamActualsByWeek[weekOf] ?? hardcoded.find(h => h.weekOf === weekOf)?.actual ?? 0,
     })).filter(h => h.actual > 0);
     if (!historicalIntake.length) return [];
     const today = getMondayDate(0);
@@ -3680,7 +3685,7 @@ export function SchedulePage({
       return { weekOf: c.weekOf, weeksFromNow: designedAtWeek, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft };
     });
     return [...results, ...presResults].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
-  }, [location, designableQueue, weeklyTotals, presActuals]);
+  }, [location, designableQueue, weeklyTotals, presActuals, teamActuals]);
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates    = canViewCPO && designers.some(d =>
