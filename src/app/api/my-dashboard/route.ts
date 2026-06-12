@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
     .eq("location", location)
     .in("key", allKeys);
 
-  const scheduleMap: Record<string, Record<string, number[]>> = {};
+  const scheduleMap: Record<string, Record<string, number[] | Record<string, number>>> = {};
   for (const row of scheduleRows ?? []) {
     try {
       const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
@@ -159,7 +159,7 @@ export async function GET(req: NextRequest) {
     .eq("location", location)
     .in("key", rosterKeyList);
 
-  const rosterMap: Record<string, Record<string, { name?: string; ratio?: number; _removed?: boolean }>> = {};
+  const rosterMap: Record<string, Record<string, { id?: string; name?: string; ratio?: number; _removed?: boolean }>> = {};
   for (const row of rosterRows ?? []) {
     try {
       const parsed = typeof row.value === "string" ? JSON.parse(row.value) : row.value;
@@ -167,29 +167,57 @@ export async function GET(req: NextRequest) {
     } catch { /* ignore */ }
   }
 
-  // Helper: find a person's ID in a given dept roster by name match
-  function findIdInRoster(rosterKey: string, name: string): string | null {
+  // Helper: find a person in a given dept roster by name match.
+  // Rosters may be objects keyed by ID or arrays (resin) — prefer member.id over the key.
+  function findMemberInRoster(rosterKey: string, name: string): { id: string; ratio: number | null } | null {
     const roster = rosterMap[rosterKey] ?? {};
     const nameLower = name.trim().toLowerCase();
-    for (const [id, member] of Object.entries(roster)) {
+    for (const [key, member] of Object.entries(roster)) {
       if (member?._removed) continue;
-      if (member?.name?.trim().toLowerCase() === nameLower) return id;
+      if (member?.name?.trim().toLowerCase() === nameLower) {
+        return { id: member?.id ?? key, ratio: member?.ratio ?? null };
+      }
     }
     return null;
   }
+  function findIdInRoster(rosterKey: string, name: string): string | null {
+    return findMemberInRoster(rosterKey, name)?.id ?? null;
+  }
+
+  // Shape-aware schedule readers. Resin stores weekly hours as {weekIndex: {memberId: hours}}
+  // and daily hours keyed `${weekOffset}-${memberId}`; other depts key directly by member ID.
+  function getWeeklyHours(dept: string, weeklyKey: string, id: string): number[] {
+    const raw = scheduleMap[weeklyKey] ?? {};
+    if (dept === 'resin') {
+      return Array.from({ length: 52 }, (_, i) => {
+        const wk = raw[String(i)];
+        const val = wk && !Array.isArray(wk) ? (wk as Record<string, number>)[id] : undefined;
+        return typeof val === 'number' ? val : 0;
+      });
+    }
+    const arr = raw[id];
+    return Array.isArray(arr) ? arr : [];
+  }
+  function getDailyHours(dept: string, dailyKey: string, id: string): number[] {
+    const raw = scheduleMap[dailyKey] ?? {};
+    const arr = dept === 'resin' ? raw[`0-${id}`] : raw[id];
+    return Array.isArray(arr) ? (arr as number[]).slice(0, 5) : [];
+  }
   // Target ratio comes from the roster, not actuals
   const homeRosterKey = ROSTER_KEYS[homeDeptNorm] ?? null;
-  const homeRosterId = homeRosterKey ? findIdInRoster(homeRosterKey, memberName) : null;
-  const targetRatio: number | null = homeRosterId && homeRosterKey
-    ? (rosterMap[homeRosterKey]?.[homeRosterId]?.ratio ?? null)
-    : null;
+  const homeMember = homeRosterKey ? findMemberInRoster(homeRosterKey, memberName) : null;
+  const homeRosterId = homeMember?.id ?? null;
+  const targetRatio: number | null = homeMember?.ratio ?? null;
 
   // Prefer the home-roster ID; fall back to DESIGNER_IDS for legacy design/pres IDs
   const homeScheduleId = homeRosterId ?? designerId;
   const homeWeeklyHours: number[] = homeScheduleId
-    ? (scheduleMap[homeDeptConfig.weekly]?.[homeScheduleId] ?? []) : [];
+    ? [...getWeeklyHours(homeDeptNorm, homeDeptConfig.weekly, homeScheduleId)] : [];
   const dailyHours: number[] = homeScheduleId
-    ? (scheduleMap[homeDeptConfig.daily]?.[homeScheduleId] ?? []).slice(0, 5) : [];
+    ? getDailyHours(homeDeptNorm, homeDeptConfig.daily, homeScheduleId) : [];
+  // Current week: the daily grid is the source of truth when it has entries
+  const homeDailySum = dailyHours.reduce((s, h) => s + (h ?? 0), 0);
+  if (homeDailySum > 0) homeWeeklyHours[0] = Math.round(homeDailySum * 10) / 10;
 
   const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
   for (const dk of ALL_DEPT_KEYS) {
@@ -198,8 +226,8 @@ export async function GET(req: NextRequest) {
     const crossId = findIdInRoster(ROSTER_KEYS[dk.dept] ?? '', memberName);
     if (!crossId) continue;
 
-    const deptWeekly: number[] = scheduleMap[dk.weekly]?.[crossId] ?? [];
-    const deptDaily: number[]  = scheduleMap[dk.daily]?.[crossId]  ?? [];
+    const deptWeekly: number[] = getWeeklyHours(dk.dept, dk.weekly, crossId);
+    const deptDaily: number[]  = getDailyHours(dk.dept, dk.daily, crossId);
     const dailyThisWeekTotal = deptDaily.reduce((s, h) => s + (h ?? 0), 0);
 
     const mergedForDept = [...deptWeekly];
@@ -226,9 +254,9 @@ export async function GET(req: NextRequest) {
     if (dk.dept === homeDeptNorm) continue;
     const crossId = findIdInRoster(ROSTER_KEYS[dk.dept] ?? '', memberName);
     if (!crossId) continue;
-    const deptDaily: number[] = scheduleMap[dk.daily]?.[crossId] ?? [];
+    const deptDaily: number[] = getDailyHours(dk.dept, dk.daily, crossId);
     if (deptDaily.some(h => h > 0)) {
-      crossDeptDaily.push({ dept: dk.dept, daily: deptDaily.slice(0, 5) });
+      crossDeptDaily.push({ dept: dk.dept, daily: deptDaily });
     }
   }
 
