@@ -929,12 +929,13 @@ function ResinHistoricalsSection({
     return isoDate(d);
   }).reverse();
 
-  function getActual(weekOf: string, memberId: string): ResinActual | undefined {
-    return actuals.find(a => a.weekOf === weekOf && a.memberId === memberId);
+  function getActual(weekOf: string, member: ResinMember): ResinActual | undefined {
+    return actuals.find(a => a.weekOf === weekOf &&
+      (a.memberId === member.id || a.memberName === member.name || a.memberId === member.name));
   }
 
   async function updateActual(weekOf: string, member: ResinMember, field: 'hours' | 'units', val: number) {
-    const existing = getActual(weekOf, member.id);
+    const existing = getActual(weekOf, member);
     const updated: ResinActual = {
       weekOf,
       memberId:   member.id,
@@ -943,7 +944,8 @@ function ResinHistoricalsSection({
       units:      field === 'units' ? val : (existing?.units ?? 0),
     };
 
-    const next = actuals.filter(a => !(a.weekOf === weekOf && a.memberId === member.id));
+    const next = actuals.filter(a => !(a.weekOf === weekOf &&
+      (a.memberId === member.id || a.memberName === member.name || a.memberId === member.name)));
     next.push(updated);
     onActualsChange(next);
 
@@ -993,7 +995,7 @@ function ResinHistoricalsSection({
                   {m.name}
                 </td>
                 {weeks.map(w => {
-                  const a    = getActual(w, m.id);
+                  const a    = getActual(w, m);
                   const cpo  = a && a.hours > 0 && a.units > 0 && (m.hourlyRate > 0 || m.annualSalary > 0)
                     ? (m.payType === 'hourly' ? a.hours * m.hourlyRate : (m.annualSalary / 52) * (a.hours / 40)) / a.units
                     : null;
