@@ -130,11 +130,11 @@ export default function MyDashboardClient({ profile }: { profile: UserProfile })
               <div className="grid grid-cols-3 gap-4">
                 <StatCard label="Scheduled Hours" value={fmt(data?.thisWeek?.scheduledHours ?? null)} sub="all depts this week" />
                 <StatCard
-                  label="Frames This Week"
+                  label={`${({ design: 'Frames', resin: 'Units' } as Record<string, string>)[data?.homeDepartment ?? data?.department ?? ''] ?? 'Orders'} This Week`}
                   value={data?.thisWeek?.scheduledHours && data?.thisWeek?.targetRatio
                     ? String(Math.round(data.thisWeek.scheduledHours / data.thisWeek.targetRatio))
                     : "—"}
-                  sub={data?.thisWeek?.targetRatio ? `based on ${data.thisWeek.targetRatio} hrs/frame ratio` : "based on scheduled hours"}
+                  sub={data?.thisWeek?.targetRatio ? `based on ${data.thisWeek.targetRatio} hrs/${({ design: 'frame', resin: 'unit' } as Record<string, string>)[data?.homeDepartment ?? data?.department ?? ''] ?? 'order'} ratio` : "based on scheduled hours"}
                 />
                 <StatCard label="Target Ratio" value={fmt(data?.thisWeek?.targetRatio ?? null, 2)} sub="hrs / order" />
               </div>

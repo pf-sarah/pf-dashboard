@@ -58,6 +58,19 @@ export async function GET(req: NextRequest) {
     department = profile.department;
   }
 
+  // Home department/location come from the live Rippling roster when available
+  if (memberName) {
+    const { data: emp } = await supabase
+      .from("rippling_employees")
+      .select("department, location")
+      .ilike("full_name", memberName.trim())
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    if (emp?.department) department = emp.department.toLowerCase();
+    if (emp?.location)   location   = emp.location;
+  }
+
   if (!memberName || !location || !department) {
     return NextResponse.json({ thisWeek: null, historicals: [], upcomingWeeks: [] });
   }
@@ -127,10 +140,7 @@ export async function GET(req: NextRequest) {
   const homeDeptNorm = department?.toLowerCase() ?? '';
   const homeDeptConfig = ALL_DEPT_KEYS.find(d => d.dept === homeDeptNorm) ?? ALL_DEPT_KEYS[0];
 
-  const homeWeeklyHours: number[] = designerId
-    ? (scheduleMap[homeDeptConfig.weekly]?.[designerId] ?? []) : [];
-  const dailyHours: number[] = designerId
-    ? (scheduleMap[homeDeptConfig.daily]?.[designerId] ?? []).slice(0, 5) : [];
+  // homeWeeklyHours / dailyHours computed below after roster lookup
 
   // Cross-dept hours — look up by name across each dept's roster, not by home designerId
   // Each dept roster is stored under e.g. presRoster, ffRoster, designRoster, resinRoster
@@ -173,6 +183,13 @@ export async function GET(req: NextRequest) {
   const targetRatio: number | null = homeRosterId && homeRosterKey
     ? (rosterMap[homeRosterKey]?.[homeRosterId]?.ratio ?? null)
     : null;
+
+  // Prefer the home-roster ID; fall back to DESIGNER_IDS for legacy design/pres IDs
+  const homeScheduleId = homeRosterId ?? designerId;
+  const homeWeeklyHours: number[] = homeScheduleId
+    ? (scheduleMap[homeDeptConfig.weekly]?.[homeScheduleId] ?? []) : [];
+  const dailyHours: number[] = homeScheduleId
+    ? (scheduleMap[homeDeptConfig.daily]?.[homeScheduleId] ?? []).slice(0, 5) : [];
 
   const crossDeptWeekly: { dept: string; hours: number[] }[] = [];
   for (const dk of ALL_DEPT_KEYS) {

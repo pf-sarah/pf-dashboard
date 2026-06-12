@@ -4,7 +4,7 @@
 export interface TeamMember {
   name: string;
   location: 'Utah' | 'Georgia';
-  department: 'design' | 'preservation' | 'fulfillment';
+  department: 'design' | 'preservation' | 'fulfillment' | 'resin';
 }
 
 export const TEAM_MEMBERS: TeamMember[] = [
@@ -19,7 +19,7 @@ export const TEAM_MEMBERS: TeamMember[] = [
   // Utah Preservation
   { name: 'Katelyn Wilson',        location: 'Utah',    department: 'preservation' },
   { name: 'Emma Dunakey',          location: 'Utah',    department: 'preservation' },
-  { name: 'Preslee Peterson',      location: 'Utah',    department: 'preservation' },
+  { name: 'Preslee Peterson',      location: 'Utah',    department: 'resin' },
   { name: 'Abby Wilkey',           location: 'Utah',    department: 'preservation' },
   { name: 'Branson Ward',          location: 'Utah',    department: 'preservation' },
   // Utah Fulfillment
