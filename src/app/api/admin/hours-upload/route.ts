@@ -17,6 +17,7 @@ function normalizeDept(raw: string): string {
   if (l.includes('preservation'))  return 'preservation';
   if (l.includes('fulfillment'))   return 'fulfillment';
   if (l.includes('checks') || l.includes('unboxing')) return 'checks_unboxing';
+  if (l.includes('resin'))         return 'Resin';
   return raw.toLowerCase();
 }
 
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
       if (!r.employee || !r.date || !r.department || !r.location) continue;
       const dept = normalizeDept(r.department);
       const loc  = normalizeLocation(r.location);
-      if (!['design', 'preservation', 'fulfillment', 'checks_unboxing'].includes(dept)) continue;
+      if (!['design', 'preservation', 'fulfillment', 'checks_unboxing', 'Resin'].includes(dept)) continue;
 
       const weekOf = getMondayISO(r.date);
       const key    = `${r.employee}|${loc}|${dept}|${weekOf}`;
