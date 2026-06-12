@@ -90,8 +90,9 @@ export async function POST(req: NextRequest) {
   // Enforce 31-day edit window
   const weekDate = new Date(weekOf + 'T12:00:00');
   const daysDiff = (Date.now() - weekDate.getTime()) / (1000 * 60 * 60 * 24);
-  if (daysDiff > 31) {
-    return NextResponse.json({ error: 'Cannot edit actuals older than 31 days' }, { status: 403 });
+  const editWindowDays = type === 'resin' ? 62 : 31;
+  if (daysDiff > editWindowDays) {
+    return NextResponse.json({ error: `Cannot edit actuals older than ${editWindowDays} days` }, { status: 403 });
   }
 
   try {
@@ -130,7 +131,7 @@ export async function POST(req: NextRequest) {
       const { error } = await supabase
         .from('team_member_week_actuals')
         .upsert({
-          location: 'Resin', department: 'Resin', week_of: weekOf,
+          location: 'Utah', department: 'Resin', week_of: weekOf,
           member_name: memberName,
           actual_hours: actualHours,
           actual_orders: actualUnits,
