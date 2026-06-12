@@ -275,6 +275,7 @@ export async function GET(req: NextRequest) {
   const thisWeekScheduledHours = mergedWeeklyHours[0] ?? null;
 
   return NextResponse.json({
+    routeVersion: 'v3-resin-shapes',
     memberName,
     location,
     department,
