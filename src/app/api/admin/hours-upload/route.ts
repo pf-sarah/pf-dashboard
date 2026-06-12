@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
           updated_at:   new Date().toISOString(),
         }, { onConflict: 'location,department,week_of,member_name' });
 
-      if (error) throw error;
+      if (error) throw new Error(`Upsert failed for ${rec.member_name} / ${rec.department} / ${rec.week_of}: ${error.message} (${error.code ?? ''} ${error.details ?? ''})`);
       upserted++;
     }
 
@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     console.error('Hours upload error:', e);
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    const msg = e instanceof Error ? e.message : JSON.stringify(e);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
