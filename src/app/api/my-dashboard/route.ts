@@ -33,12 +33,16 @@ export async function GET(req: NextRequest) {
     // Verify caller is allowed — must be admin/GM/manager
     const { data: caller } = await supabase
       .from("user_profiles")
-      .select("role")
+      .select("role, team_member_name, location, department")
       .eq("clerk_user_id", userId)
       .single();
 
-    const allowed = ["admin", "general_manager", "manager"].includes(caller?.role ?? "");
-    if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const isPrivileged = ["admin", "general_manager", "manager"].includes(caller?.role ?? "");
+    const isOwnData =
+      caller?.team_member_name === memberNameParam &&
+      caller?.location === locationParam &&
+      caller?.department === departmentParam;
+    if (!isPrivileged && !isOwnData) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     memberName = memberNameParam;
     location   = locationParam;
