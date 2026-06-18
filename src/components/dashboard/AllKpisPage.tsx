@@ -58,17 +58,17 @@ function TabBar<T extends string>({
   small?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-1.5 sm:gap-1">
       {tabs.map(t => (
         <button
           key={t.id}
           onClick={() => onChange(t.id)}
-          className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+          className={`px-3.5 py-2.5 sm:px-3 sm:py-1.5 rounded-md font-medium transition-colors ${
             small ? 'text-xs' : 'text-sm'
           } ${
             active === t.id
               ? 'bg-indigo-600 text-white'
-              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 active:bg-slate-100'
           }`}
         >
           {t.label}
@@ -261,32 +261,38 @@ function HistoricalTable({
     return <div className="text-sm text-slate-400 py-8 text-center">No data for this period</div>;
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wide text-slate-400 whitespace-nowrap">Period</th>
-            {depts.map(dept => (
-              <th key={dept} className="py-3 px-4 text-xs font-semibold uppercase tracking-wide text-slate-400 whitespace-nowrap">
-                {DEPT_LABELS[dept]}
-                {dept === 'resin' && location !== 'Utah' ? ' (Utah only)' : ''}
-              </th>
+    <div>
+      <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+        <span>Swipe to see more</span>
+        <span aria-hidden>→</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="py-3 px-4 text-xs font-semibold uppercase tracking-wide text-slate-400 whitespace-nowrap">Period</th>
+              {depts.map(dept => (
+                <th key={dept} className="py-3 px-4 text-xs font-semibold uppercase tracking-wide text-slate-400 whitespace-nowrap">
+                  {DEPT_LABELS[dept]}
+                  {dept === 'resin' && location !== 'Utah' ? ' (Utah only)' : ''}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...windows].reverse().map(w => (
+              <HistoricalRow
+                key={`${w.periodStart}-${w.periodEnd}`}
+                window={w}
+                section={section}
+                location={location}
+                depts={depts}
+                showGM={showGM}
+              />
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {[...windows].reverse().map(w => (
-            <HistoricalRow
-              key={`${w.periodStart}-${w.periodEnd}`}
-              window={w}
-              section={section}
-              location={location}
-              depts={depts}
-              showGM={showGM}
-            />
-          ))}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -366,19 +372,19 @@ export default function AllKpisPage() {
         {section === 'cpo' && (
           <div className="space-y-1.5">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">GM cost</div>
-            <div className="flex items-center gap-2 h-8">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowGM(false)}
-                className={`text-xs px-3 py-1.5 rounded-md border font-medium transition-colors ${
-                  !showGM ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                className={`text-xs px-3.5 py-2.5 sm:px-3 sm:py-1.5 rounded-md border font-medium transition-colors ${
+                  !showGM ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 active:bg-slate-100'
                 }`}
               >
                 Excl. GM
               </button>
               <button
                 onClick={() => setShowGM(true)}
-                className={`text-xs px-3 py-1.5 rounded-md border font-medium transition-colors ${
-                  showGM ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                className={`text-xs px-3.5 py-2.5 sm:px-3 sm:py-1.5 rounded-md border font-medium transition-colors ${
+                  showGM ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 active:bg-slate-100'
                 }`}
               >
                 Incl. GM

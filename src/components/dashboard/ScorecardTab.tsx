@@ -151,7 +151,8 @@ function GoalCell({
         autoFocus
         type="number"
         step="0.01"
-        className="w-20 border border-indigo-300 rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-400"
+        inputMode="decimal"
+        className="w-20 border border-indigo-300 rounded px-1.5 py-2 sm:py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-indigo-400"
         value={raw}
         placeholder={placeholder ?? '0.00'}
         onChange={e => setRaw(e.target.value)}
@@ -171,14 +172,64 @@ function GoalCell({
   return (
     <button
       onClick={() => { setRaw(value != null ? String(value) : ''); setEditing(true); }}
-      className={`w-20 text-xs rounded px-1.5 py-0.5 border transition-colors text-center ${
+      className={`w-20 text-xs rounded px-1.5 py-2 sm:py-1 border transition-colors text-center ${
         value != null
-          ? 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'
-          : 'border-dashed border-slate-300 text-slate-400 hover:border-indigo-300 hover:text-indigo-500 bg-transparent'
+          ? 'border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200'
+          : 'border-dashed border-slate-300 text-slate-400 hover:border-indigo-300 hover:text-indigo-500 bg-transparent active:bg-slate-100'
       }`}
     >
       {value != null ? fmt$(value) : '+ set'}
     </button>
+  );
+}
+
+// ── Quick-apply control ───────────────────────────────────────────────────────
+// Native <select> on mobile gives a real tap target (and the OS picker UI);
+// pill buttons remain on desktop where the original layout works fine.
+function QuickApply({
+  options, onApply, variant = 'indigo',
+}: {
+  options: { label: string; val: number | null }[];
+  onApply: (val: number) => void;
+  variant?: 'indigo' | 'amber';
+}) {
+  const valid = options.filter((o): o is { label: string; val: number } => o.val != null);
+  if (!valid.length) return null;
+
+  const hoverClasses = variant === 'amber'
+    ? 'hover:bg-amber-50 hover:border-amber-300 hover:text-amber-600'
+    : 'hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-600';
+
+  return (
+    <>
+      {/* Mobile: native select, ~40px tall tap target */}
+      <select
+        defaultValue=""
+        onChange={e => {
+          const v = parseFloat(e.target.value);
+          if (!isNaN(v)) onApply(v);
+          e.currentTarget.value = '';
+        }}
+        className="sm:hidden w-20 text-[10px] border border-slate-200 rounded px-1 py-2 text-slate-500 bg-white"
+      >
+        <option value="" disabled>Quick apply…</option>
+        {valid.map(o => (
+          <option key={o.label} value={o.val}>{o.label} · {fmt$(o.val)}</option>
+        ))}
+      </select>
+      {/* Desktop: compact pill row */}
+      <div className="hidden sm:flex gap-0.5 flex-wrap justify-center">
+        {valid.map(o => (
+          <button
+            key={o.label}
+            onClick={() => onApply(o.val)}
+            className={`px-1 py-px text-[9px] bg-white border border-slate-200 rounded text-slate-500 transition-colors ${hoverClasses}`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -341,7 +392,12 @@ export default function ScorecardTab() {
     })();
 
     return (
-      <div className="overflow-x-auto">
+      <div>
+        <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+          <span>Swipe to see more</span>
+          <span aria-hidden>→</span>
+        </div>
+        <div className="overflow-x-auto">
         <table className="min-w-full text-xs">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
@@ -429,25 +485,16 @@ export default function ScorecardTab() {
                         onChange={v => setGoal(nextMonth, goalLoc, dept, 'goal_cpo', v)}
                       />
                       {savingThis && <span className="text-[10px] text-slate-400">saving…</span>}
-                      {/* Quick-apply buttons */}
-                      {l3 !== null && (
-                        <div className="flex gap-0.5 flex-wrap justify-center">
-                          {[
-                            { label: 'L3',   val: l3 },
-                            { label: 'YTD',  val: ytd },
-                            { label: '−5%',  val: l3 * 0.95 },
-                            { label: '−10%', val: l3 * 0.90 },
-                          ].map(({ label, val }) => val != null && (
-                            <button
-                              key={label}
-                              onClick={() => setGoal(nextMonth, goalLoc, dept, 'goal_cpo', parseFloat(val.toFixed(4)))}
-                              className="px-1 py-px text-[9px] bg-white border border-slate-200 rounded hover:bg-indigo-50 hover:border-indigo-300 text-slate-500 hover:text-indigo-600 transition-colors"
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      {/* Quick-apply: native select on mobile, pills on desktop */}
+                      <QuickApply
+                        options={[
+                          { label: 'L3',   val: l3 },
+                          { label: 'YTD',  val: ytd },
+                          { label: '−5%',  val: l3 != null ? l3 * 0.95 : null },
+                          { label: '−10%', val: l3 != null ? l3 * 0.90 : null },
+                        ]}
+                        onApply={v => setGoal(nextMonth, goalLoc, dept, 'goal_cpo', parseFloat(v.toFixed(4)))}
+                      />
                     </div>
                   </td>
                   {/* Min cell */}
@@ -458,23 +505,15 @@ export default function ScorecardTab() {
                         onChange={v => setGoal(nextMonth, goalLoc, dept, 'min_cpo', v)}
                         placeholder="max"
                       />
-                      {l3 !== null && (
-                        <div className="flex gap-0.5 flex-wrap justify-center">
-                          {[
-                            { label: 'L3',   val: l3 },
-                            { label: '+5%',  val: l3 * 1.05 },
-                            { label: '+10%', val: l3 * 1.10 },
-                          ].map(({ label, val }) => val != null && (
-                            <button
-                              key={label}
-                              onClick={() => setGoal(nextMonth, goalLoc, dept, 'min_cpo', parseFloat(val.toFixed(4)))}
-                              className="px-1 py-px text-[9px] bg-white border border-slate-200 rounded hover:bg-amber-50 hover:border-amber-300 text-slate-500 hover:text-amber-600 transition-colors"
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <QuickApply
+                        variant="amber"
+                        options={[
+                          { label: 'L3',   val: l3 },
+                          { label: '+5%',  val: l3 != null ? l3 * 1.05 : null },
+                          { label: '+10%', val: l3 != null ? l3 * 1.10 : null },
+                        ]}
+                        onApply={v => setGoal(nextMonth, goalLoc, dept, 'min_cpo', parseFloat(v.toFixed(4)))}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -482,6 +521,7 @@ export default function ScorecardTab() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     );
   }
@@ -527,6 +567,10 @@ export default function ScorecardTab() {
                     Specialist ≤{targets.specialist}
                   </span>
                 </div>
+              </div>
+              <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+                <span>Swipe to see more</span>
+                <span aria-hidden>→</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full text-xs">
@@ -866,17 +910,17 @@ export default function ScorecardTab() {
       </div>
 
       {/* ── View tabs ───────────────────────────────────────────────────────── */}
-      <div className="flex border-b border-slate-200">
+      <div className="flex overflow-x-auto border-b border-slate-200">
         {([
           ['actuals', 'CPO Actuals & Goals'],
           ['ratios',  'Individual Ratios'],
           ['whatif',  'What-If'],
         ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setActiveView(id)}
-            className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`shrink-0 px-4 sm:px-5 py-3 sm:py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
               activeView === id
                 ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700 active:text-slate-800'
             }`}>
             {label}
           </button>
@@ -935,6 +979,10 @@ export default function ScorecardTab() {
               <h3 className="text-sm font-semibold text-slate-700">Company-Wide — Blended CPO</h3>
               <p className="text-xs text-slate-400 mt-0.5">Utah + Georgia combined. Excludes Resin.</p>
             </div>
+            <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+              <span>Swipe to see more</span>
+              <span aria-hidden>→</span>
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
                 <thead>
@@ -988,6 +1036,10 @@ export default function ScorecardTab() {
               <p className="text-xs text-slate-400 mt-0.5">
                 Design = frames · Preservation = bouquets · Fulfillment = orders shipped · Resin = pieces
               </p>
+            </div>
+            <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+              <span>Swipe to see more</span>
+              <span aria-hidden>→</span>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs">
