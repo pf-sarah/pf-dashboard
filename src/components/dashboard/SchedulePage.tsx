@@ -2414,12 +2414,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const init: Record<string, number[]> = {};
     (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).forEach(m => {
       const weeklyHrs = ffHours[m.id]?.[0] ?? 0;
-      if (weeklyHrs > 0) init[m.id] = distributeHours(weeklyHrs);
+      if (weeklyHrs > 0) init[`0-${m.id}`] = distributeHours(weeklyHrs);
     });
     Object.keys(ffRoster).forEach(id => {
-      if (!init[id]) {
+      if (!init[`0-${id}`]) {
         const weeklyHrs = ffHours[id]?.[0] ?? 0;
-        if (weeklyHrs > 0) init[id] = distributeHours(weeklyHrs);
+        if (weeklyHrs > 0) init[`0-${id}`] = distributeHours(weeklyHrs);
       }
     });
     if (Object.keys(init).length > 0) setFfDailyHours(prev => {
@@ -2532,10 +2532,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 
       {ffTab === 'thisweek' && (() => {
         const days = getWeekdays(ffThisWeekOffset);
-        function getFFH(id: string, di: number) { return ffDailyHours[id]?.[di] ?? 0; }
+        function getFFH(id: string, di: number) { return ffDailyHours[`${ffThisWeekOffset}-${id}`]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
-          const prev = ffDailyHours[id] ?? Array(5).fill(0);
-          const next = { ...ffDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) };
+          const key = `${ffThisWeekOffset}-${id}`;
+          const prev = ffDailyHours[key] ?? Array(5).fill(0);
+          const next = { ...ffDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
         }
@@ -2615,7 +2616,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                     {days.map((_, di) => {
                       const o = teamDailyOrders(di); const cc = teamDailyCost(di);
                       const cpo = o > 0 && cc > 0 ? cc / o : null;
-                      const ffDayHours = team.reduce((s, m) => s + (ffDailyHours[m.id]?.[di] ?? 0), 0);
+                      const ffDayHours = team.reduce((s, m) => s + (ffDailyHours[`${ffThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
                       const ffDayRatio = o > 0 ? ffDayHours / o : null;
                       return (
                         <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
@@ -3447,7 +3448,7 @@ export function SchedulePage({
     const init: Record<string, number[]> = {};
     designers.forEach(d => {
       const weeklyHrs = schedule[0]?.[d.id] ?? 0;
-      if (weeklyHrs > 0) init[d.id] = distributeHours(weeklyHrs);
+      if (weeklyHrs > 0) init[`0-${d.id}`] = distributeHours(weeklyHrs);
     });
     if (Object.keys(init).length > 0) setDesignDailyHours(prev => {
       // Only pre-populate members that have no saved entry at all
@@ -3967,10 +3968,11 @@ export function SchedulePage({
           {/* ── WEEKLY SCHEDULE TAB ─────────────────────────────────────────── */}
           {activeTab === 'thisweek' && (() => {
             const days = getWeekdays(designThisWeekOffset);
-            function getDH(id: string, di: number) { return designDailyHours[id]?.[di] ?? 0; }
+            function getDH(id: string, di: number) { return designDailyHours[`${designThisWeekOffset}-${id}`]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
-              const prev = designDailyHours[id] ?? Array(5).fill(0);
-              const next = { ...designDailyHours, [id]: prev.map((h: number, j: number) => j === di ? val : h) };
+              const key = `${designThisWeekOffset}-${id}`;
+              const prev = designDailyHours[key] ?? Array(5).fill(0);
+              const next = { ...designDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
               setDesignDailyHours(next);
               update('designDailyHours', next);
             }
