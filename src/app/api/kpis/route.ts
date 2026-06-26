@@ -425,9 +425,19 @@ function projectDept(
 // Maps a calendar month's Mondays to their index in the 52-week schedule array.
 // Week index 0 = week of 2025-12-29 (mirrors getWeekIndex in useHistoricalMetrics.ts)
 function getWeekIdxOffset(firstMonday: string): number {
-  const SCHEDULE_EPOCH = new Date('2025-12-29T12:00:00');
+  // IMPORTANT: designHours/ffHours/presHours arrays are indexed relative to
+  // "this week" (today's Monday), NOT a fixed calendar epoch. This must match
+  // the convention used in SchedulePage.tsx (weekOffset / getMondayDate(0) / w=0).
+  // See: 52-week schedule staleness note in project context — these arrays have
+  // no date anchor and will need migration to date-keyed storage eventually.
+  const now = new Date();
+  const dow = now.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  const thisMonday = new Date(now);
+  thisMonday.setDate(thisMonday.getDate() + diff);
+  thisMonday.setHours(12, 0, 0, 0);
   const d = new Date(firstMonday + 'T12:00:00');
-  return Math.round((d.getTime() - SCHEDULE_EPOCH.getTime()) / (7 * 24 * 60 * 60 * 1000));
+  return Math.round((d.getTime() - thisMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
 }
 
 function projectMonthForLocation(
