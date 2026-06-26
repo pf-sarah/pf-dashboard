@@ -204,7 +204,8 @@ export async function GET(req: NextRequest) {
   }
   function getDailyHours(dept: string, dailyKey: string, id: string): number[] {
     const raw = scheduleMap[dailyKey] ?? {};
-    const arr = dept === 'resin' ? raw[`0-${id}`] : raw[id];
+    // All depts now store daily hours keyed `${weekOffset}-${memberId}`; "this week" = offset 0.
+    const arr = raw[`0-${id}`];
     return Array.isArray(arr) ? (arr as number[]).slice(0, 5) : [];
   }
   // Target ratio comes from the roster, not actuals
