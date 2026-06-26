@@ -1679,14 +1679,16 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     onPresHoursChange(newHours);
   }
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
-    const newHours = { ...presDailyHours, [memberId]: [...(presDailyHours[memberId] ?? Array(7).fill(0))] };
-    newHours[memberId][dayIdx] = val;
+    const key = `${presThisWeekOffset}-${memberId}`;
+    const newHours = { ...presDailyHours, [key]: [...(presDailyHours[key] ?? Array(7).fill(0))] };
+    newHours[key][dayIdx] = val;
     onPresDailyHoursChange(newHours);
   }
 
   function updateCheckHours(memberId: string, dayIdx: number, val: number) {
-    const newHours = { ...presCheckHours, [memberId]: [...(presCheckHours[memberId] ?? Array(7).fill(0))] };
-    newHours[memberId][dayIdx] = val;
+    const key = `${presThisWeekOffset}-${memberId}`;
+    const newHours = { ...presCheckHours, [key]: [...(presCheckHours[key] ?? Array(7).fill(0))] };
+    newHours[key][dayIdx] = val;
     onPresCheckHoursChange(newHours);
   }
 
@@ -1724,11 +1726,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
   const dayTotals = Array.from({ length: 7 }, (_, di) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[m.id]?.[di] ?? 0) / m.ratio : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0)
   );
   // Total check hours scheduled per day
   const checkDayTotals = Array.from({ length: 7 }, (_, di) =>
-    team.reduce((s, m) => s + (presCheckHours[m.id]?.[di] ?? 0), 0)
+    team.reduce((s, m) => s + (presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0)
   );
 
   // Per-week totals for 52-week grid
@@ -2019,8 +2021,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           </div>
                         </td>
                         {fiveDays.map((_, di) => {
-                          const prodH = presDailyHours[m.id]?.[di] ?? 0;
-                          const checkH = presCheckHours[m.id]?.[di] ?? 0;
+                          const prodH = presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
+                          const checkH = presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
                           const totalProdH = prodH + checkH;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? totalProdH) : totalProdH;
                           const orders = m.ratio > 0 ? prodH / m.ratio : 0;
@@ -2071,13 +2073,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const dayCost = team.reduce((s, m) => {
                           if (m.rate === 0 && m.annualSalary === 0) return s;
                           if ((presRoster[m.id] as {excludeFromCost?: boolean})?.excludeFromCost) return s;
-                          const prodH = presDailyHours[m.id]?.[di] ?? 0;
-                          const chkH  = presCheckHours[m.id]?.[di] ?? 0;
+                          const prodH = presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
+                          const chkH  = presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
                           const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? (prodH + chkH)) : (prodH + chkH);
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
-                        const dayHours = team.reduce((s, m) => s + (presDailyHours[m.id]?.[di] ?? 0), 0);
+                        const dayHours = team.reduce((s, m) => s + (presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
                         const dayRatio = cap > 0 ? dayHours / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
@@ -2090,7 +2092,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             {(() => {
                               const checksData = checksOnDay(d.iso);
                               const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
-                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[m.id]?.[di] ?? 0), 0);
+                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
                               if (checkHrsNeeded <= 0 && checkHrsScheduled <= 0) return null;
                               const checkDiff = checkHrsScheduled - checkHrsNeeded;
                               return (
