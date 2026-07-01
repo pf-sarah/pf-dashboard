@@ -8,6 +8,10 @@ export interface DesignerRoster {
     hourlyRate: number; annualSalary: number; name: string;
     isManager?: boolean;
     role?: 'specialist' | 'senior' | 'master';
+    // Soft-delete flag: excludes this member from the active roster (schedule
+    // grid, future editing) while keeping their historical scheduled hours
+    // intact for past-period goal/CPO calculations.
+    _removed?: boolean;
   };
 }
 
@@ -23,7 +27,7 @@ export interface PresSettings {
 }
 
 export interface TeamRoster {
-  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master' };
+  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master'; _removed?: boolean };
 }
 
 // memberId → { isoMonday → hours }. Week-of-year is anchored to a calendar
