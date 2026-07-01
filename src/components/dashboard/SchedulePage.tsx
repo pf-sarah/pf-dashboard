@@ -1175,7 +1175,7 @@ function useDraggableOrder<T extends { id: string }>(
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
 function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
   team: (Omit<PresTeamMember, 'hours'> & { hours: unknown })[];
-  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
+  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string; _removed?: boolean }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
@@ -1255,7 +1255,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
 function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
   team: (Omit<FfTeamMember, 'hours'> & { hours: unknown })[];
-  ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
   employeeRates?:       Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   onUpdateName: (id: string, name: string) => void;
   onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) => void;
@@ -1324,7 +1324,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   presCheckHours:        Record<string, number[]>;
   onPresDailyHoursChange:(h: Record<string, number[]>) => void;
   onPresCheckHoursChange:(h: Record<string, number[]>) => void;
-  presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } };
   mgrTotalHours:         Record<string, Record<string, number>>;
@@ -1634,9 +1634,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   // Build team including any added members from presRoster that aren't in defaultTeam
   // `hours` is now date-keyed (isoMonday -> hours); `defaultHrs` is the fallback
   // used when a member has no persisted entry for a given week yet.
-  const team: (Omit<PresTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] = (() => {
+  // `includeRemoved: true` returns everyone who's ever been on the roster
+  // (including soft-deleted members) — used only for historicals, so past
+  // scheduled-hours/goal data doesn't vanish when someone leaves.
+  const buildPresTeam = (includeRemoved: boolean): (Omit<PresTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] => {
     const base = defaultTeam
-      .filter(m => !(presRoster[m.id] as {_removed?: boolean})?._removed)
+      .filter(m => includeRemoved || !presRoster[m.id]?._removed)
       .map(m => {
         const roster = presRoster[m.id];
         const hours  = presHours[m.id] ?? {};
@@ -1645,7 +1648,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     // Add any custom members stored in presRoster not in defaultTeam
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(presRoster).forEach(([id, r]) => {
-      if (!defaultIds.has(id)) {
+      if (!defaultIds.has(id) && (includeRemoved || !r._removed)) {
         base.push({
           id, name: r.name, ratio: r.ratio, rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0),
           payType: (r.payType ?? 'hourly') as 'hourly' | 'salary',
@@ -1656,7 +1659,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
       }
     });
     return base;
-  })();
+  };
+  const team = buildPresTeam(false);
+  const fullTeam = buildPresTeam(true);
 
   function updateHours(memberId: string, weekIdx: number, val: number) {
     const key = isoMonday(weekIdx);
@@ -1697,18 +1702,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   }
 
   function handleRemoveMember(id: string) {
+    // Soft-delete: mark as removed so they drop off the active roster, but
+    // keep their roster entry and scheduledHours intact — historicals still
+    // need those for past-period goal/CPO calculations.
     const newRoster = { ...presRoster };
-    const isDefault = defaultTeam.some(m => m.id === id);
-    if (isDefault) {
-      // Mark default member as removed so they're excluded from team
-      newRoster[id] = { ...(newRoster[id] ?? { ratio: 1, rate: 0, name: '' }), _removed: true } as typeof newRoster[string];
-    } else {
-      delete newRoster[id];
-    }
-    const newHours = { ...presHours };
-    delete newHours[id];
+    const existing = newRoster[id] ?? team.find(m => m.id === id) ?? { ratio: 1, rate: 0, name: '' };
+    newRoster[id] = { ...existing, _removed: true } as typeof newRoster[string];
     onPresRosterChange(newRoster);
-    onPresHoursChange(newHours);
   }
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
@@ -2383,7 +2383,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
   ffHours:              Record<string, Record<string, number>>;
-  ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
+  ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
   mgrTotalHours:        Record<string, Record<string, number>>;
   onFfHoursChange:      (h: Record<string, Record<string, number>>) => void;
   onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
@@ -2424,24 +2424,31 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 
   // Merge persisted roster + hours over defaults
   const defaultTeam = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
-  const team: (Omit<FfTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] = (() => {
-    const base = defaultTeam.map(m => {
-      const roster = ffRoster[m.id];
-      const hours  = ffHours[m.id] ?? {};
-      return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), name: roster?.name ?? m.name,
-        payType: roster?.payType ?? 'hourly' as const,
-        annualSalary: roster?.annualSalary ?? 0, hours, defaultHrs: m.hours[0] ?? 0 };
-    });
+  // `includeRemoved: true` returns everyone who's ever been on the roster
+  // (including soft-deleted members) — used only for historicals, so past
+  // scheduled-hours/goal data doesn't vanish when someone leaves.
+  const buildFfTeam = (includeRemoved: boolean): (Omit<FfTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] => {
+    const base = defaultTeam
+      .filter(m => includeRemoved || !ffRoster[m.id]?._removed)
+      .map(m => {
+        const roster = ffRoster[m.id];
+        const hours  = ffHours[m.id] ?? {};
+        return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), name: roster?.name ?? m.name,
+          payType: roster?.payType ?? 'hourly' as const,
+          annualSalary: roster?.annualSalary ?? 0, hours, defaultHrs: m.hours[0] ?? 0 };
+      });
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(ffRoster).forEach(([id, r]) => {
-      if (!defaultIds.has(id)) {
+      if (!defaultIds.has(id) && (includeRemoved || !r._removed)) {
         base.push({ id, name: r.name ?? 'New Member', ratio: r.ratio ?? 1.0, pay: 'hourly' as const,
           payType: r.payType ?? 'hourly' as const, annualSalary: r.annualSalary ?? 0,
         rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0), hours: ffHours[id] ?? {}, defaultHrs: 0 });
       }
     });
     return base;
-  })();
+  };
+  const team = buildFfTeam(false);
+  const fullTeam = buildFfTeam(true);
 
   function handleAddFfMember() {
     const id = `${location.toLowerCase()}-f-${Date.now()}`;
@@ -2449,10 +2456,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfHoursChange({ ...ffHours, [id]: {} });
   }
   function handleRemoveFfMember(id: string) {
-    const newRoster = { ...ffRoster }; delete newRoster[id];
-    const newHours  = { ...ffHours };  delete newHours[id];
+    // Soft-delete: mark as removed so they drop off the active roster, but
+    // keep their roster entry and scheduledHours intact for historicals.
+    const newRoster = { ...ffRoster };
+    const existing = newRoster[id] ?? team.find(m => m.id === id) ?? { ratio: 1, rate: 0, name: '' };
+    newRoster[id] = { ...existing, _removed: true };
     onFfRosterChange(newRoster);
-    onFfHoursChange(newHours);
   }
   function updateFfRosterName(id: string, name: string) {
     const existing = ffRoster[id] ?? { ratio: 1.0, rate: 0, name: 'New Member' };
@@ -3320,22 +3329,29 @@ export function SchedulePage({
   const defaultDesigners = location === 'Utah' ? DEFAULT_UTAH_DESIGNERS : DEFAULT_GEORGIA_DESIGNERS;
   const defaultSchedule  = location === 'Utah' ? buildDefaultUtahSchedule() : buildDefaultGeorgiaSchedule();
 
-  // Merge persisted roster over defaults — includes custom added designers
-  const designers: Designer[] = (() => {
-    const base = defaultDesigners.map(d => {
-      const persisted = settings.designRoster[d.id];
-      if (!persisted) return d;
-      const rateFromRippling = employeeRates[persisted.name ?? d.name]?.hourlyRate ?? 0;
-      return { ...d, name: persisted.name ?? d.name, ratio: persisted.ratio, payType: persisted.payType, hourlyRate: persisted.hourlyRate > 0 ? persisted.hourlyRate : rateFromRippling, annualSalary: persisted.annualSalary };
-    });
+  // Merge persisted roster over defaults — includes custom added designers.
+  // `includeRemoved: true` returns everyone who's ever been on the roster
+  // (including soft-deleted members) — used only for historicals, so past
+  // scheduled-hours/goal data doesn't vanish when someone leaves.
+  const buildDesigners = (includeRemoved: boolean): Designer[] => {
+    const base = defaultDesigners
+      .filter(d => includeRemoved || !settings.designRoster[d.id]?._removed)
+      .map(d => {
+        const persisted = settings.designRoster[d.id];
+        if (!persisted) return d;
+        const rateFromRippling = employeeRates[persisted.name ?? d.name]?.hourlyRate ?? 0;
+        return { ...d, name: persisted.name ?? d.name, ratio: persisted.ratio, payType: persisted.payType, hourlyRate: persisted.hourlyRate > 0 ? persisted.hourlyRate : rateFromRippling, annualSalary: persisted.annualSalary };
+      });
     const defaultIds = new Set(defaultDesigners.map(d => d.id));
     Object.entries(settings.designRoster).forEach(([id, r]) => {
-      if (!defaultIds.has(id)) {
+      if (!defaultIds.has(id) && (includeRemoved || !r._removed)) {
         base.push({ id, name: r.name ?? 'New Designer', ratio: r.ratio ?? 1.5, payType: r.payType ?? 'hourly', hourlyRate: r.hourlyRate ?? 0, annualSalary: r.annualSalary ?? 0 });
       }
     });
     return base;
-  })();
+  };
+  const designers: Designer[] = buildDesigners(false);
+  const fullDesigners: Designer[] = buildDesigners(true);
 
   // Merge persisted hours over defaults — schedule is array of WeekSchedule
   const schedule: WeekSchedule[] = Array.from({ length: WEEKS }, (_, w) => {
@@ -3378,15 +3394,37 @@ export function SchedulePage({
   const weeklyEstimates = settings.weeklyEstimates;
 
   // ── Historical metrics for KPI bars ─────────────────────────────────────────
+  // Uses the "full" (unfiltered) rosters — includes soft-deleted members and
+  // custom additions — so past scheduled-hours/goal/CPO data for anyone who
+  // ever worked a given period stays in the historical numbers even after
+  // they're removed from the active roster.
+  const fullPresTeam = (() => {
+    const defaultTeamPres = location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM;
+    const base = defaultTeamPres.map(m => ({ ...m, isRoster: false }));
+    const defaultIds = new Set(defaultTeamPres.map(m => m.id));
+    const custom = Object.entries(settings.presRoster)
+      .filter(([id]) => !defaultIds.has(id))
+      .map(([id, r]) => ({ id, name: r.name, rate: r.rate ?? 0, ratio: r.ratio ?? 1, isManager: false, role: undefined as string | undefined, isRoster: true }));
+    return [...base, ...custom];
+  })();
+  const fullFfTeam = (() => {
+    const defaultTeamFf = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
+    const base = defaultTeamFf.map(m => ({ ...m, isRoster: false }));
+    const defaultIds = new Set(defaultTeamFf.map(m => m.id));
+    const custom = Object.entries(settings.ffRoster)
+      .filter(([id]) => !defaultIds.has(id))
+      .map(([id, r]) => ({ id, name: r.name, rate: r.rate ?? 0, ratio: r.ratio ?? 1, isManager: false, role: undefined as string | undefined, isRoster: true }));
+    return [...base, ...custom];
+  })();
   const historicalMetrics = useHistoricalMetrics(location, {
-    design: designers.map(d => ({
+    design: fullDesigners.map(d => ({
       name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, ratio: d.ratio,
       isManager: !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager),
       role: ((settings.designRoster[d.id] as {role?:string})?.role ?? (d as {role?:string}).role ?? 'specialist') as 'specialist'|'senior'|'master',
       scheduledHours: settings.designHours[d.id] ?? {},
       mgrTotalHours: settings.mgrTotalHours[d.id],
     })),
-    preservation: (location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM).map(m => {
+    preservation: fullPresTeam.map(m => {
       const r = settings.presRoster[m.id];
       return {
         name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
@@ -3397,7 +3435,7 @@ export function SchedulePage({
         mgrTotalHours: settings.mgrTotalHours[m.id],
       };
     }),
-    fulfillment: (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).map(m => {
+    fulfillment: fullFfTeam.map(m => {
       const r = settings.ffRoster[m.id];
       return {
         name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
@@ -3477,12 +3515,12 @@ export function SchedulePage({
   function handleRemoveDesigner(id: string) {
     const designer = designers.find(d => d.id === id);
     if (designer) setDeletedStack(prev => [...prev, { designer, schedule: schedule.map(w => ({ ...w })) }]);
+    // Soft-delete: mark as removed so they drop off the active roster, but
+    // keep their roster entry and scheduledHours intact for historicals.
     const newRoster = { ...settings.designRoster };
-    delete newRoster[id];
+    const existing = newRoster[id] ?? (designer as unknown as typeof newRoster[string]) ?? { ratio: 1.5, payType: 'hourly' as PayType, hourlyRate: 0, annualSalary: 0, name: '' };
+    newRoster[id] = { ...existing, _removed: true };
     update('designRoster', newRoster);
-    const newHours = { ...settings.designHours };
-    delete newHours[id];
-    update('designHours', newHours);
   }
   function handleUndo() {
     const last = deletedStack[deletedStack.length - 1];
