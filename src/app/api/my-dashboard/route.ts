@@ -2,19 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { DESIGNER_IDS } from "@/lib/teamMembers";
+import { isoMonday } from "@/lib/weekDates";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-function getMondayOfWeek(offset = 0): string {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = d.getDate() - (day === 0 ? 6 : day - 1) + offset * 7;
-  d.setDate(diff);
-  return d.toISOString().split("T")[0];
-}
 
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
@@ -92,7 +85,7 @@ export async function GET(req: NextRequest) {
     .order("week_of", { ascending: false });
 
   const rows = actuals ?? [];
-  const thisWeekOf  = getMondayOfWeek(0);
+  const thisWeekOf  = isoMonday(0);
 
   // Averages/ratio/this week all based on home department
   const homeDeptRowsEarly = rows.filter(r => r.department?.toLowerCase() === department?.toLowerCase());
@@ -188,24 +181,27 @@ export async function GET(req: NextRequest) {
     return findMemberInRoster(rosterKey, name)?.id ?? null;
   }
 
-  // Shape-aware schedule readers. Resin stores weekly hours as {weekIndex: {memberId: hours}}
-  // and daily hours keyed `${weekOffset}-${memberId}`; other depts key directly by member ID.
+  // Shape-aware schedule readers. Resin stores weekly hours as {isoMonday: {memberId: hours}}
+  // (date-then-member); other depts store {memberId: {isoMonday: hours}} (member-then-date).
+  // Both are date-keyed — we translate week offset -> isoMonday at the read boundary so the
+  // rest of this route can keep working with plain offset-indexed arrays.
   function getWeeklyHours(dept: string, weeklyKey: string, id: string): number[] {
     const raw = scheduleMap[weeklyKey] ?? {};
     if (dept === 'resin') {
       return Array.from({ length: 52 }, (_, i) => {
-        const wk = raw[String(i)];
+        const wk = raw[isoMonday(i)];
         const val = wk && !Array.isArray(wk) ? (wk as Record<string, number>)[id] : undefined;
         return typeof val === 'number' ? val : 0;
       });
     }
-    const arr = raw[id];
-    return Array.isArray(arr) ? arr : [];
+    const memberMap = raw[id];
+    if (!memberMap || Array.isArray(memberMap)) return [];
+    return Array.from({ length: 52 }, (_, i) => (memberMap as Record<string, number>)[isoMonday(i)] ?? 0);
   }
   function getDailyHours(dept: string, dailyKey: string, id: string): number[] {
     const raw = scheduleMap[dailyKey] ?? {};
-    // All depts now store daily hours keyed `${weekOffset}-${memberId}`; "this week" = offset 0.
-    const arr = raw[`0-${id}`];
+    // Daily hours are keyed `${isoMonday}-${memberId}`; "this week" = offset 0.
+    const arr = raw[`${isoMonday(0)}-${id}`];
     return Array.isArray(arr) ? (arr as number[]).slice(0, 5) : [];
   }
   // Target ratio comes from the roster, not actuals
@@ -270,7 +266,7 @@ export async function GET(req: NextRequest) {
     .map(d => ({ dept: d.dept, hours: d.hours[0] }));
 
   const upcomingWeeks = Array.from({ length: NUM_WEEKS }, (_, i) => ({
-    weekOf: getMondayOfWeek(i),
+    weekOf: isoMonday(i),
     scheduledHours: mergedWeeklyHours[i] ?? null,
     crossDept: crossDeptWeekly
       .filter(d => (d.hours[i] ?? 0) > 0)

@@ -26,44 +26,42 @@ export interface TeamRoster {
   [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master' };
 }
 
-export type HoursMap = Record<string, number[]>;
+// memberId → { isoMonday → hours }. Week-of-year is anchored to a calendar
+// date, not an integer offset, so entries never silently drift as time passes.
+export type WeeklyHoursMap = Record<string, Record<string, number>>;
+
+// "${isoMonday}-${memberId}" → daily hours array (parallel to the visible
+// week's weekdays). The date component of the key is the Monday of the week
+// this daily breakdown belongs to.
+export type DailyHoursMap = Record<string, number[]>;
 
 // personId → { defaultHours, overrides: { isoDate → hours } }
 export interface MasterAvailability {
   [personId: string]: { defaultHours: number; overrides: Record<string, number> };
 }
 
-// A flex/on-call row added to a dept schedule
-export interface FlexRow {
-  id:         string;   // unique row id
-  personId:   string;   // matches team member id
-  personName: string;
-  homeDept:   'design' | 'preservation' | 'fulfillment' | 'oncall';
-  hours:      number[]; // parallel to dept schedule length
-}
-
 export interface ScheduleSettings {
-  designHours:        HoursMap;
+  designHours:        WeeklyHoursMap;
   designRoster:       DesignerRoster;
-  presHours:          HoursMap;
+  presHours:          WeeklyHoursMap;
   presRoster:         TeamRoster;
   presSettings:       PresSettings;
-  ffHours:            HoursMap;
+  ffHours:            WeeklyHoursMap;
   ffRoster:           TeamRoster;
   masterAvailability: MasterAvailability;
-  flexRows:           Record<string, FlexRow[]>;
   avgIntake:          number;
   weeklyEstimates:    Record<string, { ut: number; ga: number }>;
   // Manager total hours (production + managerial) — parallel to dept hours maps
-  mgrTotalHours:      HoursMap;
-  designDailyHours:   HoursMap;
-  presDailyHours:     HoursMap;
-  presCheckHours:     HoursMap;
-  ffDailyHours:       HoursMap;
+  mgrTotalHours:      WeeklyHoursMap;
+  mgrTotalDailyHours: DailyHoursMap;
+  designDailyHours:   DailyHoursMap;
+  presDailyHours:     DailyHoursMap;
+  presCheckHours:     DailyHoursMap;
+  ffDailyHours:       DailyHoursMap;
   // Resin scheduling
   resinRoster:        unknown;
-  resinHours:         unknown;
-  resinDailyHours:    unknown;
+  resinHours:         Record<string, Record<string, number>>;
+  resinDailyHours:    DailyHoursMap;
 }
 
 const DEFAULTS: ScheduleSettings = {
@@ -72,23 +70,23 @@ const DEFAULTS: ScheduleSettings = {
   presSettings: { weekOverrides: {} },
   ffHours: {}, ffRoster: {},
   masterAvailability: {},
-  flexRows: {},
   avgIntake: 45,
   weeklyEstimates: {},
   mgrTotalHours: {},
+  mgrTotalDailyHours: {},
   designDailyHours: {},
   presDailyHours: {},
   presCheckHours: {},
   ffDailyHours: {},
   resinRoster: null,
-  resinHours: null,
-  resinDailyHours: null,
+  resinHours: {},
+  resinDailyHours: {},
 };
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
-  'ffHours','ffRoster','masterAvailability','flexRows','avgIntake','weeklyEstimates',
-  'mgrTotalHours','designDailyHours','ffDailyHours','presDailyHours','presCheckHours',
+  'ffHours','ffRoster','masterAvailability','avgIntake','weeklyEstimates',
+  'mgrTotalHours','mgrTotalDailyHours','designDailyHours','ffDailyHours','presDailyHours','presCheckHours',
   'resinRoster','resinHours','resinDailyHours',
 ];
 

@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { useActualsWithPayroll } from './useActualsWithPayroll';
 import type { EnrichedActual } from './useActualsWithPayroll';
+import { getMondayDate } from '@/lib/weekDates';
 
 interface TeamMember {
   id:           string;
@@ -27,15 +28,6 @@ interface HistoricalsSectionProps {
 
 function fmt$(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
-}
-
-function getMondayDate(offsetWeeks: number): Date {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + offsetWeeks * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
 }
 
 function isoDate(d: Date): string { return d.toISOString().split('T')[0]; }

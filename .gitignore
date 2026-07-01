@@ -36,6 +36,12 @@ yarn-error.log*
 # vercel
 .vercel
 
+# clerk keyless-mode local dev keys
+.clerk/
+
+# local data backups (may contain production data)
+scripts/*_backup_*.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

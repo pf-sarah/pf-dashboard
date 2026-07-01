@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getMondayDate, getWeekLabel } from '@/lib/weekDates';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -99,18 +100,6 @@ function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-function getMondayDate(offsetWeeks: number): Date {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + offsetWeeks * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getWeekLabel(offsetWeeks: number): string {
-  return getMondayDate(offsetWeeks).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 function getMonthKey(offsetWeeks: number): string {
   return getMondayDate(offsetWeeks).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });

@@ -375,17 +375,16 @@ function buildWindowResult(
 //   designRoster: { [id]: { ratio, payType, hourlyRate, annualSalary, name, isManager? } }
 //   presRoster:   { [id]: { ratio, rate, name, payType?, annualSalary?, isManager? } }
 //   ffRoster:     { [id]: { ratio, rate, name, payType?, annualSalary? } }
-//   designHours / presHours / ffHours: { [memberId]: number[] }  (52 weekly hours)
+//   designHours / presHours / ffHours: { [memberId]: { [isoMonday]: hours } }
 
 interface DesignRosterEntry  { ratio: number; payType?: string; hourlyRate?: number; annualSalary?: number; name: string; isManager?: boolean }
 interface PresRosterEntry    { ratio: number; rate?: number;    payType?: string;    annualSalary?: number; name: string; isManager?: boolean }
-interface HoursMap           { [memberId: string]: number[] }
+interface HoursMap           { [memberId: string]: Record<string, number> }
 
 function projectDept(
   roster:   Record<string, DesignRosterEntry | PresRosterEntry>,
   hours:    HoursMap,
-  weekOfs:  string[],         // Mondays in the month
-  weekIdxOffset: number,      // which index into the 52-week array the first weekOf maps to
+  weekOfs:  string[],         // Mondays in the month (isoMonday strings)
   location: string,
   dept:     string,           // 'Design' | 'Preservation' | 'Fulfillment'
   settings: ScheduleSettingRow[]
@@ -395,10 +394,7 @@ function projectDept(
   for (const [memberId, member] of Object.entries(roster)) {
     if ((member as { _removed?: boolean })._removed) continue;
 
-    const memberHours = weekOfs.reduce((sum, _w, i) => {
-      const hoursArr = hours[memberId];
-      return sum + (Array.isArray(hoursArr) ? (hoursArr[weekIdxOffset + i] ?? 0) : 0);
-    }, 0);
+    const memberHours = weekOfs.reduce((sum, w) => sum + (hours[memberId]?.[w] ?? 0), 0);
 
     totalHours += memberHours;
     if (member.ratio > 0) totalProduction += memberHours / member.ratio;
@@ -422,24 +418,6 @@ function projectDept(
   void settings; // unused but kept for future G&A projection
 }
 
-// Maps a calendar month's Mondays to their index in the 52-week schedule array.
-// Week index 0 = week of 2025-12-29 (mirrors getWeekIndex in useHistoricalMetrics.ts)
-function getWeekIdxOffset(firstMonday: string): number {
-  // IMPORTANT: designHours/ffHours/presHours arrays are indexed relative to
-  // "this week" (today's Monday), NOT a fixed calendar epoch. This must match
-  // the convention used in SchedulePage.tsx (weekOffset / getMondayDate(0) / w=0).
-  // See: 52-week schedule staleness note in project context — these arrays have
-  // no date anchor and will need migration to date-keyed storage eventually.
-  const now = new Date();
-  const dow = now.getDay();
-  const diff = dow === 0 ? -6 : 1 - dow;
-  const thisMonday = new Date(now);
-  thisMonday.setDate(thisMonday.getDate() + diff);
-  thisMonday.setHours(12, 0, 0, 0);
-  const d = new Date(firstMonday + 'T12:00:00');
-  return Math.round((d.getTime() - thisMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
-}
-
 function projectMonthForLocation(
   settings:   ScheduleSettingRow[],
   location:   string,
@@ -449,7 +427,6 @@ function projectMonthForLocation(
   monthEnd.setMonth(monthEnd.getMonth() + 1);
   monthEnd.setDate(0);
   const weekOfs      = getWeekMondays(monthStart, isoDate(monthEnd));
-  const weekIdxOff   = getWeekIdxOffset(weekOfs[0] ?? monthStart);
 
   const get = (key: string) => settings.find(r => r.location === location && r.key === key)?.value ?? {};
 
@@ -460,9 +437,9 @@ function projectMonthForLocation(
   const presHours    = get('presHours')    as HoursMap;
   const ffHours      = get('ffHours')      as HoursMap;
 
-  const designMetrics = projectDept(designRoster, designHours, weekOfs, weekIdxOff, location, 'Design',       settings);
-  const presMetrics   = projectDept(presRoster,   presHours,   weekOfs, weekIdxOff, location, 'Preservation', settings);
-  const ffMetrics     = projectDept(ffRoster,     ffHours,     weekOfs, weekIdxOff, location, 'Fulfillment',  settings);
+  const designMetrics = projectDept(designRoster, designHours, weekOfs, location, 'Design',       settings);
+  const presMetrics   = projectDept(presRoster,   presHours,   weekOfs, location, 'Preservation', settings);
+  const ffMetrics     = projectDept(ffRoster,     ffHours,     weekOfs, location, 'Fulfillment',  settings);
 
   function toMetrics(m: { hours: number; production: number; laborCost: number }): KpiMetrics {
     return {
