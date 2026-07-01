@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { getMondayDate } from '@/lib/weekDates';
 
 export interface RosterMember {
   name: string;
@@ -9,9 +10,9 @@ export interface RosterMember {
   annualSalary: number;
   isManager?: boolean;
   role?: 'specialist' | 'senior' | 'master';
-  scheduledHours?: number[]; // 52 weeks of scheduled hours
+  scheduledHours?: Record<string, number>; // isoMonday -> scheduled hours
   ratio?: number;
-  mgrTotalHours?: number[];  // 52 weeks of total hours (managers only)
+  mgrTotalHours?: Record<string, number>;  // isoMonday -> total hours (managers only)
 }
 
 interface ActualRow {
@@ -107,15 +108,6 @@ const ROLE_RATIOS: Record<string, Record<string, number>> = {
   fulfillment:  { specialist: 0.50, senior: 0.40, master: 0.30 },
 };
 
-function getMondayDate(offsetWeeks: number): Date {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + offsetWeeks * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
 function isoDate(d: Date): string {
   return d.toISOString().split('T')[0];
 }
@@ -151,21 +143,6 @@ function getWeeksInRange(start: string, end: string): string[] {
     cur.setDate(cur.getDate() + 7);
   }
   return weeks;
-}
-
-function getWeekIndex(isoMonday: string): number {
-  // IMPORTANT: scheduledHours arrays (designHours/ffHours/presHours) are indexed
-  // relative to "this week" (today's Monday), NOT a fixed calendar epoch.
-  // Must match the convention used in SchedulePage.tsx (weekOffset / w=0) and
-  // the corresponding getWeekIdxOffset in kpis/route.ts.
-  const now = new Date();
-  const dow = now.getDay();
-  const diff = dow === 0 ? -6 : 1 - dow;
-  const thisMonday = new Date(now);
-  thisMonday.setDate(thisMonday.getDate() + diff);
-  thisMonday.setHours(12, 0, 0, 0);
-  const d = new Date(isoMonday + 'T12:00:00');
-  return Math.round((d.getTime() - thisMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
 }
 
 function computeActualDeptMetrics(
@@ -227,6 +204,7 @@ function computeActualDeptMetrics(
 
   // Goal calculation (unchanged)
   const roleRatios = ROLE_RATIOS[dept] ?? {};
+  const weeksList = getWeeksInRange(weekStart, weekEnd);
   let goalNumerator = 0, goalDenominator = 0;
   let goalTotalOrders = 0, goalTotalCost = 0;
 
@@ -236,7 +214,7 @@ function computeActualDeptMetrics(
       ? byMember[m.name].hours / byMember[m.name].orders
       : roleExpect;
     const goalRatio = Math.min(currentRatio, roleExpect);
-    const scheduledH = m.scheduledHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? byMember[m.name]?.hours ?? 0;
+    const scheduledH = weeksList.reduce((s, w) => s + (m.scheduledHours?.[w] ?? 0), 0) || byMember[m.name]?.hours || 0;
     if (scheduledH > 0) {
       goalNumerator   += goalRatio * scheduledH;
       goalDenominator += scheduledH;
@@ -248,8 +226,8 @@ function computeActualDeptMetrics(
   });
   roster.filter(m => m.isManager).forEach(m => {
     const cost = m.payType === 'salary' ? (m.annualSalary / 52) * weeksInPeriod
-      : ((m.mgrTotalHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0) +
-         (m.scheduledHours?.slice(0, weeksInPeriod).reduce((a, b) => a + b, 0) ?? 0)) * m.hourlyRate;
+      : (weeksList.reduce((s, w) => s + (m.mgrTotalHours?.[w] ?? 0), 0) +
+         weeksList.reduce((s, w) => s + (m.scheduledHours?.[w] ?? 0), 0)) * m.hourlyRate;
     goalTotalCost += cost;
   });
 
@@ -276,8 +254,7 @@ function computeScheduledDeptGoal(
     const goalRatio  = Math.min(m.ratio ?? roleExpect, roleExpect);
     let scheduledH = 0;
     weeksInRange.forEach(w => {
-      const idx = getWeekIndex(w);
-      scheduledH += m.scheduledHours?.[idx] ?? 0;
+      scheduledH += m.scheduledHours?.[w] ?? 0;
     });
     if (scheduledH === 0) return;
     goalTotalHours += scheduledH;
@@ -293,10 +270,9 @@ function computeScheduledDeptGoal(
   });
   roster.filter(m => m.isManager).forEach(m => {
     const totalH = weeksInRange.reduce((s, w) => {
-      const idx = getWeekIndex(w);
-      return s + (m.mgrTotalHours?.[idx] ?? m.scheduledHours?.[idx] ?? 0);
+      return s + (m.mgrTotalHours?.[w] ?? m.scheduledHours?.[w] ?? 0);
     }, 0);
-    const prodH = weeksInRange.reduce((s, w) => s + (m.scheduledHours?.[getWeekIndex(w)] ?? 0), 0);
+    const prodH = weeksInRange.reduce((s, w) => s + (m.scheduledHours?.[w] ?? 0), 0);
     const roleRatiosLocal = ROLE_RATIOS[dept] ?? {};
     const goalRatio  = Math.min(m.ratio ?? (roleRatiosLocal['master'] ?? 999), roleRatiosLocal['master'] ?? 999);
     goalTotalOrders += goalRatio > 0 ? prodH / goalRatio : 0;

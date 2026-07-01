@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useScheduleSettings } from './useScheduleSettings';
+import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,10 +13,6 @@ interface ResinMember {
   payType:     'hourly' | 'salary';
   hourlyRate:  number;
   annualSalary: number;
-}
-
-interface WeekSchedule {
-  [memberId: string]: number;  // hours scheduled
 }
 
 interface CohortRow {
@@ -41,20 +38,6 @@ const WINDOW = 8;  // weeks visible in the schedule grid at once
 const DEFAULT_RESIN_ROSTER: ResinMember[] = [
   { id: 'resin-1', name: 'Preslee Peterson', ratio: 1.5, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
 ];
-
-function getMondayDate(offsetWeeks: number): Date {
-  const d   = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + offsetWeeks * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function getWeekLabel(offsetWeeks: number): string {
-  const d = getMondayDate(offsetWeeks);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
 
 function mondayOf(dateStr: string): Date {
   const d   = new Date(dateStr + 'T12:00:00');
@@ -82,22 +65,19 @@ function useResinSettings() {
       .catch(() => {});
   }, []);
 
-  const resinDailyHours: Record<string, number[]> = (settings.resinDailyHours && typeof settings.resinDailyHours === 'object' && !Array.isArray(settings.resinDailyHours))
-    ? (settings.resinDailyHours as Record<string, number[]>)
-    : {};
+  const resinDailyHours: Record<string, number[]> = settings.resinDailyHours ?? {};
 
-  function setResinDailyHours(h: Record<string, number[]>) { update('resinDailyHours', h as unknown); }
+  function setResinDailyHours(h: Record<string, number[]>) { update('resinDailyHours', h); }
 
     const roster: ResinMember[] = Array.isArray(settings.resinRoster)
     ? (settings.resinRoster as unknown as ResinMember[])
     : DEFAULT_RESIN_ROSTER;
 
-  const hours: WeekSchedule[] = Array.isArray(settings.resinHours)
-    ? (settings.resinHours as unknown as WeekSchedule[])
-    : Array.from({ length: WEEKS }, () => ({ 'resin-1': 0 }));
+  // Date-keyed: isoMonday -> { memberId -> hours }
+  const hours: Record<string, Record<string, number>> = settings.resinHours ?? {};
 
   function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
-  function setHours(h: WeekSchedule[])  { update('resinHours',  h as unknown); }
+  function setHours(h: Record<string, Record<string, number>>) { update('resinHours', h); }
 
   return { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState };
 }
@@ -136,7 +116,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => weekOffset + i);
 
   function weeklyCapacity(weekIdx: number): number {
-    const schedule = hours[weekIdx] ?? {};
+    const schedule = hours[isoMonday(weekIdx)] ?? {};
     return roster.reduce((sum, m) => {
       const h = schedule[m.id] ?? 0;
       return sum + (m.ratio > 0 ? h / m.ratio : 0);
@@ -183,9 +163,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   function updateHours(weekIdx: number, memberId: string, val: number) {
-    const next = [...hours];
-    if (!next[weekIdx]) next[weekIdx] = {};
-    next[weekIdx] = { ...next[weekIdx], [memberId]: val };
+    const key = isoMonday(weekIdx);
+    const next = { ...hours, [key]: { ...(hours[key] ?? {}), [memberId]: val } };
     setHours(next);
   }
 
@@ -493,7 +472,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               </thead>
               <tbody>
                 {roster.map((m, mi) => {
-                  const weekTotal = [0,1,2,3,4,5,6].reduce((s, di) => s + (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                  const weekTotal = [0,1,2,3,4,5,6].reduce((s, di) => s + (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
                   const units = m.ratio > 0 ? weekTotal / m.ratio : 0;
                   return (
                     <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
@@ -502,12 +481,12 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                         <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
                       </td>
                       {[0,1,2,3,4,5,6].map(di => {
-                        const dayVal = resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0;
+                        const dayVal = resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0;
                         return (
                           <td key={di} className={`px-1 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/20' : ''}`}>
                             <input type="number" value={dayVal || ''} placeholder="0" min={0} step={0.5}
                               onChange={e => {
-                                const key = `${thisWeekOffset}-${m.id}`;
+                                const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
                                 const prev = resinDailyHours[key] ?? Array(7).fill(0);
                                 const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? (parseFloat(e.target.value) || 0) : h) };
                                 setResinDailyHours(next);
@@ -526,8 +505,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                 <tr className="bg-purple-50 border-t border-purple-100 font-medium">
                   <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Day total</td>
                   {[0,1,2,3,4,5,6].map(di => {
-                    const dayTotal = roster.reduce((s, m) => s + (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
-                    const dayUnits = roster.reduce((s, m) => s + (m.ratio > 0 ? (resinDailyHours[`${thisWeekOffset}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0);
+                    const dayTotal = roster.reduce((s, m) => s + (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
+                    const dayUnits = roster.reduce((s, m) => s + (m.ratio > 0 ? (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0);
                     return (
                       <td key={di} className="px-2 py-2 text-center text-xs text-purple-700">
                         {dayTotal > 0 ? <><div>{dayTotal.toFixed(1)}h</div><div className="text-[10px]">{dayUnits.toFixed(1)}u</div></> : <span className="text-slate-300">—</span>}
@@ -597,7 +576,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                       <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
                     </td>
                     {windowWeeks.map(w => {
-                      const h    = hours[w]?.[m.id] ?? 0;
+                      const h    = hours[isoMonday(w)]?.[m.id] ?? 0;
                       const units = m.ratio > 0 ? h / m.ratio : 0;
                       const cost  = m.payType === 'hourly' ? h * m.hourlyRate : (m.annualSalary / 52 / 5) * (h / 8);
                       const cpo   = units > 0 && cost > 0 ? cost / units : null;

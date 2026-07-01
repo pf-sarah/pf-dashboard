@@ -9,6 +9,7 @@ import { HistoricalsSection } from './HistoricalsSection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings } from './useScheduleSettings';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -152,27 +153,6 @@ function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-
-function getMondayDate(offsetWeeks: number): Date {
-  const d   = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff + offsetWeeks * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function isoMonday(offsetWeeks: number): string {
-  return getMondayDate(offsetWeeks).toISOString().split('T')[0];
-}
-
-function getWeekLabel(offsetWeeks: number): string {
-  return getMondayDate(offsetWeeks).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function getMonthKey(offsetWeeks: number): string {
-  return getMondayDate(offsetWeeks).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-}
 
 function fmt$(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
@@ -1194,7 +1174,7 @@ function useDraggableOrder<T extends { id: string }>(
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
 function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
-  team: PresTeamMember[];
+  team: (Omit<PresTeamMember, 'hours'> & { hours: unknown })[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) => void;
   onRemove: (id: string) => void;
@@ -1274,7 +1254,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
 function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
-  team: FfTeamMember[];
+  team: (Omit<FfTeamMember, 'hours'> & { hours: unknown })[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   employeeRates?:       Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   onUpdateName: (id: string, name: string) => void;
@@ -1333,13 +1313,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, presCheckHours, onPresDailyHoursChange, onPresCheckHoursChange, presRoster, presSettings, mgrTotalHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
+  presHours, presDailyHours, presCheckHours, onPresDailyHoursChange, onPresCheckHoursChange, presRoster, presSettings, mgrTotalHours, mgrTotalDailyHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, onMgrTotalDailyHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
   teamActuals:           { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:        () => void;
-  presHours:             Record<string, number[]>;
+  presHours:             Record<string, Record<string, number>>;
   presDailyHours:        Record<string, number[]>;
   presCheckHours:        Record<string, number[]>;
   onPresDailyHoursChange:(h: Record<string, number[]>) => void;
@@ -1347,11 +1327,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } };
-  mgrTotalHours:         Record<string, number[]>;
-  onPresHoursChange:     (h: Record<string, number[]>) => void;
+  mgrTotalHours:         Record<string, Record<string, number>>;
+  mgrTotalDailyHours:    Record<string, number[]>;
+  onPresHoursChange:     (h: Record<string, Record<string, number>>) => void;
   onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } }) => void;
-  onMgrTotalHoursChange: (h: Record<string, number[]>) => void;
+  onMgrTotalHoursChange: (h: Record<string, Record<string, number>>) => void;
+  onMgrTotalDailyHoursChange: (h: Record<string, number[]>) => void;
   weeklyEstimates:       Record<string, { ut: number; ga: number }>;
   presActuals?:          Record<string, number>;
   onReceivedSaved?:      () => void;
@@ -1650,13 +1632,15 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const defaultTeam = location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM;
 
   // Build team including any added members from presRoster that aren't in defaultTeam
-  const team: PresTeamMember[] = (() => {
+  // `hours` is now date-keyed (isoMonday -> hours); `defaultHrs` is the fallback
+  // used when a member has no persisted entry for a given week yet.
+  const team: (Omit<PresTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] = (() => {
     const base = defaultTeam
       .filter(m => !(presRoster[m.id] as {_removed?: boolean})?._removed)
       .map(m => {
         const roster = presRoster[m.id];
-        const hours  = presHours[m.id] ?? Array(WEEKS).fill(m.hours[0] ?? 0);
-        return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), hours };
+        const hours  = presHours[m.id] ?? {};
+        return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), hours, defaultHrs: m.hours[0] ?? 0 };
       });
     // Add any custom members stored in presRoster not in defaultTeam
     const defaultIds = new Set(defaultTeam.map(m => m.id));
@@ -1666,27 +1650,28 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           id, name: r.name, ratio: r.ratio, rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0),
           payType: (r.payType ?? 'hourly') as 'hourly' | 'salary',
           annualSalary: r.annualSalary ?? 0,
-          hours: presHours[id] ?? Array(WEEKS).fill(0),
-        } as PresTeamMember);
+          hours: presHours[id] ?? {},
+          defaultHrs: 0,
+        } as PresTeamMember & { hours: Record<string, number>; defaultHrs: number });
       }
     });
     return base;
   })();
 
   function updateHours(memberId: string, weekIdx: number, val: number) {
-    const newHours = { ...presHours, [memberId]: [...(presHours[memberId] ?? Array(WEEKS).fill(0))] };
-    newHours[memberId][weekIdx] = val;
+    const key = isoMonday(weekIdx);
+    const newHours = { ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [key]: val } };
     onPresHoursChange(newHours);
   }
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
-    const key = `${presThisWeekOffset}-${memberId}`;
+    const key = `${isoMonday(presThisWeekOffset)}-${memberId}`;
     const newHours = { ...presDailyHours, [key]: [...(presDailyHours[key] ?? Array(7).fill(0))] };
     newHours[key][dayIdx] = val;
     onPresDailyHoursChange(newHours);
   }
 
   function updateCheckHours(memberId: string, dayIdx: number, val: number) {
-    const key = `${presThisWeekOffset}-${memberId}`;
+    const key = `${isoMonday(presThisWeekOffset)}-${memberId}`;
     const newHours = { ...presCheckHours, [key]: [...(presCheckHours[key] ?? Array(7).fill(0))] };
     newHours[key][dayIdx] = val;
     onPresCheckHoursChange(newHours);
@@ -1694,7 +1679,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   function applyToAllWeeks(memberId: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
-    const newHours = { ...presHours, [memberId]: Array(WEEKS).fill(hours) };
+    const newWeekly: Record<string, number> = {};
+    for (let w = 0; w < WEEKS; w++) newWeekly[isoMonday(w)] = hours;
+    const newHours = { ...presHours, [memberId]: newWeekly };
     onPresHoursChange(newHours);
   }
 
@@ -1706,7 +1693,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   function handleAddMember() {
     const id = `${location.toLowerCase()}-p-${Date.now()}`;
     onPresRosterChange({ ...presRoster, [id]: { id, name: 'New Member', ratio: 0.7, rate: 0 } as typeof presRoster[string] });
-    onPresHoursChange({ ...presHours, [id]: Array(WEEKS).fill(0) });
+    onPresHoursChange({ ...presHours, [id]: {} });
   }
 
   function handleRemoveMember(id: string) {
@@ -1726,16 +1713,16 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // Per-day hours (index 0–4 = Mon–Fri of current week)
   const dayTotals = Array.from({ length: 7 }, (_, di) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (presDailyHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0)
   );
   // Total check hours scheduled per day
   const checkDayTotals = Array.from({ length: 7 }, (_, di) =>
-    team.reduce((s, m) => s + (presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0)
+    team.reduce((s, m) => s + (presCheckHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0)
   );
 
   // Per-week totals for 52-week grid
   const weeklyTotals = Array.from({ length: WEEKS }, (_, w) =>
-    team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[w] ?? 0) / m.ratio : 0), 0)
+    team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0)
   );
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
@@ -2021,10 +2008,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           </div>
                         </td>
                         {fiveDays.map((_, di) => {
-                          const prodH = presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
-                          const checkH = presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
+                          const dailyKey = `${isoMonday(presThisWeekOffset)}-${m.id}`;
+                          const prodH = presDailyHours[dailyKey]?.[di] ?? 0;
+                          const checkH = presCheckHours[dailyKey]?.[di] ?? 0;
                           const totalProdH = prodH + checkH;
-                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? totalProdH) : totalProdH;
+                          const totalH = m.isManager ? (mgrTotalDailyHours[dailyKey]?.[di] ?? totalProdH) : totalProdH;
                           const orders = m.ratio > 0 ? prodH / m.ratio : 0;
                           const hasRate = m.rate > 0 || m.annualSalary > 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
@@ -2041,7 +2029,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 </div>
                                 <div className="flex flex-col items-center">
                                   <span className="text-[8px] text-teal-400 mb-0.5">chk</span>
-                                  <input type="number" value={(presCheckHours[m.id]?.[di] || '')} placeholder="0" min="0" step="0.5"
+                                  <input type="number" value={(presCheckHours[dailyKey]?.[di] || '')} placeholder="0" min="0" step="0.5"
                                     title="Check hours"
                                     onChange={e => updateCheckHours(m.id, di, parseFloat(e.target.value) || 0)}
                                     className="w-12 border border-teal-200 rounded px-1 py-1 text-center text-teal-700 bg-teal-50/50 focus:outline-none focus:ring-1 focus:ring-teal-300" />
@@ -2051,9 +2039,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 <input type="number" value={totalH || ''} placeholder="total" min="0" step="0.5"
                                   title="Total hours (incl. managerial)"
                                   onChange={e => {
-                                    const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
-                                    newH[m.id][di] = parseFloat(e.target.value) || 0;
-                                    onMgrTotalHoursChange(newH);
+                                    const newH = { ...mgrTotalDailyHours, [dailyKey]: [...(mgrTotalDailyHours[dailyKey] ?? Array(7).fill(0))] };
+                                    newH[dailyKey][di] = parseFloat(e.target.value) || 0;
+                                    onMgrTotalDailyHoursChange(newH);
                                   }}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
@@ -2073,13 +2061,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         const dayCost = team.reduce((s, m) => {
                           if (m.rate === 0 && m.annualSalary === 0) return s;
                           if ((presRoster[m.id] as {excludeFromCost?: boolean})?.excludeFromCost) return s;
-                          const prodH = presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
-                          const chkH  = presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0;
-                          const totalH = m.isManager ? (mgrTotalHours[m.id]?.[di] ?? (prodH + chkH)) : (prodH + chkH);
+                          const dailyKey = `${isoMonday(presThisWeekOffset)}-${m.id}`;
+                          const prodH = presDailyHours[dailyKey]?.[di] ?? 0;
+                          const chkH  = presCheckHours[dailyKey]?.[di] ?? 0;
+                          const totalH = m.isManager ? (mgrTotalDailyHours[dailyKey]?.[di] ?? (prodH + chkH)) : (prodH + chkH);
                           return s + (m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate);
                         }, 0);
                         const dayCPO = cap > 0 && dayCost > 0 ? dayCost / cap : null;
-                        const dayHours = team.reduce((s, m) => s + (presDailyHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                        const dayHours = team.reduce((s, m) => s + (presDailyHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
                         const dayRatio = cap > 0 ? dayHours / cap : null;
                         return (
                           <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-indigo-50/50' : ''}`}>
@@ -2092,7 +2081,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             {(() => {
                               const checksData = checksOnDay(d.iso);
                               const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
-                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[`${presThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
                               if (checkHrsNeeded <= 0 && checkHrsScheduled <= 0) return null;
                               const checkDiff = checkHrsScheduled - checkHrsNeeded;
                               return (
@@ -2234,8 +2223,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             <div className="text-slate-400">{m.ratio} h/ord</div>
                           </td>
                           {windowWeeks.map(w => {
-                            const prodH = m.hours[w] ?? 0;
-                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                            const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
+                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
                             const orders = m.ratio > 0 ? prodH / m.ratio : 0;
                             const cost = m.payType === 'salary' ? (m.annualSalary / 52) : totalH * m.rate;
                             const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
@@ -2252,8 +2241,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                   <input
                                     type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
                                     onChange={e => {
-                                      const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
-                                      newH[m.id][w] = parseFloat(e.target.value) || 0;
+                                      const key = isoMonday(w);
+                                      const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: parseFloat(e.target.value) || 0 } };
                                       onMgrTotalHoursChange(newH);
                                     }}
                                     title="Total hours (production + managerial)"
@@ -2272,8 +2261,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
                         {windowWeeks.map(w => {
                           const totalCost = team.reduce((s, m) => {
-                            const prodH = m.hours[w] ?? 0;
-                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                            const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
+                            const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
                             return s + (m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate);
                           }, 0);
                           const totalCPO = weeklyTotals[w] > 0 && totalCost > 0 ? totalCost / weeklyTotals[w] : null;
@@ -2393,12 +2382,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   countsLoading:   boolean;
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
-  ffHours:              Record<string, number[]>;
+  ffHours:              Record<string, Record<string, number>>;
   ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>;
-  mgrTotalHours:        Record<string, number[]>;
-  onFfHoursChange:      (h: Record<string, number[]>) => void;
+  mgrTotalHours:        Record<string, Record<string, number>>;
+  onFfHoursChange:      (h: Record<string, Record<string, number>>) => void;
   onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
-  onMgrTotalHoursChange:(h: Record<string, number[]>) => void;
+  onMgrTotalHoursChange:(h: Record<string, Record<string, number>>) => void;
   employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   ffDailyHoursProp?:     Record<string, number[]>;
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
@@ -2412,14 +2401,15 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
     const init: Record<string, number[]> = {};
+    const todayKey = isoMonday(0);
     (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).forEach(m => {
-      const weeklyHrs = ffHours[m.id]?.[0] ?? 0;
-      if (weeklyHrs > 0) init[`0-${m.id}`] = distributeHours(weeklyHrs);
+      const weeklyHrs = ffHours[m.id]?.[todayKey] ?? 0;
+      if (weeklyHrs > 0) init[`${todayKey}-${m.id}`] = distributeHours(weeklyHrs);
     });
     Object.keys(ffRoster).forEach(id => {
-      if (!init[`0-${id}`]) {
-        const weeklyHrs = ffHours[id]?.[0] ?? 0;
-        if (weeklyHrs > 0) init[`0-${id}`] = distributeHours(weeklyHrs);
+      if (!init[`${todayKey}-${id}`]) {
+        const weeklyHrs = ffHours[id]?.[todayKey] ?? 0;
+        if (weeklyHrs > 0) init[`${todayKey}-${id}`] = distributeHours(weeklyHrs);
       }
     });
     if (Object.keys(init).length > 0) setFfDailyHours(prev => {
@@ -2434,20 +2424,20 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 
   // Merge persisted roster + hours over defaults
   const defaultTeam = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
-  const team: FfTeamMember[] = (() => {
+  const team: (Omit<FfTeamMember, 'hours'> & { hours: Record<string, number>; defaultHrs: number })[] = (() => {
     const base = defaultTeam.map(m => {
       const roster = ffRoster[m.id];
-      const hours  = ffHours[m.id] ?? [...m.hours];
+      const hours  = ffHours[m.id] ?? {};
       return { ...m, ratio: roster?.ratio ?? m.ratio, rate: roster?.rate > 0 ? roster.rate : (employeeRates[roster?.name ?? m.name]?.hourlyRate ?? m.rate), name: roster?.name ?? m.name,
         payType: roster?.payType ?? 'hourly' as const,
-        annualSalary: roster?.annualSalary ?? 0, hours };
+        annualSalary: roster?.annualSalary ?? 0, hours, defaultHrs: m.hours[0] ?? 0 };
     });
     const defaultIds = new Set(defaultTeam.map(m => m.id));
     Object.entries(ffRoster).forEach(([id, r]) => {
       if (!defaultIds.has(id)) {
         base.push({ id, name: r.name ?? 'New Member', ratio: r.ratio ?? 1.0, pay: 'hourly' as const,
           payType: r.payType ?? 'hourly' as const, annualSalary: r.annualSalary ?? 0,
-        rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0), hours: ffHours[id] ?? Array(8).fill(0) });
+        rate: r.rate > 0 ? r.rate : (employeeRates[r.name]?.hourlyRate ?? 0), hours: ffHours[id] ?? {}, defaultHrs: 0 });
       }
     });
     return base;
@@ -2456,7 +2446,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   function handleAddFfMember() {
     const id = `${location.toLowerCase()}-f-${Date.now()}`;
     onFfRosterChange({ ...ffRoster, [id]: { ratio: 1.0, rate: 0, name: 'New Member' } });
-    onFfHoursChange({ ...ffHours, [id]: Array(8).fill(0) });
+    onFfHoursChange({ ...ffHours, [id]: {} });
   }
   function handleRemoveFfMember(id: string) {
     const newRoster = { ...ffRoster }; delete newRoster[id];
@@ -2470,15 +2460,15 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   }
 
   function updateHours(id: string, wi: number, val: number) {
-    const member = team.find(m => m.id === id);
-    if (!member) return;
-    const currentHours = ffHours[id] ?? Array(WEEKS).fill(0);
-    const newHours = { ...ffHours, [id]: currentHours.map((h: number, j: number) => j === wi ? val : h) };
+    const key = isoMonday(wi);
+    const newHours = { ...ffHours, [id]: { ...(ffHours[id] ?? {}), [key]: val } };
     onFfHoursChange(newHours);
   }
   function applyToAllWeeks(id: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
-    onFfHoursChange({ ...ffHours, [id]: Array(WEEKS).fill(hours) });
+    const newWeekly: Record<string, number> = {};
+    for (let w = 0; w < WEEKS; w++) newWeekly[isoMonday(w)] = hours;
+    onFfHoursChange({ ...ffHours, [id]: newWeekly });
   }
   function updateRoster(mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) {
     const id = team[mi]?.id;
@@ -2487,8 +2477,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
   }
 
-  const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[0] ?? 0) / m.ratio : 0), 0);
-  const weekCost   = team.reduce((s, m) => s + (m.hours[0] ?? 0) * m.rate, 0);
+  const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(0)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0);
+  const weekCost   = team.reduce((s, m) => s + (m.hours[isoMonday(0)] ?? m.defaultHrs ?? 0) * m.rate, 0);
   const teamCPO    = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
   const hasRates   = canViewCPO && team.some(m => m.rate > 0);
@@ -2532,15 +2522,15 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 
       {ffTab === 'thisweek' && (() => {
         const days = getWeekdays(ffThisWeekOffset);
-        function getFFH(id: string, di: number) { return ffDailyHours[`${ffThisWeekOffset}-${id}`]?.[di] ?? 0; }
+        function getFFH(id: string, di: number) { return ffDailyHours[`${isoMonday(ffThisWeekOffset)}-${id}`]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
-          const key = `${ffThisWeekOffset}-${id}`;
+          const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
           const prev = ffDailyHours[key] ?? Array(5).fill(0);
           const next = { ...ffDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
         }
-        function ffDailyCost(m: FfTeamMember, di: number) {
+        function ffDailyCost(m: Omit<FfTeamMember, 'hours'> & { hours: unknown }, di: number) {
           const h = getFFH(m.id, di);
           return m.payType === 'salary' ? m.annualSalary / 260 : h * m.rate;
         }
@@ -2616,7 +2606,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                     {days.map((_, di) => {
                       const o = teamDailyOrders(di); const cc = teamDailyCost(di);
                       const cpo = o > 0 && cc > 0 ? cc / o : null;
-                      const ffDayHours = team.reduce((s, m) => s + (ffDailyHours[`${ffThisWeekOffset}-${m.id}`]?.[di] ?? 0), 0);
+                      const ffDayHours = team.reduce((s, m) => s + (ffDailyHours[`${isoMonday(ffThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
                       const ffDayRatio = o > 0 ? ffDayHours / o : null;
                       return (
                         <td key={di} className={`px-2 py-2 text-center ${di === 0 ? 'bg-amber-50/50' : ''}`}>
@@ -2710,8 +2700,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         {m.payType === 'salary' && <div className="text-[10px] text-amber-600">salary</div>}
                       </td>
                       {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
-                        const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
-                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                        const prodH = ffHours[m.id]?.[isoMonday(w)] ?? 0;
+                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
                         const o = m.ratio > 0 ? prodH / m.ratio : 0;
                         const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
                         const cpo = !m.isManager && o > 0 && cost > 0 ? cost / o : null;
@@ -2725,14 +2715,16 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                             {m.isManager && (
                               <input type="number" value={totalH || ''} placeholder="total h" min="0" step="0.5"
                                 onChange={e => {
-                                  const newH = { ...mgrTotalHours, [m.id]: [...(mgrTotalHours[m.id] ?? Array(WEEKS).fill(0))] };
-                                  newH[m.id][w] = parseFloat(e.target.value) || 0;
+                                  const key = isoMonday(w);
+                                  const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: parseFloat(e.target.value) || 0 } };
                                   onMgrTotalHoursChange(newH);
                                 }}
                                 onContextMenu={e => { e.preventDefault();
-                                  const val = mgrTotalHours[m.id]?.[w] ?? prodH;
+                                  const val = mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH;
                                   if (!window.confirm(`Copy ${val} hours to all 52 weeks for this manager?`)) return;
-                                  const newH = { ...mgrTotalHours, [m.id]: Array(WEEKS).fill(val) };
+                                  const newWeekly: Record<string, number> = {};
+                                  for (let wi = 0; wi < WEEKS; wi++) newWeekly[isoMonday(wi)] = val;
+                                  const newH = { ...mgrTotalHours, [m.id]: newWeekly };
                                   onMgrTotalHoursChange(newH);
                                 }}
                                 title="Total hours (production + managerial) — right-click to apply to all weeks"
@@ -2748,10 +2740,10 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                     <td className="sticky left-0 bg-slate-50 px-4 py-2 text-xs text-slate-600">Week total</td>
                     {Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS).map(w => {
-                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? ((ffHours[m.id] ?? [])[w] ?? 0) / m.ratio : 0), 0);
+                      const c = team.reduce((s, m) => s + (m.ratio > 0 ? (ffHours[m.id]?.[isoMonday(w)] ?? 0) / m.ratio : 0), 0);
                       const cost = team.reduce((s, m) => {
-                        const prodH = (ffHours[m.id] ?? [])[w] ?? 0;
-                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[w] ?? prodH) : prodH;
+                        const prodH = ffHours[m.id]?.[isoMonday(w)] ?? 0;
+                        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
                         return s + (m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate);
                       }, 0);
                       const cpo = c > 0 && cost > 0 ? cost / c : null;
@@ -2857,10 +2849,10 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   location:             'Utah' | 'Georgia';
   masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number> }>;
   onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number> }>) => void;
-  designHours:          Record<string, number[]>;
+  designHours:          Record<string, Record<string, number>>;
   designSchedule:       WeekSchedule[];
-  presHours:            Record<string, number[]>;
-  ffHours:              Record<string, number[]>;
+  presHours:            Record<string, Record<string, number>>;
+  ffHours:              Record<string, Record<string, number>>;
   designRoster:         Record<string, { ratio: number; name: string }>;
   presRoster:           Record<string, { ratio: number; name: string }>;
   ffRoster:             Record<string, { ratio: number; name: string }>;
@@ -2880,9 +2872,9 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
     // Design: read from the already-merged schedule array
     const dHrs = designSchedule[weekIdx]?.[person.id] ?? 0;
     // Preservation: sum of daily hours
-    const pHrs = (presHours[person.id] ?? []).reduce((a, b) => a + b, 0);
+    const pHrs = Object.values(presHours[person.id] ?? {}).reduce((a, b) => a + b, 0);
     // Fulfillment: persisted weekly hours
-    const fHrs = ffHours[person.id]?.[weekIdx] ?? 0;
+    const fHrs = ffHours[person.id]?.[isoMonday(weekIdx)] ?? 0;
     return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
   }
 
@@ -3349,7 +3341,7 @@ export function SchedulePage({
   const schedule: WeekSchedule[] = Array.from({ length: WEEKS }, (_, w) => {
     const weekObj: WeekSchedule = {};
     designers.forEach(d => {
-      weekObj[d.id] = settings.designHours[d.id]?.[w] ?? defaultSchedule[w]?.[d.id] ?? 0;
+      weekObj[d.id] = settings.designHours[d.id]?.[isoMonday(w)] ?? defaultSchedule[w]?.[d.id] ?? 0;
     });
     return weekObj;
   });
@@ -3391,7 +3383,7 @@ export function SchedulePage({
       name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, ratio: d.ratio,
       isManager: !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager),
       role: ((settings.designRoster[d.id] as {role?:string})?.role ?? (d as {role?:string}).role ?? 'specialist') as 'specialist'|'senior'|'master',
-      scheduledHours: Array.from({ length: WEEKS }, (_, w) => schedule[w]?.[d.id] ?? 0),
+      scheduledHours: settings.designHours[d.id] ?? {},
       mgrTotalHours: settings.mgrTotalHours[d.id],
     })),
     preservation: (location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM).map(m => {
@@ -3401,7 +3393,7 @@ export function SchedulePage({
         hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
         isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
         role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
-        scheduledHours: settings.presHours[m.id] ?? Array(WEEKS).fill(0),
+        scheduledHours: settings.presHours[m.id] ?? {},
         mgrTotalHours: settings.mgrTotalHours[m.id],
       };
     }),
@@ -3412,7 +3404,7 @@ export function SchedulePage({
         hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
         isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
         role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
-        scheduledHours: settings.ffHours[m.id] ?? Array(WEEKS).fill(0),
+        scheduledHours: settings.ffHours[m.id] ?? {},
         mgrTotalHours: settings.mgrTotalHours[m.id],
       };
     }),
@@ -3446,9 +3438,10 @@ export function SchedulePage({
   // Pre-populate daily hours from weekly schedule on first load
   useEffect(() => {
     const init: Record<string, number[]> = {};
+    const todayKey = isoMonday(0);
     designers.forEach(d => {
       const weeklyHrs = schedule[0]?.[d.id] ?? 0;
-      if (weeklyHrs > 0) init[`0-${d.id}`] = distributeHours(weeklyHrs);
+      if (weeklyHrs > 0) init[`${todayKey}-${d.id}`] = distributeHours(weeklyHrs);
     });
     if (Object.keys(init).length > 0) setDesignDailyHours(prev => {
       // Only pre-populate members that have no saved entry at all
@@ -3478,7 +3471,7 @@ export function SchedulePage({
     const newRoster = { ...settings.designRoster, [id]: { id, name: 'New Designer', ratio: 1.5, payType: 'hourly' as PayType, hourlyRate: 0, annualSalary: 0 } };
     update('designRoster', newRoster);
     // Add empty hours for new designer
-    const newHours = { ...settings.designHours, [id]: Array(WEEKS).fill(0) };
+    const newHours = { ...settings.designHours, [id]: {} };
     update('designHours', newHours);
   }
   function handleRemoveDesigner(id: string) {
@@ -3503,24 +3496,21 @@ export function SchedulePage({
   // ── Schedule handlers ─────────────────────────────────────────────────────────
   function handleHoursChange(weekIdx: number, designerId: string, value: string) {
     const newHours = { ...settings.designHours };
-    if (!newHours[designerId]) {
-      const def = location === 'Utah' ? buildDefaultUtahSchedule() : buildDefaultGeorgiaSchedule();
-      newHours[designerId] = Array.from({ length: WEEKS }, (_, w) => def[w]?.[designerId] ?? 0);
-    }
-    newHours[designerId] = [...newHours[designerId]];
-    newHours[designerId][weekIdx] = parseFloat(value) || 0;
+    const key = isoMonday(weekIdx);
+    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: parseFloat(value) || 0 };
     update('designHours', newHours);
   }
   function handleMgrTotalHoursChange(weekIdx: number, designerId: string, value: string) {
     const newHours = { ...settings.mgrTotalHours };
-    if (!newHours[designerId]) newHours[designerId] = Array(WEEKS).fill(0);
-    newHours[designerId] = [...newHours[designerId]];
-    newHours[designerId][weekIdx] = parseFloat(value) || 0;
+    const key = isoMonday(weekIdx);
+    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: parseFloat(value) || 0 };
     update('mgrTotalHours', newHours);
   }
   function applyToAllWeeks(designerId: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this designer?`)) return;
-    const newHours = { ...settings.designHours, [designerId]: Array(WEEKS).fill(hours) };
+    const newWeekly: Record<string, number> = {};
+    for (let w = 0; w < WEEKS; w++) newWeekly[isoMonday(w)] = hours;
+    const newHours = { ...settings.designHours, [designerId]: newWeekly };
     update('designHours', newHours);
   }
 
@@ -3529,7 +3519,7 @@ export function SchedulePage({
     const hrs    = schedule[weekIdx]?.[d.id] ?? 0;
     const frames = d.ratio > 0 ? hrs / d.ratio : 0;
     const isDesignMgr = !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager);
-    const totalHrs = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[weekIdx] ?? hrs) : hrs;
+    const totalHrs = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[isoMonday(weekIdx)] ?? hrs) : hrs;
     const cost   = d.payType === 'salary' ? d.annualSalary / 52 : totalHrs * d.hourlyRate;
     const cpo    = !isDesignMgr && frames > 0 && cost > 0 ? cost / frames : null;
     return { hrs, frames, cost, cpo };
@@ -3805,10 +3795,12 @@ export function SchedulePage({
           presRoster={settings.presRoster}
           presSettings={settings.presSettings}
           mgrTotalHours={settings.mgrTotalHours}
+          mgrTotalDailyHours={settings.mgrTotalDailyHours}
           onPresHoursChange={(h) => update('presHours', h)}
           onPresRosterChange={(r) => update('presRoster', r)}
           onPresSettingsChange={(s) => update('presSettings', s)}
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
+          onMgrTotalDailyHoursChange={(h) => update('mgrTotalDailyHours', h)}
           employeeRates={employeeRates}
           weeklyEstimates={weeklyEstimates}
           presActuals={presActuals}
@@ -3968,9 +3960,9 @@ export function SchedulePage({
           {/* ── WEEKLY SCHEDULE TAB ─────────────────────────────────────────── */}
           {activeTab === 'thisweek' && (() => {
             const days = getWeekdays(designThisWeekOffset);
-            function getDH(id: string, di: number) { return designDailyHours[`${designThisWeekOffset}-${id}`]?.[di] ?? 0; }
+            function getDH(id: string, di: number) { return designDailyHours[`${isoMonday(designThisWeekOffset)}-${id}`]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
-              const key = `${designThisWeekOffset}-${id}`;
+              const key = `${isoMonday(designThisWeekOffset)}-${id}`;
               const prev = designDailyHours[key] ?? Array(5).fill(0);
               const next = { ...designDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
               setDesignDailyHours(next);
@@ -4117,7 +4109,7 @@ export function SchedulePage({
                         {windowWeeks.map(w => {
                           const { hrs, frames, cpo } = weekStats(w, d);
                           const isDesignMgr = !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager);
-                          const totalH = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[w] ?? hrs) : hrs;
+                          const totalH = isDesignMgr ? (settings.mgrTotalHours[d.id]?.[isoMonday(w)] ?? hrs) : hrs;
                           return (
                             <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                               <input
