@@ -158,3 +158,57 @@ export function useScheduleSettings(location: 'Utah' | 'Georgia') {
 
   return { settings, loading, saveState, update };
 }
+
+// Paid holidays: one shared calendar for both locations (staff are paid but
+// produce nothing that day), stored under a location-agnostic 'Global' row
+// so it applies regardless of which location/department is being viewed.
+export function usePaidHolidays() {
+  const [holidays, setHolidays] = useState<string[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [saveState, setSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle');
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/schedule-settings?location=Global')
+      .then(r => r.json())
+      .then((data: { paidHolidays?: string[] }) => setHolidays(data.paidHolidays ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const persist = useCallback(async (next: string[]) => {
+    setSaveState('saving');
+    try {
+      const res = await fetch('/api/schedule-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: 'Global', key: 'paidHolidays', value: next }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 1500);
+    } catch {
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
+    }
+  }, []);
+
+  const addHoliday = useCallback((isoDateStr: string) => {
+    setHolidays(prev => {
+      if (prev.includes(isoDateStr)) return prev;
+      const next = [...prev, isoDateStr].sort();
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const removeHoliday = useCallback((isoDateStr: string) => {
+    setHolidays(prev => {
+      const next = prev.filter(d => d !== isoDateStr);
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  return { holidays, loading, saveState, addHoliday, removeHoliday };
+}

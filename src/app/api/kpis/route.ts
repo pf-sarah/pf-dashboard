@@ -57,12 +57,14 @@ export interface WindowResult {
 }
 
 export interface EstimatedMonthResult {
-  label:      string;
-  monthStart: string;
-  isSnapshot: boolean;
-  utah:       PeriodKpis;
-  georgia:    PeriodKpis;
-  combined:   PeriodKpis;
+  label:          string;
+  monthStart:     string;
+  isSnapshot:     boolean;
+  // The 3 trailing calendar months G&A cost was averaged from, e.g. ['Apr 2026','May 2026','Jun 2026']
+  gaSourceMonths: string[];
+  utah:           PeriodKpis;
+  georgia:        PeriodKpis;
+  combined:       PeriodKpis;
 }
 
 // ── Salary managers ───────────────────────────────────────────────────────────
@@ -324,6 +326,28 @@ function buildWindowResult(
   return { label, periodStart: start, periodEnd: end, utah, georgia, combined: poolLocations(utah, georgia) };
 }
 
+// Trailing N-completed-calendar-months average of actual G&A labor cost for a
+// location. Used to project G&A into estimated months, which have no actuals
+// of their own to draw from. Reuses computePeriodKpis so any G&A salary-manager
+// cost injection stays consistent with historical months automatically.
+function averageGaCostForMonths(
+  laborRows: LaborRow[],
+  location:  string,
+  now:       Date,
+  months = 3
+): { avg: number; monthKeys: string[] } {
+  let total = 0;
+  const monthKeys: string[] = [];
+  for (let i = months; i >= 1; i--) {
+    const first   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const last    = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    const weekOfs = getWeekMondays(isoDate(first), isoDate(last));
+    total += computePeriodKpis(laborRows, [], location, weekOfs).ga.laborCost;
+    monthKeys.push(isoDate(first).slice(0, 7));
+  }
+  return { avg: months > 0 ? total / months : 0, monthKeys };
+}
+
 // ── Estimated projections from schedule_settings ──────────────────────────────
 // Roster shapes (from useScheduleSettings.ts):
 //   designRoster: { [id]: { ratio, payType, hourlyRate, annualSalary, name, isManager? } }
@@ -334,14 +358,42 @@ function buildWindowResult(
 interface DesignRosterEntry  { ratio: number; payType?: string; hourlyRate?: number; annualSalary?: number; name: string; isManager?: boolean }
 interface PresRosterEntry    { ratio: number; rate?: number;    payType?: string;    annualSalary?: number; name: string; isManager?: boolean }
 interface HoursMap           { [memberId: string]: Record<string, number> }
+interface DailyHoursMap      { [weekOfMemberKey: string]: number[] }  // "${isoMonday}-${memberId}" -> [mon..fri]
+
+// Paid holidays fall on staff pay (hours/cost unchanged — they're paid whether
+// productive or not) but zero production. Estimate each member's lost hours
+// for a holiday from that specific week's daily breakdown if one was entered,
+// else fall back to an even 1/5 split of that week's total scheduled hours.
+function holidayHoursForMember(
+  memberId:     string,
+  weekOfs:      string[],
+  hours:        HoursMap,
+  dailyHours:   DailyHoursMap,
+  holidaySet:   Set<string>
+): number {
+  if (holidaySet.size === 0) return 0;
+  let holidayHours = 0;
+  for (const weekOf of weekOfs) {
+    const weekTotal = hours[memberId]?.[weekOf] ?? 0;
+    for (let dayOffset = 0; dayOffset < 5; dayOffset++) {
+      const d = new Date(weekOf + 'T12:00:00');
+      d.setDate(d.getDate() + dayOffset);
+      if (!holidaySet.has(isoDate(d))) continue;
+      const daily = dailyHours[`${weekOf}-${memberId}`]?.[dayOffset];
+      holidayHours += daily ?? (weekTotal / 5);
+    }
+  }
+  return holidayHours;
+}
 
 function projectDept(
-  roster:   Record<string, DesignRosterEntry | PresRosterEntry>,
-  hours:    HoursMap,
-  weekOfs:  string[],         // Mondays in the month (isoMonday strings)
-  location: string,
-  dept:     string,           // 'Design' | 'Preservation' | 'Fulfillment'
-  settings: ScheduleSettingRow[]
+  roster:      Record<string, DesignRosterEntry | PresRosterEntry>,
+  hours:       HoursMap,
+  dailyHours:  DailyHoursMap,
+  weekOfs:     string[],         // Mondays in the month (isoMonday strings)
+  location:    string,
+  dept:        string,           // 'Design' | 'Preservation' | 'Fulfillment'
+  holidaySet:  Set<string>
 ): { hours: number; production: number; laborCost: number } {
   let totalHours = 0, totalProduction = 0, totalCost = 0;
 
@@ -351,7 +403,11 @@ function projectDept(
     const memberHours = weekOfs.reduce((sum, w) => sum + (hours[memberId]?.[w] ?? 0), 0);
 
     totalHours += memberHours;
-    if (member.ratio > 0) totalProduction += memberHours / member.ratio;
+    if (member.ratio > 0) {
+      const holidayHours   = holidayHoursForMember(memberId, weekOfs, hours, dailyHours, holidaySet);
+      const productiveHours = Math.max(0, memberHours - holidayHours);
+      totalProduction += productiveHours / member.ratio;
+    }
 
     const payType     = member.payType ?? 'hourly';
     const hourlyRate  = (member as DesignRosterEntry).hourlyRate ?? (member as PresRosterEntry).rate ?? 0;
@@ -368,32 +424,36 @@ function projectDept(
   totalCost += getSalaryMgrCostForWeeks(SALARY_MANAGERS, location, dept, weekOfs);
 
   return { hours: totalHours, production: totalProduction, laborCost: totalCost };
-
-  void settings; // unused but kept for future G&A projection
 }
 
 function projectMonthForLocation(
   settings:   ScheduleSettingRow[],
   location:   string,
-  monthStart: string
+  monthStart: string,
+  gaCost:     number,
+  paidHolidays: string[]
 ): PeriodKpis {
-  const monthEnd = new Date(monthStart);
+  const monthEnd = new Date(monthStart + 'T12:00:00');
   monthEnd.setMonth(monthEnd.getMonth() + 1);
   monthEnd.setDate(0);
   const weekOfs      = getWeekMondays(monthStart, isoDate(monthEnd));
+  const holidaySet   = new Set(paidHolidays);
 
   const get = (key: string) => settings.find(r => r.location === location && r.key === key)?.value ?? {};
 
-  const designRoster = get('designRoster') as Record<string, DesignRosterEntry>;
-  const presRoster   = get('presRoster')   as Record<string, PresRosterEntry>;
-  const ffRoster     = get('ffRoster')     as Record<string, PresRosterEntry>;
-  const designHours  = get('designHours')  as HoursMap;
-  const presHours    = get('presHours')    as HoursMap;
-  const ffHours      = get('ffHours')      as HoursMap;
+  const designRoster     = get('designRoster')     as Record<string, DesignRosterEntry>;
+  const presRoster       = get('presRoster')       as Record<string, PresRosterEntry>;
+  const ffRoster         = get('ffRoster')         as Record<string, PresRosterEntry>;
+  const designHours      = get('designHours')      as HoursMap;
+  const presHours        = get('presHours')        as HoursMap;
+  const ffHours          = get('ffHours')          as HoursMap;
+  const designDailyHours = get('designDailyHours') as DailyHoursMap;
+  const presDailyHours   = get('presDailyHours')   as DailyHoursMap;
+  const ffDailyHours     = get('ffDailyHours')     as DailyHoursMap;
 
-  const designMetrics = projectDept(designRoster, designHours, weekOfs, location, 'Design',       settings);
-  const presMetrics   = projectDept(presRoster,   presHours,   weekOfs, location, 'Preservation', settings);
-  const ffMetrics     = projectDept(ffRoster,     ffHours,     weekOfs, location, 'Fulfillment',  settings);
+  const designMetrics = projectDept(designRoster, designHours, designDailyHours, weekOfs, location, 'Design',       holidaySet);
+  const presMetrics   = projectDept(presRoster,   presHours,   presDailyHours,   weekOfs, location, 'Preservation', holidaySet);
+  const ffMetrics     = projectDept(ffRoster,     ffHours,     ffDailyHours,     weekOfs, location, 'Fulfillment',  holidaySet);
 
   function toMetrics(m: { hours: number; production: number; laborCost: number }): KpiMetrics {
     return {
@@ -411,16 +471,30 @@ function projectMonthForLocation(
   const preservation = toMetrics(presMetrics);
   const fulfillment  = toMetrics(ffMetrics);
   const resin: KpiMetrics = { hours: 0, production: 0, laborCost: 0, ratio: null, cpo: null, cpoWithGM: null, hasData: false };
-  const ga:    KpiMetrics = { hours: 0, production: 0, laborCost: 0, ratio: null, cpo: null, cpoWithGM: null, hasData: false };
 
-  const totalProdOrders   = design.production + preservation.production + fulfillment.production;
+  const totalProdOrders = design.production + preservation.production + fulfillment.production;
+
+  // G&A has no production of its own — mirror computePeriodKpis, which spreads
+  // it across total org production so its CPO ($/unit) is computable.
+  const ga: KpiMetrics = {
+    hours: 0, production: totalProdOrders, laborCost: gaCost,
+    ratio: null,
+    cpo: gaCost > 0 && totalProdOrders > 0 ? gaCost / totalProdOrders : null,
+    cpoWithGM: null,
+    hasData: gaCost > 0,
+  };
+
   const totalHours        = design.hours       + preservation.hours       + fulfillment.hours;
-  const combinedLaborCost = design.laborCost   + preservation.laborCost   + fulfillment.laborCost;
+  const combinedLaborCost = design.laborCost   + preservation.laborCost   + fulfillment.laborCost + ga.laborCost;
 
   let blendedCPO: number | null = null;
   let blendedSum = 0; let blendedHasData = false;
   for (const m of [design, preservation, fulfillment]) {
     if (m.cpo !== null) { blendedSum += m.cpo; blendedHasData = true; }
+  }
+  if (gaCost > 0 && totalProdOrders > 0) {
+    blendedSum += gaCost / totalProdOrders;
+    blendedHasData = true;
   }
   if (blendedHasData) blendedCPO = blendedSum;
 
@@ -442,7 +516,7 @@ function projectMonthForLocation(
   const combined: KpiMetrics = {
     hours: totalHours, production: totalProdOrders, laborCost: combinedLaborCost,
     ratio: combinedRatio, cpo: blendedCPO, cpoWithGM: blendedCPOWithGM,
-    hasData: totalHours > 0 || totalProdOrders > 0,
+    hasData: totalHours > 0 || totalProdOrders > 0 || combinedLaborCost > 0,
   };
 
   return { design, preservation, fulfillment, resin, ga, combined };
@@ -571,6 +645,15 @@ export async function GET(req: NextRequest) {
       if (settingsError) throw settingsError;
       const liveSettings: ScheduleSettingRow[] = settingsData ?? [];
 
+      // G&A has no schedule/roster to project from — use a trailing 3-month
+      // actual average instead. Same window applies to both current and next
+      // month estimates (there's no actual G&A data for either to draw on).
+      const utahGa    = averageGaCostForMonths(laborRows, 'Utah',    now);
+      const georgiaGa = averageGaCostForMonths(laborRows, 'Georgia', now);
+      const gaSourceMonths = utahGa.monthKeys.map(monthLabel);
+
+      const paidHolidays = (liveSettings.find(r => r.location === 'Global' && r.key === 'paidHolidays')?.value as string[]) ?? [];
+
       estimated = {};
 
       if (requested.includes('est-current')) {
@@ -592,13 +675,14 @@ export async function GET(req: NextRequest) {
 
         const useSettings     = snapSettings.length > 0 ? snapSettings : liveSettings;
         const isSnapshot      = snapSettings.length > 0;
-        const utahEst         = projectMonthForLocation(useSettings, 'Utah',    currentMonthKey);
-        const georgiaEst      = projectMonthForLocation(useSettings, 'Georgia', currentMonthKey);
+        const utahEst         = projectMonthForLocation(useSettings, 'Utah',    currentMonthKey, utahGa.avg,    paidHolidays);
+        const georgiaEst      = projectMonthForLocation(useSettings, 'Georgia', currentMonthKey, georgiaGa.avg, paidHolidays);
 
         estimated.current = {
           label:      `Est. ${monthLabel(currentMonthKey.slice(0, 7))}`,
           monthStart: currentMonthKey,
           isSnapshot,
+          gaSourceMonths,
           utah:       utahEst,
           georgia:    georgiaEst,
           combined:   poolLocations(utahEst, georgiaEst),
@@ -608,13 +692,14 @@ export async function GET(req: NextRequest) {
       if (requested.includes('est-next')) {
         const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const nextMonthKey  = isoDate(nextMonthDate);
-        const utahEst       = projectMonthForLocation(liveSettings, 'Utah',    nextMonthKey);
-        const georgiaEst    = projectMonthForLocation(liveSettings, 'Georgia', nextMonthKey);
+        const utahEst       = projectMonthForLocation(liveSettings, 'Utah',    nextMonthKey, utahGa.avg,    paidHolidays);
+        const georgiaEst    = projectMonthForLocation(liveSettings, 'Georgia', nextMonthKey, georgiaGa.avg, paidHolidays);
 
         estimated.next = {
           label:      `Est. ${monthLabel(nextMonthKey.slice(0, 7))}`,
           monthStart: nextMonthKey,
           isSnapshot: false,
+          gaSourceMonths,
           utah:       utahEst,
           georgia:    georgiaEst,
           combined:   poolLocations(utahEst, georgiaEst),
