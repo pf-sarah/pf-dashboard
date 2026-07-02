@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabase } from '@/lib/supabase';
+import { DEPARTMENT_MANAGERS, getSalaryMgrCostForWeeks, getGmCostForWeeks } from '@/lib/managers';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,54 +66,11 @@ export interface EstimatedMonthResult {
 }
 
 // ── Salary managers ───────────────────────────────────────────────────────────
-// These are never in weekly_labor_cost. Cost computed from annual salary ÷ 52.
-// Mirrors scorecard/route.ts exactly.
+// Manager pay/role definitions live in src/lib/managers.ts (single source of
+// truth shared with scorecard/route.ts, useActualsWithPayroll.ts, and
+// useHistoricalMetrics.ts). Update that file when a manager changes.
 
-interface SalaryMgr {
-  name:         string;
-  location:     string;
-  departments:  string[];
-  annualSalary: number;
-  from?:        string;
-  to?:          string;
-}
-
-const SALARY_MANAGERS: SalaryMgr[] = [
-  // Utah
-  { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                annualSalary: 45760 },
-  { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],           annualSalary: 41600 },
-  // Georgia — time-aware
-  // Katherine Piper — pay flows through weekly_labor_cost upload
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],          annualSalary: 47008,  to:   '2026-04-12' },
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design','Preservation'], annualSalary: 56000,  from: '2026-04-13' },
-];
-
-// GMs — excluded from dept CPO, included only in cpoWithGM on combined
-const GM_MANAGERS: SalaryMgr[] = [
-  { name: 'Lauren Boyd',      location: 'Utah',    departments: ['Design','Preservation','Fulfillment'], annualSalary: 60000.20 },
-  { name: 'Zachary Williams', location: 'Georgia', departments: ['Design','Preservation','Fulfillment'], annualSalary: 52000 },
-];
-
-function getSalaryMgrCostForWeeks(
-  managers:  SalaryMgr[],
-  location:  string,
-  dept:      string,
-  weekOfs:   string[]
-): number {
-  let total = 0;
-  for (const weekOf of weekOfs) {
-    for (const mgr of managers) {
-      if (mgr.location !== location) continue;
-      if (!mgr.departments.includes(dept)) continue;
-      const after  = !mgr.from || weekOf >= mgr.from;
-      const before = !mgr.to   || weekOf <= mgr.to;
-      if (after && before) {
-        total += (mgr.annualSalary / 52) / mgr.departments.length;
-      }
-    }
-  }
-  return total;
-}
+const SALARY_MANAGERS = DEPARTMENT_MANAGERS;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -255,13 +213,9 @@ function computePeriodKpis(
   }
   if (blendedHasData) blendedCPO = blendedSum;
 
-  // GM cost for this location + period — spread across total production orders
-  const totalGMCost = PROD_DEPTS.reduce(
-    (sum, dept) => sum + getSalaryMgrCostForWeeks(GM_MANAGERS, location, dept, weekOfs), 0
-  );
-  // De-dup: GM_MANAGERS has each GM in 3 depts, so the loop above triple-counts.
-  // Divide by 3 to get true per-location GM cost.
-  const gmCostPerLocation = totalGMCost / 3;
+  // GM cost is location-wide, not per-department — compute once per location
+  // and spread across total production orders (never sum once per dept).
+  const gmCostPerLocation = getGmCostForWeeks(location, weekOfs);
 
   const blendedCPOWithGM =
     blendedCPO !== null && totalProdOrders > 0
@@ -471,9 +425,7 @@ function projectMonthForLocation(
   if (blendedHasData) blendedCPO = blendedSum;
 
   // GM cost for projected month
-  const gmCostTotal = GM_MANAGERS
-    .filter(gm => gm.location === location)
-    .reduce((sum, gm) => sum + (gm.annualSalary / 52) * weekOfs.length, 0);
+  const gmCostTotal = getGmCostForWeeks(location, weekOfs);
 
   const blendedCPOWithGM =
     blendedCPO !== null && totalProdOrders > 0

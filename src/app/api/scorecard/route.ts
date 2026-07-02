@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabase } from '@/lib/supabase';
+import { DEPARTMENT_MANAGERS, getSalaryMgrCostForWeeks } from '@/lib/managers';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -34,37 +35,13 @@ function weeksInMonth(weekOfs: string[], monthKey: string): string[] {
   return weekOfs.filter(w => weekMonth(w) === monthKey);
 }
 
-// ── Salary managers (mirrors useActualsWithPayroll.ts exactly) ───────────────
-// These are never in weekly_labor_cost — cost is computed from annual salary.
-// Georgia manager history is time-aware (Amber changed role on 2026-04-13).
-
-interface SalaryMgr {
-  name: string; location: string; departments: string[];
-  annualSalary: number; from?: string; to?: string;
-}
-
-const SALARY_MANAGERS: SalaryMgr[] = [
-  // Utah
-  { name: 'Jennika Merrill', location: 'Utah',    departments: ['Design'],                 annualSalary: 45760 },
-  { name: 'Bella DePrima',   location: 'Utah',    departments: ['Fulfillment'],            annualSalary: 41600 },
-  // Georgia — time-aware
-  // Katherine Piper — pay flows through weekly_labor_cost upload
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],           annualSalary: 47008, to:   '2026-04-12' },
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000, from: '2026-04-13' },
-];
+// Manager pay/role definitions live in src/lib/managers.ts (single source of
+// truth shared with kpis/route.ts, useActualsWithPayroll.ts, and
+// useHistoricalMetrics.ts). Update that file when a manager changes.
 
 // Returns salary manager weekly cost contribution for a given location+dept+weekOf
 function getSalaryMgrCost(location: string, dept: string, weekOf: string): number {
-  let total = 0;
-  for (const mgr of SALARY_MANAGERS) {
-    if (mgr.location !== location) continue;
-    if (!mgr.departments.includes(dept)) continue;
-    const after  = !mgr.from || weekOf >= mgr.from;
-    const before = !mgr.to   || weekOf <= mgr.to;
-    if (!after || !before) continue;
-    total += (mgr.annualSalary / 52) / mgr.departments.length;
-  }
-  return total;
+  return getSalaryMgrCostForWeeks(DEPARTMENT_MANAGERS, location, dept, [weekOf]);
 }
 
 // Departments included in blended CPO (all except Resin)

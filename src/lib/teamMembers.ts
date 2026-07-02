@@ -34,7 +34,6 @@ export const TEAM_MEMBERS: TeamMember[] = [
   { name: 'Rachel Tucker',         location: 'Georgia', department: 'design' },
   { name: 'Celt Stewart',          location: 'Georgia', department: 'design' },
   // Georgia Preservation
-  { name: 'Amber Garrett',         location: 'Georgia', department: 'preservation' },
   { name: 'Celt Stewart',          location: 'Georgia', department: 'preservation' },
   // Georgia Fulfillment
   { name: 'Yann Jean-Louis',       location: 'Georgia', department: 'fulfillment' },
@@ -63,8 +62,6 @@ export const DESIGNER_IDS: Record<string, string> = {
   'Preslee Peterson':      'ut-p7',
   'Abby Wilkey':           'utah-p-1778856863957',
   'Branson Ward':          'utah-p-1778856972674',
-  // Georgia Preservation
-  'Amber Garrett':         'ga-p1',
   // Utah Fulfillment
   'Bella DePrima':         'ut-f1',
   'Warner Neuenschwander': 'ut-f2',

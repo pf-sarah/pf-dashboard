@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { getMondayDate } from '@/lib/weekDates';
+import { DEPARTMENT_MANAGERS, getSalaryMgrCostForWeeks } from '@/lib/managers';
 
 export interface RosterMember {
   name: string;
@@ -26,43 +27,13 @@ interface ActualRow {
 // Rippling payroll data: personName → total gross pay for the period
 export type PayrollMap = Record<string, number>;
 
-// Georgia salary manager history — mirrors useActualsWithPayroll.ts
-interface SalaryManagerEntry {
-  name: string;
-  location: string;
-  departments: string[];
-  annualSalary: number;
-  from?: string;
-  to?: string;
-}
-
-const GEORGIA_MANAGER_HISTORY: SalaryManagerEntry[] = [
-  // Katherine Piper — pay flows through weekly_labor_cost upload
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['preservation'],           annualSalary: 47008, to: '2026-04-12' },
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['design','preservation'],  annualSalary: 56000, from: '2026-04-13' },
-];
-
-const UTAH_SALARY_MANAGERS: SalaryManagerEntry[] = [
-  { name: 'Jennika Merrill', location: 'Utah', departments: ['design'],      annualSalary: 45760 },
-  { name: 'Bella DePrima',   location: 'Utah', departments: ['fulfillment'], annualSalary: 41600 },
-];
+// Manager pay/role definitions live in src/lib/managers.ts (single source of
+// truth shared with kpis/route.ts, scorecard/route.ts, and
+// useActualsWithPayroll.ts). Update that file when a manager changes.
 
 function getSalaryManagerCost(location: string, dept: string, weekStart: string, weekEnd: string): number {
   const weeks = getWeeksInRange(weekStart, weekEnd);
-  const managers = location === 'Georgia' ? GEORGIA_MANAGER_HISTORY : UTAH_SALARY_MANAGERS;
-  let total = 0;
-  for (const week of weeks) {
-    for (const mgr of managers) {
-      if (mgr.location !== location) continue;
-      if (!mgr.departments.includes(dept)) continue;
-      const after  = !mgr.from || week >= mgr.from;
-      const before = !mgr.to   || week <= mgr.to;
-      if (after && before) {
-        total += (mgr.annualSalary / 52) / mgr.departments.length;
-      }
-    }
-  }
-  return total;
+  return getSalaryMgrCostForWeeks(DEPARTMENT_MANAGERS, location, dept, weeks);
 }
 
 export interface DeptMetrics {
