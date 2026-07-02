@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
-import { useScheduleSettings } from './useScheduleSettings';
+import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -3337,6 +3337,8 @@ export function SchedulePage({
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
+  const { holidays: paidHolidays, addHoliday, removeHoliday } = usePaidHolidays();
+  const [pendingHolidayDate, setPendingHolidayDate] = useState('');
   // Employee rates from Rippling — used to fill zero rates for flex members
   const [employeeRates, setEmployeeRates] = useState<Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>>({});
   useEffect(() => {
@@ -4550,6 +4552,34 @@ export function SchedulePage({
         <ResinPage />
       )}
       {dept === 'master' && (
+        <>
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <span className="text-xs font-medium text-slate-500">Paid holidays</span>
+            <span className="text-[11px] text-slate-400">Shared across Utah &amp; Georgia — staff paid, zero production expected</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <input type="date" value={pendingHolidayDate} onChange={e => setPendingHolidayDate(e.target.value)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <button onClick={() => { if (pendingHolidayDate) { addHoliday(pendingHolidayDate); setPendingHolidayDate(''); } }}
+              disabled={!pendingHolidayDate}
+              className="px-4 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              Add
+            </button>
+          </div>
+          {paidHolidays.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {paidHolidays.map(d => (
+                <span key={d} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 text-slate-600 px-2.5 py-1 rounded-full">
+                  {new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  <button onClick={() => removeHoliday(d)} className="text-slate-400 hover:text-red-500 transition-colors">×</button>
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">No paid holidays set.</p>
+          )}
+        </div>
         <MasterScheduleSection
           location={location}
           masterAvailability={settings.masterAvailability}
@@ -4562,6 +4592,7 @@ export function SchedulePage({
           presRoster={settings.presRoster}
           ffRoster={settings.ffRoster}
         />
+        </>
       )}
 
     </div>

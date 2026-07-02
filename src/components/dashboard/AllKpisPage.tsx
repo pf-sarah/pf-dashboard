@@ -235,6 +235,9 @@ function EstCard({
             <div key={dept} className="space-y-1">
               <div className="text-xs text-slate-500 font-medium">{DEPT_LABELS[dept]}</div>
               <KpiCell metrics={metrics} section={section} showGM={showGM} dept={dept} />
+              {dept === 'ga' && section === 'cpo' && result.gaSourceMonths.length > 0 && (
+                <div className="text-[10px] text-slate-400">Avg of {result.gaSourceMonths.join(', ')}</div>
+              )}
             </div>
           );
         })}
