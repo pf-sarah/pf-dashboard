@@ -55,6 +55,9 @@ export interface ScheduleSettings {
   masterAvailability: MasterAvailability;
   avgIntake:          number;
   weeklyEstimates:    Record<string, { ut: number; ga: number }>;
+  // Per-week multiplier applied to same-week-last-year intake to auto-project
+  // future "bouquets received" when no manual weeklyEstimates override exists.
+  weeklyMultipliers:  Record<string, { ut: number; ga: number }>;
   // Manager total hours (production + managerial) — parallel to dept hours maps
   mgrTotalHours:      WeeklyHoursMap;
   mgrTotalDailyHours: DailyHoursMap;
@@ -76,6 +79,7 @@ const DEFAULTS: ScheduleSettings = {
   masterAvailability: {},
   avgIntake: 45,
   weeklyEstimates: {},
+  weeklyMultipliers: {},
   mgrTotalHours: {},
   mgrTotalDailyHours: {},
   designDailyHours: {},
@@ -89,7 +93,7 @@ const DEFAULTS: ScheduleSettings = {
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
-  'ffHours','ffRoster','masterAvailability','avgIntake','weeklyEstimates',
+  'ffHours','ffRoster','masterAvailability','avgIntake','weeklyEstimates','weeklyMultipliers',
   'mgrTotalHours','mgrTotalDailyHours','designDailyHours','ffDailyHours','presDailyHours','presCheckHours',
   'resinRoster','resinHours','resinDailyHours',
 ];

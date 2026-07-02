@@ -35,6 +35,9 @@ interface WeekSchedule {
 const WEEKS              = 52;
 const WINDOW             = 8;
 const PRESERVATION_WEEKS = 6;
+// Default projection ratio for auto-filled "bouquets received" estimates:
+// same week last year × this multiplier. Editable per week.
+const DEFAULT_INTAKE_MULTIPLIER = 1.2;
 
 // ─── Historical Utah intake (actual received by week) ─────────────────────────
 // Calibration for the designed-to-date anchor: frames designed before design-historicals
@@ -3431,6 +3434,7 @@ export function SchedulePage({
   }, [location]);
 
   const weeklyEstimates = settings.weeklyEstimates;
+  const weeklyMultipliers = settings.weeklyMultipliers ?? {};
 
   // ── Historical metrics for KPI bars ─────────────────────────────────────────
   // Uses the "full" (unfiltered) rosters — includes soft-deleted members and
@@ -3496,6 +3500,14 @@ export function SchedulePage({
       ? { ...existing, ut: val }
       : { ...existing, ga: val };
     update('weeklyEstimates', { ...weeklyEstimates, [weekOf]: updated });
+  }
+
+  function setWeeklyMultiplier(weekOf: string, val: number) {
+    const existing = weeklyMultipliers[weekOf] ?? { ut: DEFAULT_INTAKE_MULTIPLIER, ga: DEFAULT_INTAKE_MULTIPLIER };
+    const updated = location === 'Utah'
+      ? { ...existing, ut: val }
+      : { ...existing, ga: val };
+    update('weeklyMultipliers', { ...weeklyMultipliers, [weekOf]: updated });
   }
 
   const avgIntake = settings.avgIntake;
@@ -3644,6 +3656,31 @@ export function SchedulePage({
     }));
   }, [weeklyTotals, designers, schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Actual intake by week (merged: hardcoded historical < team actuals < Supabase actuals) ──
+  // Single source of truth for "what actually came in a given week" — used both to graduate
+  // the preservation queue and to look up same-week-last-year for projecting future intake.
+  const actualIntakeByWeek = useMemo(() => {
+    const map: Record<string, number> = {};
+    const hardcoded = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
+    hardcoded.forEach(h => { map[h.weekOf] = h.actual; });
+    teamActuals.filter(r => r.department === 'preservation').forEach(r => {
+      map[r.week_of] = (map[r.week_of] ?? 0) + r.actual_orders;
+    });
+    Object.entries(presActuals).forEach(([weekOf, val]) => { map[weekOf] = val; });
+    return map;
+  }, [location, teamActuals, presActuals]);
+
+  const intakeMultiplierKey = location === 'Utah' ? 'ut' : 'ga';
+  function getIntakeMultiplier(weekOf: string): number {
+    return weeklyMultipliers[weekOf]?.[intakeMultiplierKey] ?? DEFAULT_INTAKE_MULTIPLIER;
+  }
+  // Projected intake = same week last year's actual × that week's multiplier (default 1.2).
+  function getProjectedIntake(weekOf: string): number | undefined {
+    const lastYearActual = actualIntakeByWeek[addDays(weekOf, -364)];
+    if (lastYearActual === undefined) return undefined;
+    return Math.round(lastYearActual * getIntakeMultiplier(weekOf));
+  }
+
   // ── Future turnaround ────────────────────────────────────────────────────────
   const futureTurnarounds = useMemo(() => {
     const taByWeek: Record<string, number> = {};
@@ -3654,12 +3691,15 @@ export function SchedulePage({
       const graduatingDate = getMondayDate(w - PRESERVATION_WEEKS);
       const graduatingIso  = graduatingDate.toISOString().split('T')[0];
       const intakeData     = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
-      // Priority: 1) Supabase actuals, 2) team actuals total, 3) hardcoded historical, 4) per-week estimate, 5) avg
+      // Priority: 1) Supabase actuals, 2) team actuals total, 3) hardcoded historical, 4) per-week estimate,
+      // 5) projected (last year's same week × multiplier), 6) avg
       if (presActuals[graduatingIso] !== undefined) return presActuals[graduatingIso];
       if (taByWeek[graduatingIso] !== undefined) return taByWeek[graduatingIso];
       const hist = intakeData.find(h => h.weekOf === graduatingIso);
       if (hist) return hist.actual;
       const _we = weeklyEstimates[graduatingIso]; if (_we !== undefined) return location === 'Utah' ? _we.ut : _we.ga;
+      const projected = getProjectedIntake(graduatingIso);
+      if (projected !== undefined) return projected;
       return avgIntake;
     });
     const queueAtStart: number[] = [designableQueue];
@@ -3680,7 +3720,7 @@ export function SchedulePage({
       }
       return null;
     });
-  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location, teamActuals]);
+  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -4268,12 +4308,19 @@ export function SchedulePage({
                 </p>
                 <p className="text-xs text-amber-600 mb-4">Under 8 weeks total = overstaffed.</p>
                 <div className="space-y-2.5">
-                  {futureTurnarounds.slice(0, 20).map((designWait, w) => {
+                  {futureTurnarounds.map((designWait, w) => {
                     const total       = designWait;
                     const overstaffed = total !== null && total < 8;
                     const { bar, text, label } = turnaroundColors(total, overstaffed);
                     const weekIso = isoMonday(w);
-                    const _weVal = weeklyEstimates[weekIso]; const estVal = _weVal !== undefined ? (location === 'Utah' ? _weVal.ut : _weVal.ga) : '';
+                    const _weVal = weeklyEstimates[weekIso];
+                    const hasOverride = _weVal !== undefined;
+                    const overrideVal = hasOverride ? (location === 'Utah' ? _weVal.ut : _weVal.ga) : undefined;
+                    const lastYearIso = addDays(weekIso, -364);
+                    const lastYearActual = actualIntakeByWeek[lastYearIso];
+                    const multiplier = getIntakeMultiplier(weekIso);
+                    const projected = getProjectedIntake(weekIso);
+                    const estVal = hasOverride ? overrideVal : (projected !== undefined ? projected : '');
                     return (
                       <div key={w} className="flex items-center gap-3">
                         <span className="text-xs text-slate-500 w-16 shrink-0">{getWeekLabel(w)}</span>
@@ -4289,6 +4336,22 @@ export function SchedulePage({
                           />
                           <span className="text-[10px] text-slate-300">bq</span>
                         </div>
+                        {lastYearActual !== undefined && (
+                          <div className="flex items-center gap-1 shrink-0" title={`${lastYearActual} bq received ${fmtDate(lastYearIso)} (same week last year)`}>
+                            <span className="text-[10px] text-slate-400">×</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={multiplier}
+                              disabled={hasOverride}
+                              onChange={e => setWeeklyMultiplier(weekIso, parseFloat(e.target.value) || DEFAULT_INTAKE_MULTIPLIER)}
+                              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-xs text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:bg-slate-50 disabled:text-slate-300"
+                              title={hasOverride ? 'Clear the bq override to use the LY projection' : 'Multiplier applied to last year’s same week'}
+                            />
+                            <span className="text-[10px] text-slate-300">LY {lastYearActual}</span>
+                          </div>
+                        )}
                         {total !== null ? (
                           <>
                             <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
