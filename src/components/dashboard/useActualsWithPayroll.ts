@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { DEPARTMENT_MANAGERS } from '@/lib/managers';
 
 export interface ActualRow {
   week_of:       string;
@@ -41,21 +42,13 @@ export interface WeekCost {
 
 // Salary managers — Utah uses dynamic loading from rippling_employees.
 // Georgia has a time-split management history that Rippling's dept field
-// doesn't capture (Amber is listed as 'Operations'), so it's hardcoded here.
+// doesn't capture (Amber was listed as 'Operations'), so it's defined in
+// src/lib/managers.ts — the single source of truth shared with
+// kpis/route.ts, scorecard/route.ts, and useHistoricalMetrics.ts.
 
-// Georgia manager history (week_of is the Monday the change took effect)
-const GEORGIA_MANAGER_HISTORY: Array<SalaryManager & { from?: string; to?: string }> = [
-  // Before 4/13/2026: Amber → Preservation only (Katherine Piper pay via weekly_labor_cost upload)
-  // Katherine Piper — pay flows through weekly_labor_cost upload
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Preservation'],           annualSalary: 47008,  to: '2026-04-12' },
-  // From 4/13/2026: Amber → Design + Preservation ($538.46/wk each = $56,000/52/2 * 2 depts)
-  { name: 'Amber Garrett',   location: 'Georgia', departments: ['Design', 'Preservation'], annualSalary: 56000,  from: '2026-04-13' },
-];
+const GEORGIA_MANAGER_HISTORY = DEPARTMENT_MANAGERS.filter(m => m.location === 'Georgia');
 
-const SALARY_MANAGERS: SalaryManager[] = [
-  { name: 'Jennika Merrill', location: 'Utah', departments: ['Design'],       annualSalary: 45760 },
-  { name: 'Bella DePrima',   location: 'Utah', departments: ['Fulfillment'],  annualSalary: 41600 },
-];
+const SALARY_MANAGERS: SalaryManager[] = DEPARTMENT_MANAGERS.filter(m => m.location === 'Utah');
 
 export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
   const [actuals,     setActuals]     = useState<ActualRow[]>([]);

@@ -117,11 +117,11 @@ const DEFAULT_UTAH_DESIGNERS: Designer[] = [
 ];
 
 const DEFAULT_GEORGIA_DESIGNERS: Designer[] = [
-  { id: 'ga-1', name: 'Katherine Piper', ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ga-1', name: 'Katherine Piper', ratio: 1.6, payType: 'hourly', hourlyRate: 22.50, annualSalary: 0, isManager: true, role: 'master' as const },
   { id: 'ga-2', name: 'Allanna Harlan',  ratio: 1.6, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ga-3', name: 'Erin Webb',       ratio: 2.3, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
   { id: 'ga-4', name: 'Rachel Tucker',   ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'specialist' as const },
-  { id: 'ga-5', name: 'Celt Stewart',    ratio: 2.0, payType: 'hourly', hourlyRate: 0, annualSalary: 0, role: 'senior' as const },
+  { id: 'ga-5', name: 'Celt Stewart',    ratio: 2.0, payType: 'hourly', hourlyRate: 19.50, annualSalary: 0, isManager: true, role: 'master' as const },
 ];
 
 function buildDefaultUtahSchedule(): WeekSchedule[] {
@@ -221,13 +221,20 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
       <div className="space-y-2">
         {designers.map(d => (
           <div key={d.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
-            <EmployeeAutocomplete
-              value={d.name}
-              location={location ?? 'Utah'}
-              department="Design"
-              onChange={val => onChange(d.id, 'name', val)}
-              onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); onChange(d.id, 'hourlyRate', String(emp.hourly_rate ?? 0)); onChange(d.id, 'payType', emp.pay_type); onChange(d.id, 'annualSalary', String(emp.annual_salary ?? 0)); }}
-            />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex-1 min-w-0">
+                <EmployeeAutocomplete
+                  value={d.name}
+                  location={location ?? 'Utah'}
+                  department="Design"
+                  onChange={val => onChange(d.id, 'name', val)}
+                  onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); onChange(d.id, 'hourlyRate', String(emp.hourly_rate ?? 0)); onChange(d.id, 'payType', emp.pay_type); onChange(d.id, 'annualSalary', String(emp.annual_salary ?? 0)); }}
+                />
+              </div>
+              {(d as {isManager?:boolean}).isManager && (
+                <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+              )}
+            </div>
             <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="specialist">Specialist</option>
@@ -537,9 +544,7 @@ const UTAH_PRESERVATION_TEAM: PresTeamMember[] = [
 ];
 
 const GEORGIA_PRESERVATION_TEAM: PresTeamMember[] = [
-  { id: 'ga-p1', name: 'Amber Garrett', ratio: 0.42, pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
-  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 0, annualSalary: 0, hours: Array(5).fill(8), role: 'senior' as const },
-
+  { id: 'ga-p2', name: 'Celt Stewart',  ratio: 0.5,  pay: 'hourly' as const, payType: 'hourly' as const, rate: 19.50, annualSalary: 0, hours: Array(5).fill(8), isManager: true, role: 'master' as const },
 ];
 
 const UTAH_FULFILLMENT_TEAM: FfTeamMember[] = [
@@ -1204,13 +1209,20 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
                 onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
                 onDragEnd={handleDragEnd}
                 className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-              <EmployeeAutocomplete
-                value={m.name}
-                location={deptLocation ?? 'Utah'}
-                department="Preservation"
-                onChange={val => onUpdateRoster(m.id, 'name', val)}
-                onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); onUpdateRoster(m.id, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(m.id, 'payType', emp.pay_type); onUpdateRoster(m.id, 'annualSalary', emp.annual_salary ?? 0); }}
-              />
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex-1 min-w-0">
+                  <EmployeeAutocomplete
+                    value={m.name}
+                    location={deptLocation ?? 'Utah'}
+                    department="Preservation"
+                    onChange={val => onUpdateRoster(m.id, 'name', val)}
+                    onSelect={(emp: RipplingEmployee) => { onUpdateRoster(m.id, 'name', emp.full_name); onUpdateRoster(m.id, 'role', emp.role); onUpdateRoster(m.id, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(m.id, 'payType', emp.pay_type); onUpdateRoster(m.id, 'annualSalary', emp.annual_salary ?? 0); }}
+                  />
+                </div>
+                {m.isManager && (
+                  <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+                )}
+              </div>
               <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(m.id, 'role', e.target.value)}
                 className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
                 <option value="specialist">Specialist</option>
@@ -1282,13 +1294,20 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
               onDragEnd={handleDragEnd}
               className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-            <EmployeeAutocomplete
-              value={m.name}
-              location={deptLocation ?? 'Utah'}
-              department="Fulfillment"
-              onChange={val => onUpdateName(m.id, val)}
-              onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); onUpdateRoster(mi, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(mi, 'payType', emp.pay_type); onUpdateRoster(mi, 'annualSalary', emp.annual_salary ?? 0); }}
-            />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex-1 min-w-0">
+                <EmployeeAutocomplete
+                  value={m.name}
+                  location={deptLocation ?? 'Utah'}
+                  department="Fulfillment"
+                  onChange={val => onUpdateName(m.id, val)}
+                  onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); onUpdateRoster(mi, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(mi, 'payType', emp.pay_type); onUpdateRoster(mi, 'annualSalary', emp.annual_salary ?? 0); }}
+                />
+              </div>
+              {m.isManager && (
+                <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+              )}
+            </div>
             <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
               className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
               <option value="specialist">Specialist</option>
@@ -2375,7 +2394,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 // ─── FulfillmentSection ────────────────────────────────────────────────────────
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
-  ffHours, ffRoster, mgrTotalHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, employeeRates = {},
+  ffHours, ffRoster, mgrTotalHours, mgrTotalDailyHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, onMgrTotalDailyHoursChange, employeeRates = {},
   ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true, userRole = 'admin' }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
@@ -2385,9 +2404,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   ffHours:              Record<string, Record<string, number>>;
   ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
   mgrTotalHours:        Record<string, Record<string, number>>;
+  mgrTotalDailyHours:   Record<string, number[]>;
   onFfHoursChange:      (h: Record<string, Record<string, number>>) => void;
   onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
   onMgrTotalHoursChange:(h: Record<string, Record<string, number>>) => void;
+  onMgrTotalDailyHoursChange: (h: Record<string, number[]>) => void;
   employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   ffDailyHoursProp?:     Record<string, number[]>;
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
@@ -2539,8 +2560,17 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
         }
+        function getMgrTotalFFH(id: string, di: number) {
+          return mgrTotalDailyHours[`${isoMonday(ffThisWeekOffset)}-${id}`]?.[di] ?? getFFH(id, di);
+        }
+        function setMgrTotalFFH(id: string, di: number, val: number) {
+          const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
+          const prev = mgrTotalDailyHours[key] ?? Array(5).fill(0);
+          const next = { ...mgrTotalDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+          onMgrTotalDailyHoursChange(next);
+        }
         function ffDailyCost(m: Omit<FfTeamMember, 'hours'> & { hours: unknown }, di: number) {
-          const h = getFFH(m.id, di);
+          const h = m.isManager ? getMgrTotalFFH(m.id, di) : getFFH(m.id, di);
           return m.payType === 'salary' ? m.annualSalary / 260 : h * m.rate;
         }
         const teamDailyOrders = (di: number) => team.reduce((s, m) => {
@@ -2578,7 +2608,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                 <tbody>
                   {team.map((m, mi) => {
                     const weekOrders = days.reduce((s, _, di) => { const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? h / m.ratio : 0); }, 0);
-                    const weekHrs = days.reduce((s, _, di) => s + getFFH(m.id, di), 0);
+                    const weekHrs = days.reduce((s, _, di) => s + (m.isManager ? getMgrTotalFFH(m.id, di) : getFFH(m.id, di)), 0);
                     const weekCost = days.reduce((s, _, di) => s + ffDailyCost(m, di), 0);
                     const weekCPO = weekOrders > 0 && weekCost > 0 ? weekCost / weekOrders : null;
                     return (
@@ -2589,14 +2619,22 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         </td>
                         {days.map((_, dayIdx) => {
                           const h = getFFH(m.id, dayIdx);
+                          const totalH = m.isManager ? getMgrTotalFFH(m.id, dayIdx) : h;
                           const orders = m.ratio > 0 && h > 0 ? h / m.ratio : 0;
                           const cost = ffDailyCost(m, dayIdx);
-                          const cpo = orders > 0 && cost > 0 ? cost / orders : null;
+                          const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-amber-50/30' : ''}`}>
                               <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
+                                title={m.isManager ? 'Production hours' : undefined}
                                 onChange={e => setFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                              {m.isManager && (
+                                <input type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
+                                  title="Total hours (production + managerial)"
+                                  onChange={e => setMgrTotalFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
+                                  className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                              )}
                               {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
                               {ffHasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
@@ -2605,7 +2643,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         <td className="px-3 py-2 text-center">
                           <div className="font-medium text-amber-700">{Math.round(weekOrders * 100) / 100} ord</div>
                           <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
-                          {ffHasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
+                          {ffHasRates && !m.isManager && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                         </td>
                       </tr>
                     );
@@ -2817,7 +2855,6 @@ const GEORGIA_STAFF: StaffMember[] = [
   { id: 'ga-2',  name: 'Allanna Harlan',   homeDept: 'design',       onCall: false },
   { id: 'ga-3',  name: 'Erin Webb',        homeDept: 'design',       onCall: false },
   { id: 'ga-4',  name: 'Rachel Tucker',    homeDept: 'design',       onCall: false },
-  { id: 'ga-p1', name: 'Amber Garrett',    homeDept: 'preservation', onCall: false },
   { id: 'ga-p2', name: 'Celt Stewart',     homeDept: 'preservation', onCall: false },
   { id: 'ga-f1', name: 'Yann Jean-Louis',  homeDept: 'fulfillment',  onCall: false },
   { id: 'ga-f2', name: 'Nahid Knight',     homeDept: 'fulfillment',  onCall: false },
@@ -3880,9 +3917,11 @@ export function SchedulePage({
           ffHours={settings.ffHours}
           ffRoster={settings.ffRoster}
           mgrTotalHours={settings.mgrTotalHours}
+          mgrTotalDailyHours={settings.mgrTotalDailyHours}
           onFfHoursChange={(h) => update('ffHours', h)}
           onFfRosterChange={(r) => update('ffRoster', r)}
           onMgrTotalHoursChange={(h) => update('mgrTotalHours', h)}
+          onMgrTotalDailyHoursChange={(h) => update('mgrTotalDailyHours', h)}
           ffDailyHoursProp={settings.ffDailyHours}
           onFfDailyHoursChange={(h) => update('ffDailyHours', h)}
           onActualsSaved={() => {
@@ -4006,8 +4045,18 @@ export function SchedulePage({
               setDesignDailyHours(next);
               update('designDailyHours', next);
             }
+            function getMgrTotalDH(id: string, di: number) {
+              return settings.mgrTotalDailyHours[`${isoMonday(designThisWeekOffset)}-${id}`]?.[di] ?? getDH(id, di);
+            }
+            function setMgrTotalDH(id: string, di: number, val: number) {
+              const key = `${isoMonday(designThisWeekOffset)}-${id}`;
+              const prev = settings.mgrTotalDailyHours[key] ?? Array(5).fill(0);
+              const next = { ...settings.mgrTotalDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+              update('mgrTotalDailyHours', next);
+            }
             function dDailyCost(d: Designer, di: number) {
-              const h = getDH(d.id, di);
+              const isMgr = (d as {isManager?:boolean}).isManager;
+              const h = isMgr ? getMgrTotalDH(d.id, di) : getDH(d.id, di);
               return d.payType === 'salary' ? d.annualSalary / 260 : h * d.hourlyRate;
             }
             const teamDailyFrames = (di: number) => designers.reduce((s, d) => {
@@ -4043,8 +4092,9 @@ export function SchedulePage({
                     </thead>
                     <tbody>
                       {designers.map((d, di) => {
+                        const isMgr = !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager);
                         const weekFrames = days.reduce((s, _, dayIdx) => { const h = getDH(d.id, dayIdx); return s + (d.ratio > 0 && h > 0 ? h / d.ratio : 0); }, 0);
-                        const weekHrs = days.reduce((s, _, dayIdx) => s + getDH(d.id, dayIdx), 0);
+                        const weekHrs = days.reduce((s, _, dayIdx) => s + (isMgr ? getMgrTotalDH(d.id, dayIdx) : getDH(d.id, dayIdx)), 0);
                         const weekCost = days.reduce((s, _, dayIdx) => s + dDailyCost(d, dayIdx), 0);
                         const weekCPO = weekFrames > 0 && weekCost > 0 ? weekCost / weekFrames : null;
                         return (
@@ -4056,14 +4106,22 @@ export function SchedulePage({
                             </td>
                             {days.map((_, dayIdx) => {
                               const h = getDH(d.id, dayIdx);
+                              const totalH = isMgr ? getMgrTotalDH(d.id, dayIdx) : h;
                               const frames = d.ratio > 0 && h > 0 ? h / d.ratio : 0;
                               const cost = dDailyCost(d, dayIdx);
-                              const cpo = frames > 0 && cost > 0 ? cost / frames : null;
+                              const cpo = !isMgr && frames > 0 && cost > 0 ? cost / frames : null;
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
                                   <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
+                                    title={isMgr ? 'Production hours' : undefined}
                                     onChange={e => setDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
                                     className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                                  {isMgr && (
+                                    <input type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
+                                      title="Total hours (production + managerial)"
+                                      onChange={e => setMgrTotalDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
+                                      className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                                  )}
                                   {frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames * 100) / 100}f</div>}
                                   {hasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                                 </td>
@@ -4072,7 +4130,7 @@ export function SchedulePage({
                             <td className="px-3 py-2 text-center">
                               <div className="font-medium text-indigo-700">{Math.round(weekFrames * 100) / 100}f</div>
                               <div className="text-slate-400 text-[10px]">{weekHrs}h</div>
-                              {hasRates && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
+                              {hasRates && !isMgr && weekCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(weekCPO)}</div>}
                             </td>
                           </tr>
                         );
