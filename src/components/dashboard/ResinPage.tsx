@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useScheduleSettings } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
-import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
+import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -91,7 +90,7 @@ interface ResinPageProps {
 }
 
 export default function ResinPage({ resinQueue }: ResinPageProps) {
-  const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'monthly' | 'historicals'>('thisweek');
+  const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'historicals'>('thisweek');
   const [thisWeekOffset, setThisWeekOffset] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
   const [showCPO, setShowCPO] = useState(false);
@@ -131,37 +130,6 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     for (let w = 0; w < 8; w++) total += weeklyCapacity(w);
     return total / 8;
   })();
-
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
-  const monthlyData: MonthlyDatum[] = useMemo(() => {
-    const map: Record<string, {
-      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
-      byMember: Record<string, { units: number; cost: number; hrs: number }>;
-    }> = {};
-    for (let w = 0; w < WEEKS; w++) {
-      const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
-      map[key].weeks++;
-      const weekHours = hours[isoMonday(w)] ?? {};
-      roster.forEach(m => {
-        const h = weekHours[m.id] ?? 0;
-        const units = m.ratio > 0 ? h / m.ratio : 0;
-        const cost = m.payType === 'hourly' ? h * m.hourlyRate : (m.annualSalary / 52 / 5) * (h / 8);
-        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
-        map[key].byMember[m.id].units += units;
-        map[key].byMember[m.id].cost  += cost;
-        map[key].byMember[m.id].hrs   += h;
-        map[key].totalUnits += units;
-        map[key].totalCost  += cost;
-        map[key].totalHours += h;
-      });
-    }
-    return Object.values(map).map(m => ({
-      ...m,
-      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
-      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
-    }));
-  }, [roster, hours]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived: turnaround simulation ────────────────────────────────────────
   const cohortRows: CohortRow[] = (() => {
@@ -259,7 +227,6 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     { id: 'thisweek'    as const, label: 'This week' },
     { id: 'schedule'    as const, label: '52-week planner' },
     { id: 'queue'       as const, label: 'Queue & Turnaround' },
-    { id: 'monthly'     as const, label: 'Monthly Summary' },
     { id: 'historicals' as const, label: 'Historicals' },
   ];
 
@@ -783,17 +750,6 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
           {/* Full queue table */}
           <ResinQueueTable />
         </div>
-      )}
-
-      {/* ── MONTHLY SUMMARY TAB ──────────────────────────────────────────────── */}
-      {activeTab === 'monthly' && (
-        <MonthlySummarySection
-          monthlyData={monthlyData}
-          members={roster.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
-          unitLabel="resin units"
-          unitAbbrev="u"
-          hasRates={hasRates}
-        />
       )}
 
       {/* ── HISTORICALS TAB ───────────────────────────────────────────────────── */}
