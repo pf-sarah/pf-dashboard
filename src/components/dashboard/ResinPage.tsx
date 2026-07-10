@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useScheduleSettings } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
+import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
+import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -89,10 +91,11 @@ interface ResinPageProps {
 }
 
 export default function ResinPage({ resinQueue }: ResinPageProps) {
-  const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'historicals'>('thisweek');
+  const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'monthly' | 'historicals'>('thisweek');
   const [thisWeekOffset, setThisWeekOffset] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
   const [showCPO, setShowCPO] = useState(false);
+  const [resinInputMode, setResinInputMode] = useState<InputMode>('hours');
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
   const [queueLoading, setQueueLoading] = useState(true);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -128,6 +131,37 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     for (let w = 0; w < 8; w++) total += weeklyCapacity(w);
     return total / 8;
   })();
+
+  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  const monthlyData: MonthlyDatum[] = useMemo(() => {
+    const map: Record<string, {
+      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
+      byMember: Record<string, { units: number; cost: number; hrs: number }>;
+    }> = {};
+    for (let w = 0; w < WEEKS; w++) {
+      const key = getMonthKey(w);
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      map[key].weeks++;
+      const weekHours = hours[isoMonday(w)] ?? {};
+      roster.forEach(m => {
+        const h = weekHours[m.id] ?? 0;
+        const units = m.ratio > 0 ? h / m.ratio : 0;
+        const cost = m.payType === 'hourly' ? h * m.hourlyRate : (m.annualSalary / 52 / 5) * (h / 8);
+        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
+        map[key].byMember[m.id].units += units;
+        map[key].byMember[m.id].cost  += cost;
+        map[key].byMember[m.id].hrs   += h;
+        map[key].totalUnits += units;
+        map[key].totalCost  += cost;
+        map[key].totalHours += h;
+      });
+    }
+    return Object.values(map).map(m => ({
+      ...m,
+      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
+      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+    }));
+  }, [roster, hours]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived: turnaround simulation ────────────────────────────────────────
   const cohortRows: CohortRow[] = (() => {
@@ -225,6 +259,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     { id: 'thisweek'    as const, label: 'This week' },
     { id: 'schedule'    as const, label: '52-week planner' },
     { id: 'queue'       as const, label: 'Queue & Turnaround' },
+    { id: 'monthly'     as const, label: 'Monthly Summary' },
     { id: 'historicals' as const, label: 'Historicals' },
   ];
 
@@ -453,6 +488,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               Hours — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}
             </h3>
             <div className="flex items-center gap-2">
+              <InputModeToggle mode={resinInputMode} onChange={setResinInputMode} unitLabel="Orders" />
               <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0}
                 className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
               <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4}
@@ -482,13 +518,18 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                       </td>
                       {[0,1,2,3,4,5,6].map(di => {
                         const dayVal = resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0;
+                        const dayUnits = m.ratio > 0 ? dayVal / m.ratio : 0;
                         return (
                           <td key={di} className={`px-1 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/20' : ''}`}>
-                            <input type="number" value={dayVal || ''} placeholder="0" min={0} step={0.5}
+                            <input type="number"
+                              value={resinInputMode === 'output' ? (dayUnits ? round2(dayUnits) : '') : (dayVal || '')}
+                              placeholder="0" min={0} step={resinInputMode === 'output' ? 0.1 : 0.5}
                               onChange={e => {
+                                const raw = parseFloat(e.target.value) || 0;
+                                const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
                                 const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
                                 const prev = resinDailyHours[key] ?? Array(7).fill(0);
-                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? (parseFloat(e.target.value) || 0) : h) };
+                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? newHours : h) };
                                 setResinDailyHours(next);
                               }}
                               className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
@@ -537,6 +578,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               )}
             </div>
             <div className="flex items-center gap-2">
+              <InputModeToggle mode={resinInputMode} onChange={setResinInputMode} unitLabel="Orders" />
               <button
                 onClick={() => setWeekOffset(Math.max(0, weekOffset - WINDOW))}
                 disabled={weekOffset === 0}
@@ -584,20 +626,26 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                         <td key={w} className="px-1 py-1 text-center">
                           <input
                             type="number"
-                            value={h || ''}
+                            value={resinInputMode === 'output' ? (units ? round2(units) : '') : (h || '')}
                             placeholder="0"
                             min={0}
-                            onChange={e => updateHours(w, m.id, parseFloat(e.target.value) || 0)}
+                            step={resinInputMode === 'output' ? 0.1 : 1}
+                            onChange={e => {
+                              const raw = parseFloat(e.target.value) || 0;
+                              updateHours(w, m.id, resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
+                            }}
                             className="w-full text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none"
                           />
-                          {h > 0 && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              {units.toFixed(0)}u
-                              {showCPO && cpo !== null && (
-                                <span className="ml-1 text-purple-500">${cpo.toFixed(2)}</span>
-                              )}
-                            </div>
-                          )}
+                          {resinInputMode === 'output'
+                            ? (h > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{round2(h)}h</div>)
+                            : (h > 0 && (
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                {units.toFixed(0)}u
+                                {showCPO && cpo !== null && (
+                                  <span className="ml-1 text-purple-500">${cpo.toFixed(2)}</span>
+                                )}
+                              </div>
+                            ))}
                         </td>
                       );
                     })}
@@ -735,6 +783,17 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
           {/* Full queue table */}
           <ResinQueueTable />
         </div>
+      )}
+
+      {/* ── MONTHLY SUMMARY TAB ──────────────────────────────────────────────── */}
+      {activeTab === 'monthly' && (
+        <MonthlySummarySection
+          monthlyData={monthlyData}
+          members={roster.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
+          unitLabel="resin units"
+          unitAbbrev="u"
+          hasRates={hasRates}
+        />
       )}
 
       {/* ── HISTORICALS TAB ───────────────────────────────────────────────────── */}
