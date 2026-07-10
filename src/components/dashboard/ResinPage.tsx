@@ -528,8 +528,9 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                                 const raw = parseFloat(e.target.value) || 0;
                                 const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
                                 const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
-                                const prev = resinDailyHours[key] ?? Array(7).fill(0);
-                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? newHours : h) };
+                                const prev = resinDailyHours[key] ?? [];
+                                const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+                                const next = { ...resinDailyHours, [key]: padded.map((h: number, j: number) => j === di ? newHours : h) };
                                 setResinDailyHours(next);
                               }}
                               className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
