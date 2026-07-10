@@ -6,10 +6,12 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
+import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
+import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1368,9 +1370,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const mondayIso = monday.toISOString().split('T')[0];
   const sundayIso = addDays(mondayIso, 6);
 
-  const [presTab,       setPresTab]      = useState<'schedule' | 'historicals'>('schedule');
+  const [presTab,       setPresTab]      = useState<'schedule' | 'monthly' | 'historicals'>('schedule');
   const [showRoster,    setShowRoster]   = useState(false);
   const [weekOffset,    setWeekOffset]   = useState(0);
+  const [presInputMode, setPresInputMode] = useState<InputMode>('hours');
   const [activePresTab, setActivePresTab] = useState<'weekly' | '52week'>('weekly');
   const [presThisWeekOffset, setPresThisWeekOffset] = useState(0);
 
@@ -1747,6 +1750,37 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0)
   );
 
+  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  const monthlyData: MonthlyDatum[] = useMemo(() => {
+    const map: Record<string, {
+      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
+      byMember: Record<string, { units: number; cost: number; hrs: number }>;
+    }> = {};
+    for (let w = 0; w < WEEKS; w++) {
+      const key = getMonthKey(w);
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      map[key].weeks++;
+      team.forEach(m => {
+        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
+        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
+        const units = m.ratio > 0 ? prodH / m.ratio : 0;
+        const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
+        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
+        map[key].byMember[m.id].units += units;
+        map[key].byMember[m.id].cost  += cost;
+        map[key].byMember[m.id].hrs   += totalH;
+        map[key].totalUnits += units;
+        map[key].totalCost  += cost;
+        map[key].totalHours += totalH;
+      });
+    }
+    return Object.values(map).map(m => ({
+      ...m,
+      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
+      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+    }));
+  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates = canViewCPO && team.some(m => m.rate > 0);
 
@@ -1793,14 +1827,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         )}
       </div>
 
-      {/* Tabs: This Week | Schedule | Historicals */}
+      {/* Tabs: This Week | Schedule | Monthly Summary | Historicals */}
       {userRole !== 'viewer' && (
         <div className="flex border-b border-slate-200">
-          {(['schedule', 'historicals'] as const).map(t => (
+          {(['schedule', 'monthly', 'historicals'] as const).map(t => (
             <button key={t} onClick={() => setPresTab(t)}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}>{t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
+              }`}>{t === 'schedule' ? 'Schedule' : t === 'monthly' ? 'Monthly Summary' : 'Historicals'}</button>
           ))}
         </div>
       )}
@@ -2004,6 +2038,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                 <h3 className="text-sm font-semibold text-slate-700">Hours per team member — {presThisWeekOffset === 0 ? 'this week' : presThisWeekOffset === 1 ? 'next week' : `week +${presThisWeekOffset}`}</h3>
                 <div className="flex items-center gap-2">
                   {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                  <InputModeToggle mode={presInputMode} onChange={setPresInputMode} unitLabel="Frames" />
                   <button onClick={() => setPresThisWeekOffset(Math.max(0, presThisWeekOffset - 1))} disabled={presThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                   <button onClick={() => setPresThisWeekOffset(Math.min(4, presThisWeekOffset + 1))} disabled={presThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                 </div>
@@ -2044,9 +2079,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                               <div className="flex items-center gap-1">
                                 <div className="flex flex-col items-center">
                                   <span className="text-[8px] text-slate-300 mb-0.5">press</span>
-                                  <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
-                                    title={m.isManager ? 'Production hours' : 'Press hours'}
-                                    onChange={e => updateDailyHours(m.id, di, parseFloat(e.target.value) || 0)}
+                                  <input type="number"
+                                    value={presInputMode === 'output' ? (orders ? round2(orders) : '') : (prodH || '')}
+                                    placeholder="0" min="0" step={presInputMode === 'output' ? '0.1' : '0.5'}
+                                    title={m.isManager ? 'Production hours' : (presInputMode === 'output' ? 'Press orders' : 'Press hours')}
+                                    onChange={e => {
+                                      const raw = parseFloat(e.target.value) || 0;
+                                      updateDailyHours(m.id, di, presInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
+                                    }}
                                     className="w-12 border border-slate-200 rounded px-1 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                                 </div>
                                 <div className="flex flex-col items-center">
@@ -2067,7 +2107,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                   }}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
+                              {presInputMode === 'output'
+                                ? (prodH > 0 && <div className="text-slate-400 mt-0.5">{round2(prodH)}h</div>)
+                                : (orders > 0 && <div className="text-slate-400 mt-0.5">{round2(orders)} ord</div>)}
                               {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
@@ -2215,6 +2257,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                     {weeklyShopifyLoading && <span className="text-xs text-slate-400 italic">Loading event data…</span>}
                   </div>
                   <div className="flex items-center gap-2">
+                    <InputModeToggle mode={presInputMode} onChange={setPresInputMode} unitLabel="Frames" />
                     <button onClick={() => setWeekOffset(Math.max(0, weekOffset - WINDOW))} disabled={weekOffset === 0}
                       className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                     <span className="text-xs text-slate-400">
@@ -2253,8 +2296,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                             return (
                               <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                                 <input
-                                  type="number" value={prodH || ''} min="0" step="0.5" placeholder="0"
-                                  onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
+                                  type="number"
+                                  value={presInputMode === 'output' ? (orders ? round2(orders) : '') : (prodH || '')}
+                                  min="0" step={presInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
+                                  onChange={e => {
+                                    const raw = parseFloat(e.target.value) || 0;
+                                    updateHours(m.id, w, presInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
+                                  }}
                                   onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, prodH); }}
                                   title={m.isManager ? 'Production hours (right-click = all weeks)' : 'Right-click to apply to all weeks'}
                                   className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
@@ -2271,7 +2319,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
                                   />
                                 )}
-                                {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
+                                {presInputMode === 'output'
+                                  ? (prodH > 0 && <div className="text-slate-400 mt-0.5">{round2(prodH)}h</div>)
+                                  : (orders > 0 && <div className="text-slate-400 mt-0.5">{round2(orders)} ord</div>)}
                                 {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                               </td>
                             );
@@ -2378,6 +2428,17 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         </div>
       )}
 
+      {/* ── MONTHLY SUMMARY TAB ── */}
+      {presTab === 'monthly' && (
+        <MonthlySummarySection
+          monthlyData={monthlyData}
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
+          unitLabel="bouquets"
+          unitAbbrev="b"
+          hasRates={hasRates}
+        />
+      )}
+
       {/* ── HISTORICALS TAB ── */}
       {presTab === 'historicals' && userRole !== 'viewer' && (
         <HistoricalsSection
@@ -2418,7 +2479,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   canViewCPO?:           boolean;
   userRole?:             string;
 }) {
-  const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
+  const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'monthly' | 'historicals'>('thisweek');
+  const [ffInputMode, setFfInputMode] = useState<InputMode>('hours');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
   useEffect(() => { if (ffDailyHoursProp && Object.keys(ffDailyHoursProp).length > 0) setFfDailyHours(ffDailyHoursProp); }, [JSON.stringify(ffDailyHoursProp)]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -2516,6 +2578,37 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
   const hasRates   = canViewCPO && team.some(m => m.rate > 0);
 
+  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  const monthlyData: MonthlyDatum[] = useMemo(() => {
+    const map: Record<string, {
+      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
+      byMember: Record<string, { units: number; cost: number; hrs: number }>;
+    }> = {};
+    for (let w = 0; w < WEEKS; w++) {
+      const key = getMonthKey(w);
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      map[key].weeks++;
+      team.forEach(m => {
+        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
+        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
+        const units = m.ratio > 0 ? prodH / m.ratio : 0;
+        const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
+        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
+        map[key].byMember[m.id].units += units;
+        map[key].byMember[m.id].cost  += cost;
+        map[key].byMember[m.id].hrs   += totalH;
+        map[key].totalUnits += units;
+        map[key].totalCost  += cost;
+        map[key].totalHours += totalH;
+      });
+    }
+    return Object.values(map).map(m => ({
+      ...m,
+      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
+      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+    }));
+  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2545,11 +2638,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       </div>
 
       <div className="flex border-b border-slate-200">
-        {(['thisweek', 'schedule', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
+        {(['thisweek', 'schedule', 'monthly', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
           <button key={t} onClick={() => setFfTab(t)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               ffTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}>{t === 'thisweek' ? 'This Week' : t === 'schedule' ? 'Weekly Schedule' : 'Historicals'}</button>
+            }`}>{t === 'thisweek' ? 'This Week' : t === 'schedule' ? 'Weekly Schedule' : t === 'monthly' ? 'Monthly Summary' : 'Historicals'}</button>
         ))}
       </div>
 
@@ -2558,8 +2651,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         function getFFH(id: string, di: number) { return ffDailyHours[`${isoMonday(ffThisWeekOffset)}-${id}`]?.[di] ?? 0; }
         function setFFH(id: string, di: number, val: number) {
           const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
-          const prev = ffDailyHours[key] ?? Array(5).fill(0);
-          const next = { ...ffDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+          const prev = ffDailyHours[key] ?? [];
+          const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+          const next = { ...ffDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
         }
@@ -2568,8 +2662,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         }
         function setMgrTotalFFH(id: string, di: number, val: number) {
           const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
-          const prev = mgrTotalDailyHours[key] ?? Array(5).fill(0);
-          const next = { ...mgrTotalDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+          const prev = mgrTotalDailyHours[key] ?? [];
+          const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+          const next = { ...mgrTotalDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
           onMgrTotalDailyHoursChange(next);
         }
         function ffDailyCost(m: Omit<FfTeamMember, 'hours'> & { hours: unknown }, di: number) {
@@ -2591,6 +2686,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
               </div>
               <div className="flex items-center gap-2">
                 {ffHasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                <InputModeToggle mode={ffInputMode} onChange={setFfInputMode} unitLabel="Frames" />
                 <button onClick={() => setFfThisWeekOffset(Math.max(0, ffThisWeekOffset - 1))} disabled={ffThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                 <button onClick={() => setFfThisWeekOffset(Math.min(4, ffThisWeekOffset + 1))} disabled={ffThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
               </div>
@@ -2628,9 +2724,14 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                           const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
                           return (
                             <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-amber-50/30' : ''}`}>
-                              <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
+                              <input type="number"
+                                value={ffInputMode === 'output' ? (orders ? round2(orders) : '') : (h || '')}
+                                min="0" step={ffInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
                                 title={m.isManager ? 'Production hours' : undefined}
-                                onChange={e => setFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
+                                onChange={e => {
+                                  const raw = parseFloat(e.target.value) || 0;
+                                  setFFH(m.id, dayIdx, ffInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
+                                }}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                               {m.isManager && (
                                 <input type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
@@ -2638,7 +2739,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                   onChange={e => setMgrTotalFFH(m.id, dayIdx, parseFloat(e.target.value) || 0)}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
-                              {orders > 0 && <div className="text-slate-400 mt-0.5">{Math.round(orders * 100) / 100} ord</div>}
+                              {ffInputMode === 'output'
+                                ? (h > 0 && <div className="text-slate-400 mt-0.5">{round2(h)}h</div>)
+                                : (orders > 0 && <div className="text-slate-400 mt-0.5">{round2(orders)} ord</div>)}
                               {ffHasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                             </td>
                           );
@@ -2722,6 +2825,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
             <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 flex-wrap gap-2">
               <h3 className="text-sm font-semibold text-slate-700">Hours per team member per week</h3>
               <div className="flex items-center gap-2">
+                <InputModeToggle mode={ffInputMode} onChange={setFfInputMode} unitLabel="Frames" />
                 <button onClick={() => setWeekOffset(Math.max(0, weekOffset - WINDOW))} disabled={weekOffset === 0}
                   className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                 <span className="text-xs text-slate-400">{getWeekLabel(weekOffset)} – {getWeekLabel(weekOffset + WINDOW - 1)}</span>
@@ -2757,8 +2861,13 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                         const cpo = !m.isManager && o > 0 && cost > 0 ? cost / o : null;
                         return (
                           <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
-                            <input type="number" value={prodH || ''} placeholder="0" min="0" step="0.5"
-                              onChange={e => updateHours(m.id, w, parseFloat(e.target.value) || 0)}
+                            <input type="number"
+                              value={ffInputMode === 'output' ? (o ? round2(o) : '') : (prodH || '')}
+                              placeholder="0" min="0" step={ffInputMode === 'output' ? '0.1' : '0.5'}
+                              onChange={e => {
+                                const raw = parseFloat(e.target.value) || 0;
+                                updateHours(m.id, w, ffInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
+                              }}
                               onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, prodH); }}
                               title={m.isManager ? 'Production hours' : 'Right-click to apply to all weeks'}
                               className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
@@ -2780,7 +2889,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                 title="Total hours (production + managerial) — right-click to apply to all weeks"
                                 className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                             )}
-                            {o > 0 && <div className="text-slate-400 mt-0.5">{Math.round(o * 100) / 100} ord</div>}
+                            {ffInputMode === 'output'
+                              ? (prodH > 0 && <div className="text-slate-400 mt-0.5">{round2(prodH)}h</div>)
+                              : (o > 0 && <div className="text-slate-400 mt-0.5">{round2(o)} ord</div>)}
                             {cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                           </td>
                         );
@@ -2811,6 +2922,16 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           </div>
           <p className="text-xs text-slate-400">Right-click any hours cell to apply that value to all 52 weeks for that team member.</p>
         </>
+      )}
+
+      {ffTab === 'monthly' && (
+        <MonthlySummarySection
+          monthlyData={monthlyData}
+          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
+          unitLabel="orders"
+          unitAbbrev="o"
+          hasRates={hasRates}
+        />
       )}
 
       {ffTab === 'historicals' && (
@@ -3516,6 +3637,7 @@ export function SchedulePage({
   const [showRoster,   setShowRoster]  = useState(false);
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
+  const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
@@ -4082,8 +4204,9 @@ export function SchedulePage({
             function getDH(id: string, di: number) { return designDailyHours[`${isoMonday(designThisWeekOffset)}-${id}`]?.[di] ?? 0; }
             function setDH(id: string, di: number, val: number) {
               const key = `${isoMonday(designThisWeekOffset)}-${id}`;
-              const prev = designDailyHours[key] ?? Array(5).fill(0);
-              const next = { ...designDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+              const prev = designDailyHours[key] ?? [];
+              const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+              const next = { ...designDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
               setDesignDailyHours(next);
               update('designDailyHours', next);
             }
@@ -4092,8 +4215,9 @@ export function SchedulePage({
             }
             function setMgrTotalDH(id: string, di: number, val: number) {
               const key = `${isoMonday(designThisWeekOffset)}-${id}`;
-              const prev = settings.mgrTotalDailyHours[key] ?? Array(5).fill(0);
-              const next = { ...settings.mgrTotalDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+              const prev = settings.mgrTotalDailyHours[key] ?? [];
+              const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+              const next = { ...settings.mgrTotalDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
               update('mgrTotalDailyHours', next);
             }
             function dDailyCost(d: Designer, di: number) {
@@ -4115,6 +4239,7 @@ export function SchedulePage({
                   </div>
                   <div className="flex items-center gap-2">
                     {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
+                    <InputModeToggle mode={designInputMode} onChange={setDesignInputMode} unitLabel="Frames" />
                     <button onClick={() => setDesignThisWeekOffset(Math.max(0, designThisWeekOffset - 1))} disabled={designThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                     <button onClick={() => setDesignThisWeekOffset(Math.min(4, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
@@ -4154,9 +4279,14 @@ export function SchedulePage({
                               const cpo = !isMgr && frames > 0 && cost > 0 ? cost / frames : null;
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
-                                  <input type="number" value={h || ''} min="0" step="0.5" placeholder="0"
+                                  <input type="number"
+                                    value={designInputMode === 'output' ? (frames ? round2(frames) : '') : (h || '')}
+                                    min="0" step={designInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
                                     title={isMgr ? 'Production hours' : undefined}
-                                    onChange={e => setDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
+                                    onChange={e => {
+                                      const raw = parseFloat(e.target.value) || 0;
+                                      setDH(d.id, dayIdx, designInputMode === 'output' ? hoursFromOutput(raw, d.ratio) : raw);
+                                    }}
                                     className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                                   {isMgr && (
                                     <input type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
@@ -4164,7 +4294,9 @@ export function SchedulePage({
                                       onChange={e => setMgrTotalDH(d.id, dayIdx, parseFloat(e.target.value) || 0)}
                                       className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                                   )}
-                                  {frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames * 100) / 100}f</div>}
+                                  {designInputMode === 'output'
+                                    ? (h > 0 && <div className="text-slate-400 mt-0.5">{round2(h)}h</div>)
+                                    : (frames > 0 && <div className="text-slate-400 mt-0.5">{round2(frames)}f</div>)}
                                   {hasRates && cpo !== null && <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>}
                                 </td>
                               );
@@ -4214,6 +4346,7 @@ export function SchedulePage({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <InputModeToggle mode={designInputMode} onChange={setDesignInputMode} unitLabel="Frames" />
                   <button onClick={() => setWeekOffset(Math.max(0, weekOffset - WINDOW))} disabled={weekOffset === 0}
                     className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
                   <span className="text-xs text-slate-400">
@@ -4251,8 +4384,14 @@ export function SchedulePage({
                           return (
                             <td key={w} className={`px-2 py-1.5 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
                               <input
-                                type="number" value={hrs || ''} min="0" step="0.5" placeholder="0"
-                                onChange={e => handleHoursChange(w, d.id, e.target.value)}
+                                type="number"
+                                value={designInputMode === 'output' ? (frames ? round2(frames) : '') : (hrs || '')}
+                                min="0" step={designInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
+                                onChange={e => {
+                                  const raw = parseFloat(e.target.value) || 0;
+                                  const newHours = designInputMode === 'output' ? hoursFromOutput(raw, d.ratio) : raw;
+                                  handleHoursChange(w, d.id, String(newHours));
+                                }}
                                 onContextMenu={e => { e.preventDefault(); applyToAllWeeks(d.id, hrs); }}
                                 title={isDesignMgr ? 'Production hours' : 'Right-click to apply to all weeks'}
                                 className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
@@ -4265,9 +4404,9 @@ export function SchedulePage({
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
                                 />
                               )}
-                              {frames > 0 && (
-                                <div className="text-slate-400 mt-0.5">{Math.round(frames)}f</div>
-                              )}
+                              {designInputMode === 'output'
+                                ? (hrs > 0 && <div className="text-slate-400 mt-0.5">{round2(hrs)}h</div>)
+                                : (frames > 0 && <div className="text-slate-400 mt-0.5">{Math.round(frames)}f</div>)}
                               {showCPO && !isDesignMgr && cpo !== null && (
                                 <div className="text-amber-600 text-[10px]">{fmt$(cpo)}</div>
                               )}
