@@ -6,7 +6,6 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
-import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
@@ -1370,7 +1369,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const mondayIso = monday.toISOString().split('T')[0];
   const sundayIso = addDays(mondayIso, 6);
 
-  const [presTab,       setPresTab]      = useState<'schedule' | 'monthly' | 'historicals'>('schedule');
+  const [presTab,       setPresTab]      = useState<'schedule' | 'historicals'>('schedule');
   const [showRoster,    setShowRoster]   = useState(false);
   const [weekOffset,    setWeekOffset]   = useState(0);
   const [presInputMode, setPresInputMode] = useState<InputMode>('hours');
@@ -1750,37 +1749,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0)
   );
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
-  const monthlyData: MonthlyDatum[] = useMemo(() => {
-    const map: Record<string, {
-      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
-      byMember: Record<string, { units: number; cost: number; hrs: number }>;
-    }> = {};
-    for (let w = 0; w < WEEKS; w++) {
-      const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
-      map[key].weeks++;
-      team.forEach(m => {
-        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
-        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
-        const units = m.ratio > 0 ? prodH / m.ratio : 0;
-        const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
-        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
-        map[key].byMember[m.id].units += units;
-        map[key].byMember[m.id].cost  += cost;
-        map[key].byMember[m.id].hrs   += totalH;
-        map[key].totalUnits += units;
-        map[key].totalCost  += cost;
-        map[key].totalHours += totalH;
-      });
-    }
-    return Object.values(map).map(m => ({
-      ...m,
-      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
-      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
-    }));
-  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates = canViewCPO && team.some(m => m.rate > 0);
 
@@ -1827,14 +1795,14 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         )}
       </div>
 
-      {/* Tabs: This Week | Schedule | Monthly Summary | Historicals */}
+      {/* Tabs: Schedule | Historicals */}
       {userRole !== 'viewer' && (
         <div className="flex border-b border-slate-200">
-          {(['schedule', 'monthly', 'historicals'] as const).map(t => (
+          {(['schedule', 'historicals'] as const).map(t => (
             <button key={t} onClick={() => setPresTab(t)}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 presTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-              }`}>{t === 'schedule' ? 'Schedule' : t === 'monthly' ? 'Monthly Summary' : 'Historicals'}</button>
+              }`}>{t === 'schedule' ? 'Schedule' : 'Historicals'}</button>
           ))}
         </div>
       )}
@@ -2428,17 +2396,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         </div>
       )}
 
-      {/* ── MONTHLY SUMMARY TAB ── */}
-      {presTab === 'monthly' && (
-        <MonthlySummarySection
-          monthlyData={monthlyData}
-          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
-          unitLabel="bouquets"
-          unitAbbrev="b"
-          hasRates={hasRates}
-        />
-      )}
-
       {/* ── HISTORICALS TAB ── */}
       {presTab === 'historicals' && userRole !== 'viewer' && (
         <HistoricalsSection
@@ -2479,7 +2436,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   canViewCPO?:           boolean;
   userRole?:             string;
 }) {
-  const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'monthly' | 'historicals'>('thisweek');
+  const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffInputMode, setFfInputMode] = useState<InputMode>('hours');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
@@ -2578,37 +2535,6 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
   const hasRates   = canViewCPO && team.some(m => m.rate > 0);
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
-  const monthlyData: MonthlyDatum[] = useMemo(() => {
-    const map: Record<string, {
-      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
-      byMember: Record<string, { units: number; cost: number; hrs: number }>;
-    }> = {};
-    for (let w = 0; w < WEEKS; w++) {
-      const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
-      map[key].weeks++;
-      team.forEach(m => {
-        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
-        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
-        const units = m.ratio > 0 ? prodH / m.ratio : 0;
-        const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
-        if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
-        map[key].byMember[m.id].units += units;
-        map[key].byMember[m.id].cost  += cost;
-        map[key].byMember[m.id].hrs   += totalH;
-        map[key].totalUnits += units;
-        map[key].totalCost  += cost;
-        map[key].totalHours += totalH;
-      });
-    }
-    return Object.values(map).map(m => ({
-      ...m,
-      monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
-      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
-    }));
-  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -2638,11 +2564,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
       </div>
 
       <div className="flex border-b border-slate-200">
-        {(['thisweek', 'schedule', 'monthly', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
+        {(['thisweek', 'schedule', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
           <button key={t} onClick={() => setFfTab(t)}
             className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               ffTab === t ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}>{t === 'thisweek' ? 'This Week' : t === 'schedule' ? 'Weekly Schedule' : t === 'monthly' ? 'Monthly Summary' : 'Historicals'}</button>
+            }`}>{t === 'thisweek' ? 'This Week' : t === 'schedule' ? 'Weekly Schedule' : 'Historicals'}</button>
         ))}
       </div>
 
@@ -2922,16 +2848,6 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           </div>
           <p className="text-xs text-slate-400">Right-click any hours cell to apply that value to all 52 weeks for that team member.</p>
         </>
-      )}
-
-      {ffTab === 'monthly' && (
-        <MonthlySummarySection
-          monthlyData={monthlyData}
-          members={team.map(m => ({ id: m.id, name: m.name, payType: m.payType }))}
-          unitLabel="orders"
-          unitAbbrev="o"
-          hasRates={hasRates}
-        />
       )}
 
       {ffTab === 'historicals' && (
