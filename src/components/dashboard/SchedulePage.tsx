@@ -6,7 +6,12 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
-import { MonthlySummarySection, type MonthlyDatum, type MonthlyDataMode } from './MonthlySummarySection';
+import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
+
+// MonthlySummarySection doesn't (currently) support a mode toggle, so this is
+// kept local rather than imported — the mode state below still drives the
+// monthlyData blending logic, just without a UI switch wired to it.
+type MonthlyDataMode = 'actual' | 'projected' | 'blended';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays, usePersonTimeOff } from './useScheduleSettings';
@@ -2612,8 +2617,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           unitLabel="bouquets"
           unitAbbrev="b"
           hasRates={hasRates}
-          mode={presMonthlyMode}
-          onModeChange={setPresMonthlyMode}
         />
       )}
 
@@ -3177,8 +3180,6 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           unitLabel="orders"
           unitAbbrev="o"
           hasRates={hasRates}
-          mode={ffMonthlyMode}
-          onModeChange={setFfMonthlyMode}
         />
       )}
 
@@ -5276,8 +5277,6 @@ export function SchedulePage({
               unitAbbrev="f"
               hasRates={hasRates}
               memberColumnLabel="Designer"
-              mode={designMonthlyMode}
-              onModeChange={setDesignMonthlyMode}
             />
           )}
 

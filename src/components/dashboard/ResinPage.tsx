@@ -3,8 +3,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useScheduleSettings, usePaidHolidays, usePersonTimeOff } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, weeksSinceTrackingStart, sumDaily, distributeWeeklyToDaily } from '@/lib/weekDates';
-import { MonthlySummarySection, type MonthlyDatum, type MonthlyDataMode } from './MonthlySummarySection';
+import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
+
+// MonthlySummarySection doesn't (currently) support a mode toggle, so this is
+// kept local rather than imported — the mode state below still drives the
+// monthlyData blending logic, just without a UI switch wired to it.
+type MonthlyDataMode = 'actual' | 'projected' | 'blended';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -842,8 +847,6 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
           unitLabel="resin units"
           unitAbbrev="u"
           hasRates={hasRates}
-          mode={resinMonthlyMode}
-          onModeChange={setResinMonthlyMode}
         />
       )}
 
