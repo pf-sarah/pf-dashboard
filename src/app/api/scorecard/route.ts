@@ -63,8 +63,11 @@ const ALL_CPO_DEPTS = ['Design', 'Preservation', 'Fulfillment', 'G&A', 'Resin'];
 //   months    = number of months to return (default: 13 for YTD + prev)
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const isSyncCaller = req.headers.get('authorization') === `Bearer ${process.env.SCORECARDS_SYNC_SECRET}`;
+  if (!isSyncCaller) {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const locationParam = req.nextUrl.searchParams.get('location') ?? 'both';
   const monthParam    = req.nextUrl.searchParams.get('month');   // "2026-03"
