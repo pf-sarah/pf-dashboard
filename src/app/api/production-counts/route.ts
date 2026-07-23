@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { pfPost, pfGet } from '@/lib/pf-api';
 import { supabase } from '@/lib/supabase';
+import { loadStaffLocationMap, resolveOrderLocation, type LocationDetails } from '@/lib/orderLocation';
 
 export const maxDuration = 120;
 
@@ -20,7 +21,7 @@ interface DetailsHistory {
   dateCreated: string;
 }
 
-interface Details {
+interface Details extends LocationDetails {
   variantTitle?: string;
   eventDate?: string;
   preservationUserFirstName?: string;
@@ -74,6 +75,7 @@ export async function GET(req: NextRequest) {
 
   const start    = req.nextUrl.searchParams.get('start');
   const end      = req.nextUrl.searchParams.get('end');
+  const location = req.nextUrl.searchParams.get('location') ?? 'All';
   if (!start || !end) return NextResponse.json({ error: 'start and end required' }, { status: 400 });
 
   // Supabase first_seen_at is when our snapshot ran (UTC), not when the status changed.
@@ -84,14 +86,15 @@ export async function GET(req: NextRequest) {
   const endISO   = new Date(new Date(`${end}T23:59:59-06:00`).getTime() + BUFFER_MS).toISOString();
 
   const queryStatus = (status: string) => {
+    // Don't filter by order_status_history.location here — it's only reliably
+    // populated for GA-tagged orders, so most Utah rows sit blank until someone
+    // runs the Resolve Locations admin job. We resolve location live below instead.
     const q = supabase
       .from('order_status_history')
       .select('order_num')
       .eq('status', status)
       .gte('first_seen_at', startISO)
       .lte('first_seen_at', endISO);
-    // Don't filter by location here — some orders have blank location in snapshot.
-    // Location filtering happens via the PF Details endpoint which has accurate location.
     return q.then(r => [...new Set((r.data ?? []).map(x => x.order_num))]);
   };
 
@@ -120,6 +123,8 @@ export async function GET(req: NextRequest) {
     if (!allNums.length) {
       return NextResponse.json({ Preservation: [], Design: [], Fulfillment: [] });
     }
+
+    const staffLocationMap = await loadStaffLocationMap();
 
     // ── Fetch Details for all orders ─────────────────────────────────────────
     // Deduplicate to unique order numbers for API calls — same call count as before.
@@ -174,6 +179,7 @@ export async function GET(req: NextRequest) {
         const num = key.split('|')[0];
         const details = detailsByNum[key];
         if (!details) return;
+        if (location !== 'All' && resolveOrderLocation(details, staffLocationMap) !== location) return;
 
         const rawDate = historyEntry(details, historyStatus)?.dateCreated;
         if (!rawDate) return;

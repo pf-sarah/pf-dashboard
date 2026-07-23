@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useScheduleSettings } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
-import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
+import { useScheduleSettings, usePaidHolidays, usePersonTimeOff } from './useScheduleSettings';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, weeksSinceTrackingStart, sumDaily, distributeWeeklyToDaily } from '@/lib/weekDates';
+import { MonthlySummarySection, type MonthlyDatum, type MonthlyDataMode } from './MonthlySummarySection';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [showCPO, setShowCPO] = useState(false);
   const [resinInputMode, setResinInputMode] = useState<InputMode>('hours');
+  const [resinMonthlyMode, setResinMonthlyMode] = useState<MonthlyDataMode>('blended');
   const [queueSummary, setQueueSummary] = useState<QueueSummary | null>(null);
   const [queueLoading, setQueueLoading] = useState(true);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -105,6 +106,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
 
   const { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState } =
     useResinSettings();
+  const { holidays: paidHolidays } = usePaidHolidays();
+  const { timeOff: personTimeOff } = usePersonTimeOff();
 
   // Fetch queue summary
   useEffect(() => {
@@ -132,20 +135,45 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     return total / 8;
   })();
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  // ── Monthly aggregation (blends recorded actuals over the scheduled plan) ─────
+  const resinActualsByWeekMember = useMemo(() => {
+    const map: Record<string, { hours: number; units: number }> = {};
+    actuals.forEach(r => {
+      const key = `${r.weekOf}:${r.memberId}`;
+      const existing = map[key] ?? { hours: 0, units: 0 };
+      map[key] = { hours: existing.hours + r.hours, units: existing.units + r.units };
+    });
+    return map;
+  }, [actuals]);
+
   const monthlyData: MonthlyDatum[] = useMemo(() => {
     const map: Record<string, {
       monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
       byMember: Record<string, { units: number; cost: number; hrs: number }>;
+      weeksWithActual: Set<string>; isCurrent: boolean;
     }> = {};
-    for (let w = 0; w < WEEKS; w++) {
+    const pastWeeks = weeksSinceTrackingStart();
+    for (let w = -pastWeeks; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
       const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {}, weeksWithActual: new Set(), isCurrent: false };
       map[key].weeks++;
-      const weekHours = hours[isoMonday(w)] ?? {};
+      if (w === 0) map[key].isCurrent = true;
+      const weekHours = hours[weekIso] ?? {};
       roster.forEach(m => {
-        const h = weekHours[m.id] ?? 0;
-        const units = m.ratio > 0 ? h / m.ratio : 0;
+        const actual = resinActualsByWeekMember[`${weekIso}:${m.id}`];
+        const hasActual = !!(actual && actual.hours > 0);
+        if (hasActual) map[key].weeksWithActual.add(weekIso); // tracked regardless of mode — drives badges + "projected only" filtering
+        if (resinMonthlyMode === 'actual' && !hasActual) return; // no recorded actuals — skip this member-week
+        const useActual = resinMonthlyMode !== 'projected' && hasActual;
+        let units: number, h: number;
+        if (useActual) {
+          units = actual!.units;
+          h = actual!.hours;
+        } else {
+          h = weekHours[m.id] ?? 0;
+          units = m.ratio > 0 ? h / m.ratio : 0;
+        }
         const cost = m.payType === 'hourly' ? h * m.hourlyRate : (m.annualSalary / 52 / 5) * (h / 8);
         if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
         map[key].byMember[m.id].units += units;
@@ -156,12 +184,15 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
         map[key].totalHours += h;
       });
     }
-    return Object.values(map).map(m => ({
+    const results = Object.values(map).map(({ weeksWithActual, ...m }) => ({
       ...m,
       monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
       monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+      allActual:    weeksWithActual.size === m.weeks,
+      anyActual:    weeksWithActual.size > 0,
     }));
-  }, [roster, hours]); // eslint-disable-line react-hooks/exhaustive-deps
+    return resinMonthlyMode === 'projected' ? results.filter(m => !m.anyActual) : results;
+  }, [roster, hours, resinActualsByWeekMember, resinMonthlyMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived: turnaround simulation ────────────────────────────────────────
   const cohortRows: CohortRow[] = (() => {
@@ -200,6 +231,12 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     const key = isoMonday(weekIdx);
     const next = { ...hours, [key]: { ...(hours[key] ?? {}), [memberId]: val } };
     setHours(next);
+    // Keep the "This Week" daily breakdown in sync for weeks it also covers.
+    if (weekIdx >= 0 && weekIdx <= 4) {
+      const dailyKey = `${key}-${memberId}`;
+      const nextDaily = { ...resinDailyHours, [dailyKey]: distributeWeeklyToDaily(val, resinDailyHours[dailyKey]) };
+      setResinDailyHours(nextDaily);
+    }
   }
 
   function updateRosterField(id: string, field: keyof ResinMember, val: string | number) {
@@ -519,8 +556,17 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                       {[0,1,2,3,4,5,6].map(di => {
                         const dayVal = resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0;
                         const dayUnits = m.ratio > 0 ? dayVal / m.ratio : 0;
+                        const dayDate = getMondayDate(thisWeekOffset);
+                        dayDate.setDate(dayDate.getDate() + di);
+                        const dIso = dayDate.toISOString().split('T')[0];
+                        const dOff = paidHolidays.includes(dIso) || (personTimeOff[m.id] ?? []).includes(dIso);
                         return (
                           <td key={di} className={`px-1 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/20' : ''}`}>
+                            {dOff && (
+                              <div className="text-[9px] font-medium text-amber-600">
+                                {paidHolidays.includes(dIso) ? 'Hol' : 'OOO'}
+                              </div>
+                            )}
                             <input type="number"
                               value={resinInputMode === 'output' ? (dayUnits ? round2(dayUnits) : '') : (dayVal || '')}
                               placeholder="0" min={0} step={resinInputMode === 'output' ? 0.1 : 0.5}
@@ -529,8 +575,11 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                                 const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
                                 const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
                                 const prev = resinDailyHours[key] ?? Array(7).fill(0);
-                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? newHours : h) };
+                                const nextDaily = prev.map((h: number, j: number) => j === di ? newHours : h);
+                                const next = { ...resinDailyHours, [key]: nextDaily };
                                 setResinDailyHours(next);
+                                const monday = isoMonday(thisWeekOffset);
+                                setHours({ ...hours, [monday]: { ...(hours[monday] ?? {}), [m.id]: sumDaily(nextDaily) } });
                               }}
                               className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
                           </td>
@@ -793,6 +842,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
           unitLabel="resin units"
           unitAbbrev="u"
           hasRates={hasRates}
+          mode={resinMonthlyMode}
+          onModeChange={setResinMonthlyMode}
         />
       )}
 

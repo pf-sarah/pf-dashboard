@@ -39,9 +39,12 @@ export type WeeklyHoursMap = Record<string, Record<string, number>>;
 // this daily breakdown belongs to.
 export type DailyHoursMap = Record<string, number[]>;
 
-// personId → { defaultHours, overrides: { isoDate → hours } }
+// personId → { defaultHours, overrides: { isoDate → hours }, workDays }
+// workDays: weekday indices (0=Mon..6=Sun) this person normally works.
+// Defaults to Mon-Fri ([0,1,2,3,4]) when unset, for people who don't have a
+// standard 5-day week.
 export interface MasterAvailability {
-  [personId: string]: { defaultHours: number; overrides: Record<string, number> };
+  [personId: string]: { defaultHours: number; overrides: Record<string, number>; workDays?: number[] };
 }
 
 export interface ScheduleSettings {
@@ -215,4 +218,59 @@ export function usePaidHolidays() {
   }, [persist]);
 
   return { holidays, loading, saveState, addHoliday, removeHoliday };
+}
+
+// Per-person time off (PTO/OOO): personId → ISO dates. Staff ids are already
+// globally unique (ut-*/ga-*), so like paidHolidays this is stored under a
+// single location-agnostic 'Global' row rather than duplicated per location.
+export function usePersonTimeOff() {
+  const [timeOff, setTimeOff] = useState<Record<string, string[]>>({});
+  const [loading,  setLoading]  = useState(true);
+  const [saveState, setSaveState] = useState<'idle'|'saving'|'saved'|'error'>('idle');
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/schedule-settings?location=Global')
+      .then(r => r.json())
+      .then((data: { personTimeOff?: Record<string, string[]> }) => setTimeOff(data.personTimeOff ?? {}))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const persist = useCallback(async (next: Record<string, string[]>) => {
+    setSaveState('saving');
+    try {
+      const res = await fetch('/api/schedule-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: 'Global', key: 'personTimeOff', value: next }),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 1500);
+    } catch {
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
+    }
+  }, []);
+
+  const addTimeOff = useCallback((personId: string, isoDateStr: string) => {
+    setTimeOff(prev => {
+      const existing = prev[personId] ?? [];
+      if (existing.includes(isoDateStr)) return prev;
+      const next = { ...prev, [personId]: [...existing, isoDateStr].sort() };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const removeTimeOff = useCallback((personId: string, isoDateStr: string) => {
+    setTimeOff(prev => {
+      const next = { ...prev, [personId]: (prev[personId] ?? []).filter(d => d !== isoDateStr) };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  return { timeOff, loading, saveState, addTimeOff, removeTimeOff };
 }

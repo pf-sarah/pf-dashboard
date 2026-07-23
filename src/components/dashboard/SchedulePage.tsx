@@ -6,11 +6,11 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
-import { MonthlySummarySection, type MonthlyDatum } from './MonthlySummarySection';
+import { MonthlySummarySection, type MonthlyDatum, type MonthlyDataMode } from './MonthlySummarySection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
-import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
+import { useScheduleSettings, usePaidHolidays, usePersonTimeOff } from './useScheduleSettings';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, weeksSinceTrackingStart, isoMondayFromDate, sumDaily, distributeWeeklyToDaily } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +37,21 @@ interface WeekSchedule {
 const WEEKS              = 52;
 const WINDOW             = 8;
 const PRESERVATION_WEEKS = 6;
+// Stretch-goal turnaround bands. Fulfillment always adds FULFILLMENT_WEEKS
+// on top of the design-only figure, so the two bands are meant to line up:
+// 8 + 2 = 10 and 14 + 2 = 16.
+const FULFILLMENT_WEEKS      = 2;
+const DESIGN_TARGET_MIN      = 8;
+const DESIGN_TARGET_MAX      = 14;
+const TOTAL_TARGET_MIN       = DESIGN_TARGET_MIN + FULFILLMENT_WEEKS;
+const TOTAL_TARGET_MAX       = DESIGN_TARGET_MAX + FULFILLMENT_WEEKS;
+// How many weeks past the November checkpoint the capacity solver requires the
+// turnaround to *hold* in-band. Bounded rather than run to the end of the 52-week
+// simulation array — cohorts arriving very late in that array have almost no
+// simulated weeks left to clear regardless of capacity, which would otherwise force
+// the solver to way overshoot chasing an artifact of the horizon length, not a real
+// capacity shortfall.
+const SUSTAIN_CHECK_WEEKS    = 16;
 // Default projection ratio for auto-filled "bouquets received" estimates:
 // same week last year × this multiplier. Editable per week.
 const DEFAULT_INTAKE_MULTIPLIER = 1.2;
@@ -184,6 +199,34 @@ function turnaroundColors(totalWeeks: number | null, overstaffed: boolean) {
   if (totalWeeks <= 10)    return { bar: 'bg-green-400',  text: 'text-green-700',  label: `~${totalWeeks} wks — ideal` };
   if (totalWeeks <= 18)    return { bar: 'bg-amber-400',  text: 'text-amber-700',  label: `~${totalWeeks} wks — backlog building` };
   return                          { bar: 'bg-red-600',    text: 'text-red-800',    label: `~${totalWeeks} wks — large backlog` };
+}
+
+// Pure FIFO simulation: given a starting designable queue, a per-week inflow of
+// cohorts graduating out of preservation, and a per-week design capacity (frames),
+// returns for each week w the total weeks (received → frame completed) for a bouquet
+// received in week w — or null if the queue never clears within the horizon.
+// Shared by the live turnaround projection and the capacity-goal solver below so
+// both always agree on how capacity translates into turnaround.
+function simulateDesignTurnarounds(startQueue: number, graduatingByWeek: number[], frameCapacityByWeek: number[]): (number | null)[] {
+  const weeks = frameCapacityByWeek.length;
+  const queueAtStart: number[] = [startQueue];
+  for (let w = 0; w < weeks - 1; w++) {
+    const afterDrain    = Math.max(0, queueAtStart[w] - frameCapacityByWeek[w]);
+    const afterGraduate = afterDrain + (graduatingByWeek[w + 1] ?? 0);
+    queueAtStart.push(afterGraduate);
+  }
+  return Array.from({ length: weeks }, (_, w) => {
+    const graduateWeek = w + PRESERVATION_WEEKS;
+    if (graduateWeek >= weeks) return null;
+    const queueAhead = queueAtStart[graduateWeek];
+    const cohortSize = graduatingByWeek[w] ?? 0;
+    let remaining    = queueAhead + cohortSize;
+    for (let fw = graduateWeek; fw < weeks; fw++) {
+      remaining -= frameCapacityByWeek[fw];
+      if (remaining <= 0) return fw - w;
+    }
+    return null;
+  });
 }
 
 // ─── RosterEditor ──────────────────────────────────────────────────────────────
@@ -1337,7 +1380,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
 }
 
 function PreservationSection({ location, preservationQueue, countsLoading, teamActuals, onActualsSaved,
-  presHours, presDailyHours, presCheckHours, onPresDailyHoursChange, onPresCheckHoursChange, presRoster, presSettings, mgrTotalHours, mgrTotalDailyHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, onMgrTotalDailyHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin' }: {
+  presHours, presDailyHours, presCheckHours, onPresDailyHoursChange, onPresCheckHoursChange, presRoster, presSettings, mgrTotalHours, mgrTotalDailyHours, onPresHoursChange, onPresRosterChange, onPresSettingsChange, onMgrTotalHoursChange, onMgrTotalDailyHoursChange, employeeRates = {}, weeklyEstimates = {}, presActuals = {}, onReceivedSaved, canViewCPO = true, userRole = 'admin', paidHolidays = [], personTimeOff = {}, masterAvailability = {} }: {
   location:              'Utah' | 'Georgia';
   preservationQueue:     number;
   countsLoading:         boolean;
@@ -1363,6 +1406,9 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   onReceivedSaved?:      () => void;
   canViewCPO?:           boolean;
   userRole?:             string;
+  paidHolidays?:         string[];
+  personTimeOff?:        Record<string, string[]>;
+  masterAvailability?:   Record<string, { defaultHours: number; overrides: Record<string, number>; workDays?: number[] }>;
 }) {
   const today    = new Date();
   const monday   = new Date(today);
@@ -1371,6 +1417,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const sundayIso = addDays(mondayIso, 6);
 
   const [presTab,       setPresTab]      = useState<'schedule' | 'monthly' | 'historicals'>('schedule');
+  const [presMonthlyMode, setPresMonthlyMode] = useState<MonthlyDataMode>('blended');
   const [showRoster,    setShowRoster]   = useState(false);
   const [weekOffset,    setWeekOffset]   = useState(0);
   const [presInputMode, setPresInputMode] = useState<InputMode>('hours');
@@ -1386,7 +1433,23 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
 
   // ── Check settings + daily received ──────────────────────────────────────
+  // dailyReceived holds only explicit manual overrides; autoReceived is pulled from
+  // PF's own "entered bouquetReceived" history so managers no longer have to type
+  // this in by hand. Manual overrides always win when both exist for a day.
   const dailyReceived: Record<string, number> = presSettings.dailyReceived ?? {};
+  const [autoReceived, setAutoReceived] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const monday     = isoMonday(presThisWeekOffset);
+    const rangeStart = addDays(monday, -21);
+    const rangeEnd   = addDays(monday, 6);
+    fetch(`/api/preservation-received?start=${rangeStart}&end=${rangeEnd}&location=${encodeURIComponent(location)}`)
+      .then(r => r.json())
+      .then((d: { byDate?: Record<string, number> }) => {
+        if (d.byDate) setAutoReceived(prev => ({ ...prev, ...d.byDate }));
+      })
+      .catch(() => {});
+  }, [presThisWeekOffset, location]);
+  const effectiveReceived: Record<string, number> = { ...autoReceived, ...dailyReceived };
   const checkSettings = presSettings.checkSettings ?? {};
   const c1Min  = checkSettings.c1Min  ?? 2;
   const c1Max  = checkSettings.c1Max  ?? 3;
@@ -1410,86 +1473,64 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
   // For a given day ISO, compute how many bouquets need each check type
   // based on prior dailyReceived entries
-  // Snap a date to the nearest weekday: Saturday -> Friday, Sunday -> Monday
-  function snapToWeekday(iso: string): string {
+  const holidaySet = new Set(paidHolidays);
+
+  // Walk a date backward past weekends and paid holidays to the nearest earlier business day
+  // (a check due Sat/Sun/holiday is done the business day before, never pushed later).
+  function snapToBusinessDay(iso: string): string {
     const d = new Date(iso + 'T12:00:00');
-    const dow = d.getDay();
-    if (dow === 6) d.setDate(d.getDate() - 1); // Saturday -> Friday
-    if (dow === 0) d.setDate(d.getDate() + 1); // Sunday -> Monday
-    return d.toISOString().split('T')[0];
+    for (;;) {
+      const dow = d.getDay();
+      const cur = d.toISOString().split('T')[0];
+      if (dow !== 0 && dow !== 6 && !holidaySet.has(cur)) return cur;
+      d.setDate(d.getDate() - 1);
+    }
   }
 
-  // For a source date, add N business days and return the resulting date ISO
+  // For a source date, add N business days (skipping weekends and paid holidays) and return the resulting date ISO
   function addBizDays(srcIso: string, n: number): string {
     const d = new Date(srcIso + 'T12:00:00');
     let added = 0;
     while (added < n) {
       d.setDate(d.getDate() + 1);
-      if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+      const dow = d.getDay();
+      const iso = d.toISOString().split('T')[0];
+      if (dow !== 0 && dow !== 6 && !holidaySet.has(iso)) added++;
     }
     return d.toISOString().split('T')[0];
   }
 
-  // Build a map of dayIso -> { c1, c2, c3, sources } from all dailyReceived entries
-  // Each check falls on: addBizDays(src, checkDay), snapped to nearest weekday
-  // Memoised over dailyReceived + check settings
-  function buildCheckMap(): Record<string, { c1: number; c2: number; c3: number; sources: Record<string, { c1src?: string; c2src?: string; c3src?: string; snapped: boolean }> }> {
-    const map: Record<string, { c1: number; c2: number; c3: number; sources: Record<string, { c1src?: string; c2src?: string; c3src?: string; snapped: boolean }> }> = {};
-    function add(dayIso: string, checkKey: 'c1'|'c2'|'c3', count: number, srcIso: string) {
-      const snapped = snapToWeekday(dayIso) !== dayIso;
-      const targetIso = snapToWeekday(dayIso);
-      if (!map[targetIso]) map[targetIso] = { c1: 0, c2: 0, c3: 0, sources: {} };
-      map[targetIso][checkKey] += count;
-      if (!map[targetIso].sources[srcIso]) map[targetIso].sources[srcIso] = { snapped };
-      map[targetIso].sources[srcIso][`${checkKey}src`] = srcIso;
-      map[targetIso].sources[srcIso].snapped = snapped;
-    }
-    Object.entries(dailyReceived).forEach(([srcIso, count]) => {
-      if (!count) return;
-      // For each check, pick a day in the middle of the window
-      // Use min day (earliest the check can happen)
-      for (let day = c1Min; day <= c1Max; day++) add(addBizDays(srcIso, day), 'c1', count, srcIso);
-      for (let day = c2Min; day <= c2Max; day++) add(addBizDays(srcIso, day), 'c2', count, srcIso);
-      for (let day = c3Min; day <= c3Max; day++) add(addBizDays(srcIso, day), 'c3', count, srcIso);
-    });
-    // Dedupe: if same src appears multiple times for same check (range > 1 day), count once
-    Object.values(map).forEach(entry => {
-      // Already accumulated per-day; divide by window size to avoid double counting
-    });
-    return map;
-  }
-
   function checksOnDay(dayIso: string): { c1: [number, number]; c2: [number, number]; c3: [number, number]; sources: { srcIso: string; checks: string[]; snapped: boolean }[] } {
-    const targetIso = snapToWeekday(dayIso);
+    const targetIso = snapToBusinessDay(dayIso);
     // For each source date, compute which checks land on targetIso
     const result: { srcIso: string; checks: string[]; snapped: boolean }[] = [];
     let c1 = 0, c2 = 0, c3 = 0;
-    Object.entries(dailyReceived).forEach(([srcIso, count]) => {
+    Object.entries(effectiveReceived).forEach(([srcIso, count]) => {
       if (!count) return;
       const checks: string[] = [];
       let snapped = false;
-      if (snapToWeekday(addBizDays(srcIso, c1Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c1Max)) === targetIso) {
+      if (snapToBusinessDay(addBizDays(srcIso, c1Min)) === targetIso || snapToBusinessDay(addBizDays(srcIso, c1Max)) === targetIso) {
         // Check if any day in c1 window snaps to targetIso
         for (let d = c1Min; d <= c1Max; d++) {
-          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+          if (snapToBusinessDay(addBizDays(srcIso, d)) === targetIso) {
             const natural = addBizDays(srcIso, d);
             if (natural !== targetIso) snapped = true;
             checks.push('c1'); c1 += count; break;
           }
         }
       }
-      if (snapToWeekday(addBizDays(srcIso, c2Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c2Max)) === targetIso) {
+      if (snapToBusinessDay(addBizDays(srcIso, c2Min)) === targetIso || snapToBusinessDay(addBizDays(srcIso, c2Max)) === targetIso) {
         for (let d = c2Min; d <= c2Max; d++) {
-          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+          if (snapToBusinessDay(addBizDays(srcIso, d)) === targetIso) {
             const natural = addBizDays(srcIso, d);
             if (natural !== targetIso) snapped = true;
             checks.push('c2'); c2 += count; break;
           }
         }
       }
-      if (snapToWeekday(addBizDays(srcIso, c3Min)) === targetIso || snapToWeekday(addBizDays(srcIso, c3Max)) === targetIso) {
+      if (snapToBusinessDay(addBizDays(srcIso, c3Min)) === targetIso || snapToBusinessDay(addBizDays(srcIso, c3Max)) === targetIso) {
         for (let d = c3Min; d <= c3Max; d++) {
-          if (snapToWeekday(addBizDays(srcIso, d)) === targetIso) {
+          if (snapToBusinessDay(addBizDays(srcIso, d)) === targetIso) {
             const natural = addBizDays(srcIso, d);
             if (natural !== targetIso) snapped = true;
             checks.push('c3'); c3 += count; break;
@@ -1692,18 +1733,50 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const key = isoMonday(weekIdx);
     const newHours = { ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [key]: val } };
     onPresHoursChange(newHours);
+    // Keep the "This Week" daily breakdown in sync for weeks it also covers.
+    if (weekIdx >= 0 && weekIdx <= 4) {
+      const dailyKey = `${key}-${memberId}`;
+      const workDays = masterAvailability[memberId]?.workDays ?? [0, 1, 2, 3, 4];
+      const nextDaily = { ...presDailyHours, [dailyKey]: distributeWeeklyToDaily(val, presDailyHours[dailyKey], workDays) };
+      onPresDailyHoursChange(nextDaily);
+    }
   }
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
     const key = `${isoMonday(presThisWeekOffset)}-${memberId}`;
     const newHours = { ...presDailyHours, [key]: [...(presDailyHours[key] ?? Array(7).fill(0))] };
     newHours[key][dayIdx] = val;
     onPresDailyHoursChange(newHours);
+    const monday = isoMonday(presThisWeekOffset);
+    onPresHoursChange({ ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [monday]: sumDaily(newHours[key]) } });
   }
 
   function updateCheckHours(memberId: string, dayIdx: number, val: number) {
     const key = `${isoMonday(presThisWeekOffset)}-${memberId}`;
     const newHours = { ...presCheckHours, [key]: [...(presCheckHours[key] ?? Array(7).fill(0))] };
     newHours[key][dayIdx] = val;
+    onPresCheckHoursChange(newHours);
+  }
+
+  // Splits a day's needed check-hours across the active team, weighted by each
+  // member's already-scheduled press hours that day (people working more that
+  // day absorb more of the check load). Falls back to an even split if no one
+  // has press hours entered yet.
+  function autoFillCheckHours(dayIdx: number, dayIso: string) {
+    const active = team.filter(m => m.ratio > 0);
+    if (active.length === 0) return;
+    const checksData = checksOnDay(dayIso);
+    const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
+    if (checkHrsNeeded <= 0) return;
+    const monday = isoMonday(presThisWeekOffset);
+    const weights = active.map(m => presDailyHours[`${monday}-${m.id}`]?.[dayIdx] ?? 0);
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    const newHours = { ...presCheckHours };
+    active.forEach((m, i) => {
+      const key = `${monday}-${m.id}`;
+      const share = totalWeight > 0 ? checkHrsNeeded * (weights[i] / totalWeight) : checkHrsNeeded / active.length;
+      newHours[key] = [...(newHours[key] ?? Array(7).fill(0))];
+      newHours[key][dayIdx] = round2(share);
+    });
     onPresCheckHoursChange(newHours);
   }
 
@@ -1750,20 +1823,45 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0)
   );
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  // ── Monthly aggregation (blends recorded actuals over the scheduled plan) ─────
+  const presActualsByWeekName = useMemo(() => {
+    const map: Record<string, { hours: number; units: number }> = {};
+    teamActuals.filter(r => r.department === 'preservation').forEach(r => {
+      const key = `${r.week_of}:${r.member_name}`;
+      const existing = map[key] ?? { hours: 0, units: 0 };
+      map[key] = { hours: existing.hours + r.actual_hours, units: existing.units + r.actual_orders };
+    });
+    return map;
+  }, [teamActuals]);
+
   const monthlyData: MonthlyDatum[] = useMemo(() => {
     const map: Record<string, {
       monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
       byMember: Record<string, { units: number; cost: number; hrs: number }>;
+      weeksWithActual: Set<string>; isCurrent: boolean;
     }> = {};
-    for (let w = 0; w < WEEKS; w++) {
+    const pastWeeks = weeksSinceTrackingStart();
+    for (let w = -pastWeeks; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
       const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {}, weeksWithActual: new Set(), isCurrent: false };
       map[key].weeks++;
+      if (w === 0) map[key].isCurrent = true;
       team.forEach(m => {
-        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
-        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
-        const units = m.ratio > 0 ? prodH / m.ratio : 0;
+        const actual = presActualsByWeekName[`${weekIso}:${m.name}`];
+        const hasActual = !!(actual && actual.hours > 0);
+        if (hasActual) map[key].weeksWithActual.add(weekIso); // tracked regardless of mode — drives badges + "projected only" filtering
+        if (presMonthlyMode === 'actual' && !hasActual) return; // no recorded actuals — skip this member-week
+        const useActual = presMonthlyMode !== 'projected' && hasActual;
+        let units: number, totalH: number;
+        if (useActual) {
+          units = actual!.units;
+          totalH = actual!.hours;
+        } else {
+          const prodH = m.hours[weekIso] ?? m.defaultHrs ?? 0;
+          totalH = m.isManager ? (mgrTotalHours[m.id]?.[weekIso] ?? prodH) : prodH;
+          units = m.ratio > 0 ? prodH / m.ratio : 0;
+        }
         const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
         if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
         map[key].byMember[m.id].units += units;
@@ -1774,12 +1872,17 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         map[key].totalHours += totalH;
       });
     }
-    return Object.values(map).map(m => ({
+    const results = Object.values(map).map(({ weeksWithActual, ...m }) => ({
       ...m,
       monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
       monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+      allActual:    weeksWithActual.size === m.weeks,
+      anyActual:    weeksWithActual.size > 0,
     }));
-  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
+    // "Projected only" is meant to show what hasn't happened yet — once a month has any
+    // recorded actuals, it's moved past the projection stage, so drop it from this view.
+    return presMonthlyMode === 'projected' ? results.filter(m => !m.anyActual) : results;
+  }, [team, mgrTotalHours, presActualsByWeekName, presMonthlyMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates = canViewCPO && team.some(m => m.rate > 0);
@@ -2033,6 +2136,145 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
           {/* ── THIS WEEK VIEW ── */}
           {activePresTab === 'weekly' && (
+            <>
+            {/* ── BOUQUET CHECK SCHEDULE ── */}
+            <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100">
+                <h3 className="text-sm font-semibold text-slate-700">Bouquet check schedule</h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Received counts auto-pull from PF (editable to override) · checks fall on business days only, moved earlier past weekends/holidays
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-100">
+                      <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[140px]">&nbsp;</th>
+                      {fiveDays.map((d, i) => (
+                        <th key={i} className={`px-2 py-2 text-center font-medium min-w-[80px] whitespace-nowrap ${i === 0 ? 'bg-indigo-50 text-indigo-600' : 'text-slate-500'}`}>
+                          {d.label}<br /><span className="font-normal text-[10px]">{d.dateStr}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* ── Received row ── */}
+                    <tr className="bg-emerald-50/40 border-b border-slate-100">
+                      <td className="sticky left-0 bg-emerald-50/40 px-4 py-1.5">
+                        <div className="text-[10px] font-medium text-emerald-700">Received</div>
+                        <div className="text-[9px] text-slate-400">bouquets delivered</div>
+                      </td>
+                      {fiveDays.map((d, di) => {
+                        const isManual = dailyReceived[d.iso] !== undefined;
+                        const val = isManual ? dailyReceived[d.iso] : (autoReceived[d.iso] ?? '');
+                        return (
+                          <td key={di} className="px-2 py-1.5 text-center">
+                            <input
+                              type="number" min="0" placeholder="0"
+                              value={val}
+                              title={isManual ? 'Manually entered' : 'Auto-pulled from PF — edit to override'}
+                              onChange={e => setDailyReceived(d.iso, parseInt(e.target.value) || 0)}
+                              className={`w-14 border rounded px-1.5 py-1 text-center text-[11px] bg-white focus:outline-none focus:ring-1 ${
+                                isManual
+                                  ? 'border-emerald-200 text-emerald-800 focus:ring-emerald-400'
+                                  : 'border-slate-200 text-slate-500 focus:ring-emerald-400'
+                              }`}
+                            />
+                            {!isManual && autoReceived[d.iso] !== undefined && <div className="text-[8px] text-slate-300 mt-0.5">auto</div>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* ── Check load rows ── */}
+                    {[
+                      { label: 'Check 1', key: 'c1' as const, color: 'text-violet-600', bg: 'bg-violet-50/30', mins: c1Mins, min: c1Min, max: c1Max },
+                      { label: 'Check 2', key: 'c2' as const, color: 'text-blue-600',   bg: 'bg-blue-50/30',   mins: c2Mins, min: c2Min, max: c2Max },
+                      { label: 'Check 3', key: 'c3' as const, color: 'text-indigo-600', bg: 'bg-indigo-50/30', mins: c3Mins, min: c3Min, max: c3Max },
+                    ].map(({ label, key, color, bg, mins, min, max }) => (
+                      <tr key={key} className={`${bg} border-b border-slate-50`}>
+                        <td className={`sticky left-0 ${bg} px-4 py-1.5`}>
+                          <div className={`text-[10px] font-medium ${color}`}>{label}</div>
+                          <div className="text-[9px] text-slate-400">day {min}–{max} · {mins} min ea</div>
+                        </td>
+                        {fiveDays.map((d, di) => {
+                          const dow = new Date(d.iso + 'T12:00:00').getDay();
+                          const isWeekend = dow === 0 || dow === 6;
+                          const isHoliday = holidaySet.has(d.iso);
+                          if (isWeekend || isHoliday) return <td key={di} className="px-2 py-1.5 text-center"><span className="text-[10px] text-slate-100">—</span></td>;
+                          const checks = checksOnDay(d.iso);
+                          const [lo, hi] = checks[key];
+                          const totalMins = lo * mins;
+                          const srcForKey = checks.sources.filter(s => s.checks.includes(key));
+                          const fmtSrc = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                          return (
+                            <td key={di} className="px-2 py-1.5 text-center">
+                              {lo > 0 ? (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  {srcForKey.map(s => (
+                                    <div key={s.srcIso} className="flex flex-col items-center">
+                                      <span className="text-[9px] text-slate-400">from {fmtSrc(s.srcIso)}</span>
+                                      {s.snapped && (
+                                        <span className="text-[8px] text-amber-500" title="Fell on a weekend or holiday — moved to the nearest earlier business day">
+                                          * moved earlier
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  <span className={`text-[11px] font-semibold ${color}`}>
+                                    {lo === hi ? lo : `${lo}–${hi}`}
+                                  </span>
+                                  <span className="text-[9px] text-slate-400">{Math.round(totalMins)} min</span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-200">—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                    {/* ── Check hours: needed vs scheduled + auto-fill ── */}
+                    <tr className="bg-teal-50/40 border-t-2 border-slate-200">
+                      <td className="sticky left-0 bg-teal-50/40 px-4 py-2">
+                        <div className="text-[10px] font-semibold text-teal-700">Check hours</div>
+                        <div className="text-[9px] text-slate-400">needed vs scheduled</div>
+                      </td>
+                      {fiveDays.map((d, di) => {
+                        const checksData = checksOnDay(d.iso);
+                        const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
+                        const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
+                        if (checkHrsNeeded <= 0 && checkHrsScheduled <= 0) {
+                          return <td key={di} className="px-2 py-2 text-center"><span className="text-[10px] text-slate-200">—</span></td>;
+                        }
+                        const checkDiff = checkHrsScheduled - checkHrsNeeded;
+                        return (
+                          <td key={di} className="px-2 py-2 text-center">
+                            <div className="text-[11px] font-semibold text-teal-700">
+                              {Math.round(checkHrsScheduled * 10) / 10}h <span className="text-slate-400 font-normal">/ {Math.round(checkHrsNeeded * 10) / 10}h</span>
+                            </div>
+                            {checkHrsNeeded > 0 && (
+                              <div className={`text-[9px] font-medium ${checkDiff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {checkDiff >= 0 ? '+' : ''}{Math.round(checkDiff * 10) / 10}h
+                              </div>
+                            )}
+                            {checkHrsNeeded > 0 && (
+                              <button
+                                onClick={() => autoFillCheckHours(di, d.iso)}
+                                title="Split today's needed check hours across the team by who's already scheduled"
+                                className="mt-1 px-2 py-0.5 text-[10px] font-medium text-white bg-teal-600 rounded hover:bg-teal-700 transition-colors"
+                              >
+                                Auto-fill
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
                 <h3 className="text-sm font-semibold text-slate-700">Hours per team member — {presThisWeekOffset === 0 ? 'this week' : presThisWeekOffset === 1 ? 'next week' : `week +${presThisWeekOffset}`}</h3>
@@ -2074,8 +2316,18 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           const hasRate = m.rate > 0 || m.annualSalary > 0;
                           const cost = m.payType === 'salary' ? m.annualSalary / 260 : totalH * m.rate;
                           const cpo = !m.isManager && hasRate && orders > 0 && cost > 0 ? cost / orders : null;
+                          const iso = fiveDays[di]?.iso ?? '';
+                          const off = paidHolidays.includes(iso) || (personTimeOff[m.id] ?? []).includes(iso);
+                          const workDays = masterAvailability[m.id]?.workDays ?? [0, 1, 2, 3, 4];
+                          const notSched = !off && !workDays.includes(di);
                           return (
                             <td key={di} className={`px-2 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/30' : ''}`}>
+                              {off && (
+                                <div className="text-[9px] font-medium text-amber-600 mb-0.5">
+                                  {paidHolidays.includes(iso) ? 'Holiday' : 'OOO'}
+                                </div>
+                              )}
+                              {notSched && <div className="text-[9px] font-medium text-slate-400 mb-0.5">Not scheduled</div>}
                               <div className="flex items-center gap-1">
                                 <div className="flex flex-col items-center">
                                   <span className="text-[8px] text-slate-300 mb-0.5">press</span>
@@ -2104,6 +2356,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     const newH = { ...mgrTotalDailyHours, [dailyKey]: [...(mgrTotalDailyHours[dailyKey] ?? Array(7).fill(0))] };
                                     newH[dailyKey][di] = parseFloat(e.target.value) || 0;
                                     onMgrTotalDailyHoursChange(newH);
+                                    const monday = isoMonday(presThisWeekOffset);
+                                    onMgrTotalHoursChange({ ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [monday]: sumDaily(newH[dailyKey]) } });
                                   }}
                                   className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300" />
                               )}
@@ -2142,25 +2396,6 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 {diff > 0 ? '+' : ''}{Math.round(diff * 100) / 100} vs est.
                               </div>
                             )}
-                            {(() => {
-                              const checksData = checksOnDay(d.iso);
-                              const checkHrsNeeded = ((checksData.c1[0] * c1Mins) + (checksData.c2[0] * c2Mins) + (checksData.c3[0] * c3Mins)) / 60;
-                              const checkHrsScheduled = team.reduce((s, m) => s + (presCheckHours[`${isoMonday(presThisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
-                              if (checkHrsNeeded <= 0 && checkHrsScheduled <= 0) return null;
-                              const checkDiff = checkHrsScheduled - checkHrsNeeded;
-                              return (
-                                <div className="flex flex-col items-center gap-0.5 border-t border-teal-100 mt-0.5 pt-0.5">
-                                  <div className="text-[10px] text-teal-600 font-medium">
-                                    {Math.round(checkHrsScheduled * 10) / 10}h chk
-                                  </div>
-                                  {checkHrsNeeded > 0 && (
-                                    <div className={`text-[9px] font-medium ${checkDiff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                      {checkDiff >= 0 ? '+' : ''}{Math.round(checkDiff * 10) / 10} vs {Math.round(checkHrsNeeded * 10) / 10}h need
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()}
                             {dayRatio !== null && <div className="text-[10px] text-slate-500">{Math.round(dayRatio * 100) / 100} h/ord</div>}
                             {dayCPO !== null && <div className="text-[10px] text-amber-600">{fmt$(dayCPO)}</div>}
                           </td>
@@ -2174,77 +2409,11 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                         return <td key={di} className="px-2 py-1.5 text-center text-[10px] text-slate-400">{est || '—'}</td>;
                       })}
                     </tr>
-                    {/* ── Actual received row ── */}
-                    <tr className="bg-emerald-50/40 border-t border-slate-100">
-                      <td className="sticky left-0 bg-emerald-50/40 px-4 py-1.5">
-                        <div className="text-[10px] font-medium text-emerald-700">Actual received</div>
-                        <div className="text-[9px] text-slate-400">bouquets delivered</div>
-                      </td>
-                      {fiveDays.map((d, di) => {
-                        const val = dailyReceived[d.iso] ?? '';
-                        return (
-                          <td key={di} className="px-2 py-1.5 text-center">
-                            <input
-                              type="number" min="0" placeholder="0"
-                              value={val}
-                              onChange={e => setDailyReceived(d.iso, parseInt(e.target.value) || 0)}
-                              className="w-14 border border-emerald-200 rounded px-1.5 py-1 text-center text-[11px] text-emerald-800 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                    {/* ── Check load rows ── */}
-                    {[
-                      { label: 'Check 1', key: 'c1' as const, color: 'text-violet-600', bg: 'bg-violet-50/30', mins: c1Mins, min: c1Min, max: c1Max },
-                      { label: 'Check 2', key: 'c2' as const, color: 'text-blue-600',   bg: 'bg-blue-50/30',   mins: c2Mins, min: c2Min, max: c2Max },
-                      { label: 'Check 3', key: 'c3' as const, color: 'text-indigo-600', bg: 'bg-indigo-50/30', mins: c3Mins, min: c3Min, max: c3Max },
-                    ].map(({ label, key, color, bg, mins, min, max }) => (
-                      <tr key={key} className={`${bg} border-t border-slate-50`}>
-                        <td className={`sticky left-0 ${bg} px-4 py-1.5`}>
-                          <div className={`text-[10px] font-medium ${color}`}>{label}</div>
-                          <div className="text-[9px] text-slate-400">day {min}–{max} · {mins} min ea</div>
-                        </td>
-                        {fiveDays.map((d, di) => {
-                          const dow = new Date(d.iso + 'T12:00:00').getDay();
-                          const isWeekend = dow === 0 || dow === 6;
-                          if (isWeekend) return <td key={di} className="px-2 py-1.5 text-center"><span className="text-[10px] text-slate-100">—</span></td>;
-                          const checks = checksOnDay(d.iso);
-                          const [lo, hi] = checks[key];
-                          const totalMins = lo * mins;
-                          const srcForKey = checks.sources.filter(s => s.checks.includes(key));
-                          const fmtSrc = (iso: string) => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                          return (
-                            <td key={di} className="px-2 py-1.5 text-center">
-                              {lo > 0 ? (
-                                <div className="flex flex-col items-center gap-0.5">
-                                  {srcForKey.map(s => (
-                                    <div key={s.srcIso} className="flex flex-col items-center">
-                                      <span className="text-[9px] text-slate-400">from {fmtSrc(s.srcIso)}</span>
-                                      {s.snapped && (
-                                        <span className="text-[8px] text-amber-500" title="Fell on weekend — moved to nearest weekday">
-                                          * moved from weekend
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                  <span className={`text-[11px] font-semibold ${color}`}>
-                                    {lo === hi ? lo : `${lo}–${hi}`}
-                                  </span>
-                                  <span className="text-[9px] text-slate-400">{Math.round(totalMins)} min</span>
-                                </div>
-                              ) : (
-                                <span className="text-[10px] text-slate-200">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
+            </>
           )}
 
           {/* ── 52-WEEK PLANNER ── */}
@@ -2312,8 +2481,15 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                     type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
                                     onChange={e => {
                                       const key = isoMonday(w);
-                                      const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: parseFloat(e.target.value) || 0 } };
+                                      const val = parseFloat(e.target.value) || 0;
+                                      const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: val } };
                                       onMgrTotalHoursChange(newH);
+                                      if (w >= 0 && w <= 4) {
+                                        const dailyKey = `${key}-${m.id}`;
+                                        const workDays = masterAvailability[m.id]?.workDays ?? [0, 1, 2, 3, 4];
+                                        const nextDaily = { ...mgrTotalDailyHours, [dailyKey]: distributeWeeklyToDaily(val, mgrTotalDailyHours[dailyKey], workDays) };
+                                        onMgrTotalDailyHoursChange(nextDaily);
+                                      }
                                     }}
                                     title="Total hours (production + managerial)"
                                     className="w-14 mt-0.5 border border-violet-200 rounded px-1.5 py-0.5 text-center text-[10px] text-violet-600 bg-violet-50 focus:outline-none focus:ring-1 focus:ring-violet-300"
@@ -2436,6 +2612,8 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
           unitLabel="bouquets"
           unitAbbrev="b"
           hasRates={hasRates}
+          mode={presMonthlyMode}
+          onModeChange={setPresMonthlyMode}
         />
       )}
 
@@ -2459,7 +2637,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
 
 function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamActuals, onActualsSaved,
   ffHours, ffRoster, mgrTotalHours, mgrTotalDailyHours, onFfHoursChange, onFfRosterChange, onMgrTotalHoursChange, onMgrTotalDailyHoursChange, employeeRates = {},
-  ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true, userRole = 'admin' }: {
+  ffDailyHoursProp, onFfDailyHoursChange, canViewCPO = true, userRole = 'admin', paidHolidays = [], personTimeOff = {}, masterAvailability = {} }: {
   location:        'Utah' | 'Georgia';
   fulfillmentQueue: number;
   countsLoading:   boolean;
@@ -2478,8 +2656,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   onFfDailyHoursChange?: (h: Record<string, number[]>) => void;
   canViewCPO?:           boolean;
   userRole?:             string;
+  paidHolidays?:         string[];
+  personTimeOff?:        Record<string, string[]>;
+  masterAvailability?:   Record<string, { defaultHours: number; overrides: Record<string, number>; workDays?: number[] }>;
 }) {
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'monthly' | 'historicals'>('thisweek');
+  const [ffMonthlyMode, setFfMonthlyMode] = useState<MonthlyDataMode>('blended');
   const [ffInputMode, setFfInputMode] = useState<InputMode>('hours');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
@@ -2558,6 +2740,14 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const key = isoMonday(wi);
     const newHours = { ...ffHours, [id]: { ...(ffHours[id] ?? {}), [key]: val } };
     onFfHoursChange(newHours);
+    // Keep the "This Week" daily breakdown in sync for weeks it also covers.
+    if (wi >= 0 && wi <= 4) {
+      const dailyKey = `${key}-${id}`;
+      const workDays = masterAvailability[id]?.workDays ?? [0, 1, 2, 3, 4];
+      const nextDaily = { ...ffDailyHours, [dailyKey]: distributeWeeklyToDaily(val, ffDailyHours[dailyKey], workDays) };
+      setFfDailyHours(nextDaily);
+      onFfDailyHoursChange?.(nextDaily);
+    }
   }
   function applyToAllWeeks(id: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
@@ -2578,20 +2768,45 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
   const hasRates   = canViewCPO && team.some(m => m.rate > 0);
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  // ── Monthly aggregation (blends recorded actuals over the scheduled plan) ─────
+  const ffActualsByWeekName = useMemo(() => {
+    const map: Record<string, { hours: number; units: number }> = {};
+    teamActuals.filter(r => r.department === 'fulfillment').forEach(r => {
+      const key = `${r.week_of}:${r.member_name}`;
+      const existing = map[key] ?? { hours: 0, units: 0 };
+      map[key] = { hours: existing.hours + r.actual_hours, units: existing.units + r.actual_orders };
+    });
+    return map;
+  }, [teamActuals]);
+
   const monthlyData: MonthlyDatum[] = useMemo(() => {
     const map: Record<string, {
       monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
       byMember: Record<string, { units: number; cost: number; hrs: number }>;
+      weeksWithActual: Set<string>; isCurrent: boolean;
     }> = {};
-    for (let w = 0; w < WEEKS; w++) {
+    const pastWeeks = weeksSinceTrackingStart();
+    for (let w = -pastWeeks; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
       const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {} };
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {}, weeksWithActual: new Set(), isCurrent: false };
       map[key].weeks++;
+      if (w === 0) map[key].isCurrent = true;
       team.forEach(m => {
-        const prodH = m.hours[isoMonday(w)] ?? m.defaultHrs ?? 0;
-        const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH) : prodH;
-        const units = m.ratio > 0 ? prodH / m.ratio : 0;
+        const actual = ffActualsByWeekName[`${weekIso}:${m.name}`];
+        const hasActual = !!(actual && actual.hours > 0);
+        if (hasActual) map[key].weeksWithActual.add(weekIso); // tracked regardless of mode — drives badges + "projected only" filtering
+        if (ffMonthlyMode === 'actual' && !hasActual) return; // no recorded actuals — skip this member-week
+        const useActual = ffMonthlyMode !== 'projected' && hasActual;
+        let units: number, totalH: number;
+        if (useActual) {
+          units = actual!.units;
+          totalH = actual!.hours;
+        } else {
+          const prodH = m.hours[weekIso] ?? m.defaultHrs ?? 0;
+          totalH = m.isManager ? (mgrTotalHours[m.id]?.[weekIso] ?? prodH) : prodH;
+          units = m.ratio > 0 ? prodH / m.ratio : 0;
+        }
         const cost = m.payType === 'salary' ? m.annualSalary / 52 : totalH * m.rate;
         if (!map[key].byMember[m.id]) map[key].byMember[m.id] = { units: 0, cost: 0, hrs: 0 };
         map[key].byMember[m.id].units += units;
@@ -2602,12 +2817,15 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         map[key].totalHours += totalH;
       });
     }
-    return Object.values(map).map(m => ({
+    const results = Object.values(map).map(({ weeksWithActual, ...m }) => ({
       ...m,
       monthlyRatio: m.totalUnits > 0 ? m.totalHours / m.totalUnits : null,
       monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+      allActual:    weeksWithActual.size === m.weeks,
+      anyActual:    weeksWithActual.size > 0,
     }));
-  }, [team, mgrTotalHours]); // eslint-disable-line react-hooks/exhaustive-deps
+    return ffMonthlyMode === 'projected' ? results.filter(m => !m.anyActual) : results;
+  }, [team, mgrTotalHours, ffActualsByWeekName, ffMonthlyMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-4">
@@ -2653,9 +2871,12 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
           const prev = ffDailyHours[key] ?? [];
           const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-          const next = { ...ffDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
+          const nextDaily = padded.map((h: number, j: number) => j === di ? val : h);
+          const next = { ...ffDailyHours, [key]: nextDaily };
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
+          const monday = isoMonday(ffThisWeekOffset);
+          onFfHoursChange({ ...ffHours, [id]: { ...(ffHours[id] ?? {}), [monday]: sumDaily(nextDaily) } });
         }
         function getMgrTotalFFH(id: string, di: number) {
           return mgrTotalDailyHours[`${isoMonday(ffThisWeekOffset)}-${id}`]?.[di] ?? getFFH(id, di);
@@ -2664,12 +2885,22 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
           const prev = mgrTotalDailyHours[key] ?? [];
           const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-          const next = { ...mgrTotalDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
+          const nextDaily = padded.map((h: number, j: number) => j === di ? val : h);
+          const next = { ...mgrTotalDailyHours, [key]: nextDaily };
           onMgrTotalDailyHoursChange(next);
+          const monday = isoMonday(ffThisWeekOffset);
+          onMgrTotalHoursChange({ ...mgrTotalHours, [id]: { ...(mgrTotalHours[id] ?? {}), [monday]: sumDaily(nextDaily) } });
         }
         function ffDailyCost(m: Omit<FfTeamMember, 'hours'> & { hours: unknown }, di: number) {
           const h = m.isManager ? getMgrTotalFFH(m.id, di) : getFFH(m.id, di);
           return m.payType === 'salary' ? m.annualSalary / 260 : h * m.rate;
+        }
+        function isOff(id: string, iso: string): boolean {
+          return paidHolidays.includes(iso) || (personTimeOff[id] ?? []).includes(iso);
+        }
+        function isNotScheduled(id: string, dayIdx: number): boolean {
+          const workDays = masterAvailability[id]?.workDays ?? [0, 1, 2, 3, 4];
+          return !workDays.includes(dayIdx);
         }
         const teamDailyOrders = (di: number) => team.reduce((s, m) => {
           const h = getFFH(m.id, di); return s + (m.ratio > 0 && h > 0 ? h / m.ratio : 0);
@@ -2722,8 +2953,16 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                           const orders = m.ratio > 0 && h > 0 ? h / m.ratio : 0;
                           const cost = ffDailyCost(m, dayIdx);
                           const cpo = !m.isManager && orders > 0 && cost > 0 ? cost / orders : null;
+                          const off = isOff(m.id, days[dayIdx]?.iso ?? '');
+                          const notSched = !off && isNotScheduled(m.id, dayIdx);
                           return (
                             <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-amber-50/30' : ''}`}>
+                              {off && (
+                                <div className="text-[9px] font-medium text-amber-600 mb-0.5">
+                                  {paidHolidays.includes(days[dayIdx]?.iso ?? '') ? 'Holiday' : 'OOO'}
+                                </div>
+                              )}
+                              {notSched && <div className="text-[9px] font-medium text-slate-400 mb-0.5">Not scheduled</div>}
                               <input type="number"
                                 value={ffInputMode === 'output' ? (orders ? round2(orders) : '') : (h || '')}
                                 min="0" step={ffInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
@@ -2732,7 +2971,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                                   const raw = parseFloat(e.target.value) || 0;
                                   setFFH(m.id, dayIdx, ffInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
                                 }}
-                                className="w-14 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                                className={`w-14 border rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${off ? 'border-amber-300' : 'border-slate-200'}`} />
                               {m.isManager && (
                                 <input type="number" value={totalH || ''} min="0" step="0.5" placeholder="total h"
                                   title="Total hours (production + managerial)"
@@ -2875,8 +3114,15 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                               <input type="number" value={totalH || ''} placeholder="total h" min="0" step="0.5"
                                 onChange={e => {
                                   const key = isoMonday(w);
-                                  const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: parseFloat(e.target.value) || 0 } };
+                                  const val = parseFloat(e.target.value) || 0;
+                                  const newH = { ...mgrTotalHours, [m.id]: { ...(mgrTotalHours[m.id] ?? {}), [key]: val } };
                                   onMgrTotalHoursChange(newH);
+                                  if (w >= 0 && w <= 4) {
+                                    const dailyKey = `${key}-${m.id}`;
+                                    const workDays = masterAvailability[m.id]?.workDays ?? [0, 1, 2, 3, 4];
+                                    const nextDaily = { ...mgrTotalDailyHours, [dailyKey]: distributeWeeklyToDaily(val, mgrTotalDailyHours[dailyKey], workDays) };
+                                    onMgrTotalDailyHoursChange(nextDaily);
+                                  }
                                 }}
                                 onContextMenu={e => { e.preventDefault();
                                   const val = mgrTotalHours[m.id]?.[isoMonday(w)] ?? prodH;
@@ -2931,6 +3177,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           unitLabel="orders"
           unitAbbrev="o"
           hasRates={hasRates}
+          mode={ffMonthlyMode}
+          onModeChange={setFfMonthlyMode}
         />
       )}
 
@@ -3015,10 +3263,11 @@ function getWeekdays(weekOffset: number): { iso: string; label: string; dateStr:
 // ─── MasterScheduleSection ────────────────────────────────────────────────────
 
 function MasterScheduleSection({ location, masterAvailability, onAvailabilityChange,
-  designHours, designSchedule, presHours, ffHours, designRoster, presRoster, ffRoster }: {
+  designHours, designSchedule, presHours, ffHours, designRoster, presRoster, ffRoster,
+  paidHolidays = [], personTimeOff = {} }: {
   location:             'Utah' | 'Georgia';
-  masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number> }>;
-  onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number> }>) => void;
+  masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number>; workDays?: number[] }>;
+  onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number>; workDays?: number[] }>) => void;
   designHours:          Record<string, Record<string, number>>;
   designSchedule:       WeekSchedule[];
   presHours:            Record<string, Record<string, number>>;
@@ -3026,10 +3275,20 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   designRoster:         Record<string, { ratio: number; name: string }>;
   presRoster:           Record<string, { ratio: number; name: string }>;
   ffRoster:             Record<string, { ratio: number; name: string }>;
+  paidHolidays?:        string[];
+  personTimeOff?:       Record<string, string[]>;
 }) {
   const [weekOffset, setWeekOffset] = useState(0);
   const staff = location === 'Utah' ? UTAH_STAFF : GEORGIA_STAFF;
   const days   = getWeekdays(weekOffset);
+
+  // Number of this person's weekdays this week that are a paid holiday or
+  // personal time off — used to shrink their available capacity automatically
+  // instead of requiring a manual weekly override every time.
+  function offDaysThisWeek(personId: string): number {
+    const off = new Set([...paidHolidays, ...(personTimeOff[personId] ?? [])]);
+    return days.slice(0, 5).filter(d => off.has(d.iso)).length;
+  }
 
   // Week index for design/ff (weekly schedules)
   const weekIdx = weekOffset;
@@ -3041,26 +3300,48 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   } {
     // Design: read from the already-merged schedule array
     const dHrs = designSchedule[weekIdx]?.[person.id] ?? 0;
-    // Preservation: sum of daily hours
-    const pHrs = Object.values(presHours[person.id] ?? {}).reduce((a, b) => a + b, 0);
+    // Preservation: this week's persisted hours only (not a running sum of every week ever entered)
+    const pHrs = presHours[person.id]?.[isoMonday(weekIdx)] ?? 0;
     // Fulfillment: persisted weekly hours
     const fHrs = ffHours[person.id]?.[isoMonday(weekIdx)] ?? 0;
-    return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
+    return { design: round2(dHrs), preservation: round2(pHrs), fulfillment: round2(fHrs), total: round2(dHrs + pHrs + fHrs) };
   }
 
-  // Weekly available = defaultHours × 5, overridable per week
+  // Weekday indices (0=Mon..6=Sun) this person normally works — Mon-Fri by
+  // default, but overridable per-person for anyone not on a standard 5-day week.
+  function getWorkDays(personId: string): number[] {
+    return masterAvailability[personId]?.workDays ?? [0, 1, 2, 3, 4];
+  }
+  function isWorkDay(personId: string, iso: string): boolean {
+    const dayIdx = days.findIndex(d => d.iso === iso);
+    return dayIdx === -1 ? true : getWorkDays(personId).includes(dayIdx);
+  }
+  function setWorkDays(personId: string, workDays: number[]) {
+    const existing = masterAvailability[personId] ?? { defaultHours: 8, overrides: {} };
+    onAvailabilityChange({ ...masterAvailability, [personId]: { ...existing, workDays } });
+  }
+  function toggleWorkDay(personId: string, dayIdx: number) {
+    const current = getWorkDays(personId);
+    const next = current.includes(dayIdx) ? current.filter(d => d !== dayIdx) : [...current, dayIdx].sort((a, b) => a - b);
+    setWorkDays(personId, next);
+  }
+
+  // Weekly available = defaultHours × number of work days, overridable per week
   function getWeeklyAvail(person: StaffMember): number {
     const stored = masterAvailability[person.id];
     const mondayIso = days[0]?.iso ?? '';
-    if (stored?.overrides?.[mondayIso] !== undefined) return stored.overrides[mondayIso];
-    return (stored?.defaultHours ?? 8) * 5;
+    const defaultH = stored?.defaultHours ?? 8;
+    const offReduction = offDaysThisWeek(person.id) * defaultH;
+    if (stored?.overrides?.[mondayIso] !== undefined) return round2(Math.max(0, stored.overrides[mondayIso] - offReduction));
+    return round2(Math.max(0, defaultH * getWorkDays(person.id).length - offReduction));
   }
 
   // Daily available for a specific day (used for preservation which is daily)
   function getDailyAvail(person: StaffMember, iso: string): number {
     const stored = masterAvailability[person.id];
-    if (stored?.overrides?.[iso] !== undefined) return stored.overrides[iso];
-    return stored?.defaultHours ?? 8;
+    if (stored?.overrides?.[iso] !== undefined) return round2(stored.overrides[iso]);
+    if (!isWorkDay(person.id, iso)) return 0;
+    return round2(stored?.defaultHours ?? 8);
   }
 
   function setDefault(personId: string, hours: number) {
@@ -3132,6 +3413,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
                   <th className="px-3 py-2 text-center font-medium text-slate-500">Default<br/>hrs/day</th>
+                  <th className="px-3 py-2 text-center font-medium text-slate-500">Work days</th>
                   <th className="px-3 py-2 text-center font-medium text-slate-500">Available<br/>this week</th>
                   <th className="px-3 py-2 text-center font-medium text-slate-500 text-indigo-600">Design<br/>hrs</th>
                   <th className="px-3 py-2 text-center font-medium text-green-700">Pres<br/>hrs</th>
@@ -3146,13 +3428,18 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                   const avail    = getWeeklyAvail(person);
                   const remain   = avail - sched.total;
                   const over     = sched.total > avail && sched.total > 0;
+                  const overtime = sched.total > 40;
                   const defaultH = masterAvailability[person.id]?.defaultHours ?? 8;
                   const weekOverride = masterAvailability[person.id]?.overrides?.[mondayIso];
+                  const offDays = offDaysThisWeek(person.id);
+                  const workDays = getWorkDays(person.id);
                   return (
                     <tr key={person.id} className={`border-b border-slate-50 ${pi % 2 === 0 ? '' : 'bg-slate-50/30'} ${over ? 'bg-red-50' : ''}`}>
                       <td className="px-4 py-2 whitespace-nowrap">
                         <div className="font-medium text-slate-700">{person.name}</div>
                         {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
+                        {offDays > 0 && <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1 py-px ml-1">{offDays}d OOO/holiday</span>}
+                        {overtime && <span className="text-[10px] bg-red-100 text-red-700 rounded px-1 py-px ml-1 font-semibold">⚠ {sched.total}h — OT</span>}
                       </td>
                       {/* Default hours/day */}
                       <td className="px-3 py-2 text-center">
@@ -3160,9 +3447,21 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                           onChange={e => setDefault(person.id, parseFloat(e.target.value) || 0)}
                           className="w-12 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                       </td>
-                      {/* Available this week (default×5 or week override) */}
+                      {/* Which weekdays this person works */}
                       <td className="px-3 py-2 text-center">
-                        <input type="number" value={weekOverride !== undefined ? weekOverride : avail} min="0" max="60" placeholder={String(defaultH * 5)}
+                        <div className="flex gap-0.5 justify-center">
+                          {['M','T','W','T','F','S','S'].map((label, di) => (
+                            <button key={di} type="button" onClick={() => toggleWorkDay(person.id, di)}
+                              title={workDays.includes(di) ? 'Works this day — click to mark off' : 'Off this day — click to mark working'}
+                              className={`w-5 h-5 text-[10px] rounded ${workDays.includes(di) ? 'bg-indigo-100 text-indigo-700 font-medium' : 'bg-slate-100 text-slate-300'}`}>
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                      {/* Available this week (default×work days or week override) */}
+                      <td className="px-3 py-2 text-center">
+                        <input type="number" value={weekOverride !== undefined ? weekOverride : avail} min="0" max="60" placeholder={String(defaultH * workDays.length)}
                           onChange={e => setOverride(person.id, mondayIso, parseFloat(e.target.value) || 0)}
                           className={`w-14 border rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 ${weekOverride !== undefined ? 'border-indigo-300 text-indigo-700' : 'border-slate-200'}`}
                           title="Total available hours this week (click to override)" />
@@ -3170,7 +3469,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                       <td className="px-3 py-2 text-center font-medium text-indigo-700">{sched.design || '—'}</td>
                       <td className="px-3 py-2 text-center font-medium text-green-700">{sched.preservation || '—'}</td>
                       <td className="px-3 py-2 text-center font-medium text-amber-700">{sched.fulfillment || '—'}</td>
-                      <td className="px-3 py-2 text-center font-semibold text-slate-700">{sched.total || '—'}</td>
+                      <td className={`px-3 py-2 text-center font-semibold ${overtime ? 'text-red-600' : 'text-slate-700'}`}>{sched.total || '—'}</td>
                       <td className={`px-3 py-2 text-center font-semibold ${over ? 'text-red-600' : remain > 0 ? 'text-green-700' : 'text-slate-400'}`}>
                         {over ? `⚠ ${Math.abs(remain)}h over` : remain > 0 ? `${remain}h free` : '—'}
                       </td>
@@ -3198,6 +3497,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                   <tr className="bg-slate-50 border-b border-slate-100">
                     <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 min-w-[160px]">Team member</th>
                     <th className="px-3 py-2 text-center font-medium text-slate-500">Default<br/>hrs/day</th>
+                    <th className="px-3 py-2 text-center font-medium text-slate-500">Work days</th>
                     {days.map(d => (
                       <th key={d.iso} className="px-2 py-2 text-center font-medium text-slate-500 min-w-[90px]">
                         <div>{d.label}</div>
@@ -3210,20 +3510,34 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                 <tbody>
                   {presMembers.map((person, pi) => {
                     const defaultH = masterAvailability[person.id]?.defaultHours ?? 8;
+                    const workDays = getWorkDays(person.id);
                     const weekSched = getWeeklyScheduled(person);
-                    const weekAvail = defaultH * 5;
+                    const weekAvail = defaultH * workDays.length;
                     const weekRemain = weekAvail - weekSched.total;
                     const weekOver = weekSched.total > weekAvail && weekSched.total > 0;
+                    const weekOvertime = weekSched.total > 40;
                     return (
                       <tr key={person.id} className={`border-b border-slate-50 ${pi % 2 === 0 ? '' : 'bg-slate-50/30'}`}>
                         <td className="sticky left-0 bg-inherit px-4 py-2 whitespace-nowrap">
                           <div className="font-medium text-slate-700">{person.name}</div>
                           {person.onCall && <span className="text-[10px] bg-slate-100 text-slate-500 rounded px-1 py-px">on call</span>}
+                          {weekOvertime && <span className="text-[10px] bg-red-100 text-red-700 rounded px-1 py-px ml-1 font-semibold">⚠ {weekSched.total}h — OT</span>}
                         </td>
                         <td className="px-3 py-2 text-center">
                           <input type="number" value={defaultH || ''} min="0" max="12" placeholder="8"
                             onChange={e => setDefault(person.id, parseFloat(e.target.value) || 0)}
                             className="w-12 border border-slate-200 rounded px-1.5 py-1 text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex gap-0.5 justify-center">
+                            {['M','T','W','T','F','S','S'].map((label, di) => (
+                              <button key={di} type="button" onClick={() => toggleWorkDay(person.id, di)}
+                                title={workDays.includes(di) ? 'Works this day — click to mark off' : 'Off this day — click to mark working'}
+                                className={`w-5 h-5 text-[10px] rounded ${workDays.includes(di) ? 'bg-green-100 text-green-700 font-medium' : 'bg-slate-100 text-slate-300'}`}>
+                                {label}
+                              </button>
+                            ))}
+                          </div>
                         </td>
                         {days.map((d, di) => {
                           const avail   = getDailyAvail(person, d.iso);
@@ -3270,7 +3584,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
           const totalAvail = deptStaff.reduce((sum, p) => {
             const def = masterAvailability[p.id]?.defaultHours ?? 8;
             const mondayOverride = masterAvailability[p.id]?.overrides?.[mondayIso];
-            return sum + (mondayOverride !== undefined ? mondayOverride : def * 5);
+            return sum + (mondayOverride !== undefined ? mondayOverride : def * getWorkDays(p.id).length);
           }, 0);
           const totalSched = deptStaff.reduce((sum, p) => {
             const s = getWeeklyScheduled(p);
@@ -3463,6 +3777,9 @@ export function SchedulePage({
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
   const { holidays: paidHolidays, addHoliday, removeHoliday } = usePaidHolidays();
   const [pendingHolidayDate, setPendingHolidayDate] = useState('');
+  const { timeOff: personTimeOff, addTimeOff, removeTimeOff } = usePersonTimeOff();
+  const [pendingOOOPerson, setPendingOOOPerson] = useState('');
+  const [pendingOOODate, setPendingOOODate] = useState('');
   // Employee rates from Rippling — used to fill zero rates for flex members
   const [employeeRates, setEmployeeRates] = useState<Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>>({});
   useEffect(() => {
@@ -3638,7 +3955,9 @@ export function SchedulePage({
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
+  const [goalUnit, setGoalUnit] = useState<InputMode>('output');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
+  const [designMonthlyMode, setDesignMonthlyMode] = useState<MonthlyDataMode>('blended');
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
   const [presDailyHours, setPresDailyHours] = useState<Record<string, number[]>>(settings.presDailyHours ?? {});
@@ -3708,14 +4027,29 @@ export function SchedulePage({
   function handleHoursChange(weekIdx: number, designerId: string, value: string) {
     const newHours = { ...settings.designHours };
     const key = isoMonday(weekIdx);
-    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: parseFloat(value) || 0 };
+    const val = parseFloat(value) || 0;
+    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: val };
     update('designHours', newHours);
+    if (weekIdx >= 0 && weekIdx <= 4) {
+      const dailyKey = `${key}-${designerId}`;
+      const workDays = settings.masterAvailability[designerId]?.workDays ?? [0, 1, 2, 3, 4];
+      const nextDaily = { ...designDailyHours, [dailyKey]: distributeWeeklyToDaily(val, designDailyHours[dailyKey], workDays) };
+      setDesignDailyHours(nextDaily);
+      update('designDailyHours', nextDaily);
+    }
   }
   function handleMgrTotalHoursChange(weekIdx: number, designerId: string, value: string) {
     const newHours = { ...settings.mgrTotalHours };
     const key = isoMonday(weekIdx);
-    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: parseFloat(value) || 0 };
+    const val = parseFloat(value) || 0;
+    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: val };
     update('mgrTotalHours', newHours);
+    if (weekIdx >= 0 && weekIdx <= 4) {
+      const dailyKey = `${key}-${designerId}`;
+      const workDays = settings.masterAvailability[designerId]?.workDays ?? [0, 1, 2, 3, 4];
+      const nextDaily = { ...settings.mgrTotalDailyHours, [dailyKey]: distributeWeeklyToDaily(val, settings.mgrTotalDailyHours[dailyKey], workDays) };
+      update('mgrTotalDailyHours', nextDaily);
+    }
   }
   function applyToAllWeeks(designerId: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this designer?`)) return;
@@ -3739,44 +4073,76 @@ export function SchedulePage({
   // ── Weekly totals ─────────────────────────────────────────────────────────────
   const weeklyTotals = useMemo(() =>
     Array.from({ length: WEEKS }, (_, w) => {
-      let totalFrames = 0, totalCost = 0;
+      let totalFrames = 0, totalCost = 0, totalHours = 0;
       designers.forEach(d => {
-        const { frames, cost } = weekStats(w, d);
+        const { frames, cost, hrs } = weekStats(w, d);
         totalFrames += frames;
         totalCost   += cost;
+        totalHours  += hrs;
       });
-      return { totalFrames, totalCost, totalCPO: totalFrames > 0 && totalCost > 0 ? totalCost / totalFrames : null };
+      return { totalFrames, totalCost, totalHours, totalCPO: totalFrames > 0 && totalCost > 0 ? totalCost / totalFrames : null };
     }),
     [schedule, designers] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
-  const monthlyData = useMemo(() => {
+  // ── Monthly aggregation (blends recorded actuals over the scheduled plan) ─────
+  const designActualsByWeekName = useMemo(() => {
+    const map: Record<string, { hours: number; frames: number }> = {};
+    teamActuals.filter(r => r.department === 'design').forEach(r => {
+      const key = `${r.week_of}:${r.member_name}`;
+      const existing = map[key] ?? { hours: 0, frames: 0 };
+      map[key] = { hours: existing.hours + r.actual_hours, frames: existing.frames + r.actual_orders };
+    });
+    return map;
+  }, [teamActuals]);
+
+  const monthlyData: MonthlyDatum[] = useMemo(() => {
     const map: Record<string, {
-      monthKey: string; weeks: number; totalFrames: number; totalCost: number; totalHours: number;
-      byDesigner: Record<string, { frames: number; cost: number; hrs: number }>;
+      monthKey: string; weeks: number; totalUnits: number; totalCost: number; totalHours: number;
+      byMember: Record<string, { units: number; cost: number; hrs: number }>;
+      weeksWithActual: Set<string>; isCurrent: boolean;
     }> = {};
-    for (let w = 0; w < WEEKS; w++) {
+    const pastWeeks = weeksSinceTrackingStart();
+    for (let w = -pastWeeks; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
       const key = getMonthKey(w);
-      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalFrames: 0, totalCost: 0, totalHours: 0, byDesigner: {} };
+      if (!map[key]) map[key] = { monthKey: key, weeks: 0, totalUnits: 0, totalCost: 0, totalHours: 0, byMember: {}, weeksWithActual: new Set(), isCurrent: false };
       map[key].weeks++;
-      map[key].totalFrames += weeklyTotals[w].totalFrames;
-      map[key].totalCost   += weeklyTotals[w].totalCost;
+      if (w === 0) map[key].isCurrent = true;
       designers.forEach(d => {
-        const { frames, cost, hrs } = weekStats(w, d);
-        if (!map[key].byDesigner[d.id]) map[key].byDesigner[d.id] = { frames: 0, cost: 0, hrs: 0 };
-        map[key].byDesigner[d.id].frames += frames;
-        map[key].byDesigner[d.id].cost   += cost;
-        map[key].byDesigner[d.id].hrs    += hrs;
+        const actual = designActualsByWeekName[`${weekIso}:${d.name}`];
+        const hasActual = !!(actual && actual.hours > 0);
+        if (hasActual) map[key].weeksWithActual.add(weekIso); // tracked regardless of mode — drives badges + "projected only" filtering
+        if (designMonthlyMode === 'actual' && !hasActual) return; // no recorded actuals — skip this member-week
+        const useActual = designMonthlyMode !== 'projected' && hasActual;
+        let units: number, hrs: number;
+        if (useActual) {
+          units = actual!.frames;
+          hrs = actual!.hours;
+        } else {
+          const s = weekStats(w, d);
+          units = s.frames;
+          hrs = s.hrs;
+        }
+        const cost = d.payType === 'salary' ? d.annualSalary / 52 : hrs * d.hourlyRate;
+        if (!map[key].byMember[d.id]) map[key].byMember[d.id] = { units: 0, cost: 0, hrs: 0 };
+        map[key].byMember[d.id].units += units;
+        map[key].byMember[d.id].cost  += cost;
+        map[key].byMember[d.id].hrs   += hrs;
+        map[key].totalUnits += units;
+        map[key].totalCost  += cost;
         map[key].totalHours += hrs;
       });
     }
-    return Object.values(map).map(m => ({
+    const results = Object.values(map).map(({ weeksWithActual, ...m }) => ({
       ...m,
-      monthlyRatio: m.totalFrames > 0 ? m.totalHours  / m.totalFrames : null,
-      monthlyCPO:   m.totalFrames > 0 && m.totalCost > 0 ? m.totalCost / m.totalFrames : null,
+      monthlyRatio: m.totalUnits > 0 ? m.totalHours  / m.totalUnits : null,
+      monthlyCPO:   m.totalUnits > 0 && m.totalCost > 0 ? m.totalCost / m.totalUnits : null,
+      allActual:    weeksWithActual.size === m.weeks,
+      anyActual:    weeksWithActual.size > 0,
     }));
-  }, [weeklyTotals, designers, schedule]); // eslint-disable-line react-hooks/exhaustive-deps
+    return designMonthlyMode === 'projected' ? results.filter(m => !m.anyActual) : results;
+  }, [designers, schedule, designActualsByWeekName, designMonthlyMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actual intake by week (merged: hardcoded historical < team actuals < Supabase actuals) ──
   // Single source of truth for "what actually came in a given week" — used both to graduate
@@ -3803,13 +4169,13 @@ export function SchedulePage({
     return Math.round(lastYearActual * getIntakeMultiplier(weekOf));
   }
 
-  // ── Future turnaround ────────────────────────────────────────────────────────
-  const futureTurnarounds = useMemo(() => {
+  // ── Graduating cohorts (preservation → designable, per week) ────────────────
+  const graduatingCohorts = useMemo(() => {
     const taByWeek: Record<string, number> = {};
     teamActuals.filter(r => r.department === 'preservation').forEach(r => {
       taByWeek[r.week_of] = (taByWeek[r.week_of] ?? 0) + r.actual_orders;
     });
-    const graduating: number[] = Array.from({ length: WEEKS }, (_, w) => {
+    return Array.from({ length: WEEKS }, (_, w) => {
       const graduatingDate = getMondayDate(w - PRESERVATION_WEEKS);
       const graduatingIso  = graduatingDate.toISOString().split('T')[0];
       const intakeData     = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
@@ -3824,25 +4190,135 @@ export function SchedulePage({
       if (projected !== undefined) return projected;
       return avgIntake;
     });
-    const queueAtStart: number[] = [designableQueue];
-    for (let w = 0; w < WEEKS - 1; w++) {
-      const afterDrain    = Math.max(0, queueAtStart[w] - weeklyTotals[w].totalFrames);
-      const afterGraduate = afterDrain + graduating[w + 1];
-      queueAtStart.push(afterGraduate);
-    }
-    return Array.from({ length: WEEKS }, (_, w) => {
-      const graduateWeek = w + PRESERVATION_WEEKS;
-      if (graduateWeek >= WEEKS) return null;
-      const queueAhead = queueAtStart[graduateWeek];
-      const cohortSize = graduating[w];
-      let remaining    = queueAhead + cohortSize;
-      for (let fw = graduateWeek; fw < WEEKS; fw++) {
-        remaining -= weeklyTotals[fw].totalFrames;
-        if (remaining <= 0) return fw - w;
-      }
-      return null;
+  }, [avgIntake, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
+
+  // ── Future turnaround ────────────────────────────────────────────────────────
+  const futureTurnarounds = useMemo(() => {
+    const frameCapacity = weeklyTotals.map(t => t.totalFrames);
+    return simulateDesignTurnarounds(designableQueue, graduatingCohorts, frameCapacity);
+  }, [designableQueue, graduatingCohorts, weeklyTotals]);
+
+  // Actual completed design output, by week — once entered via Historicals, this
+  // takes over from the schedule/plan for that week when running the simulation,
+  // so real progress (not just what was planned) drives the capacity goal below.
+  const designActualFramesByWeek = useMemo(() => {
+    const map: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'design').forEach(r => {
+      map[r.week_of] = (map[r.week_of] ?? 0) + r.actual_orders;
     });
-  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
+    return map;
+  }, [teamActuals]);
+
+  // ── November capacity goal ───────────────────────────────────────────────────
+  // Stretch goal: design-only turnaround should be back inside
+  // [DESIGN_TARGET_MIN, DESIGN_TARGET_MAX] before November and stay there.
+  // Solves (via binary search over the shared FIFO simulation) for a DECLINING
+  // per-week capacity target — front-loaded highest this week, tapering to zero
+  // extra by the end of the checked window — rather than one flat number repeated
+  // everywhere. The taper's slope depends directly on how many weeks are left, and
+  // its starting point uses actual completed output (once entered) instead of the
+  // plan for any week that already happened, so the whole curve responds to real
+  // progress, not just what was scheduled.
+  const capacityGoal = useMemo(() => {
+    const now = getMondayDate(0);
+    let novDate = new Date(now.getFullYear(), 10, 1);
+    if (novDate < now) novDate = new Date(now.getFullYear() + 1, 10, 1);
+    const novMonday = isoMondayFromDate(novDate);
+    const weeksToNovember = Math.max(0, Math.round(
+      (new Date(novMonday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+    ));
+    // Nov 1 can land any day of the week, so the checkpoint's Monday sometimes
+    // rolls back into late October — display through the week of Nov 9 as well
+    // so the goal bubble always visibly reaches into November itself.
+    const nov9Date   = new Date(novDate.getFullYear(), 10, 9);
+    const nov9Monday = isoMondayFromDate(nov9Date);
+    const weeksToNov9 = Math.max(0, Math.round(
+      (new Date(nov9Monday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+    ));
+    const baseCapacity = weeklyTotals.map(t => t.totalFrames);
+    // Prefer actual completed frames over the plan wherever they're known (in
+    // practice this only ever differs for the current/just-passed week — future
+    // weeks have no actuals yet).
+    const simCapacity = baseCapacity.map((f, w) => designActualFramesByWeek[isoMonday(w)] ?? f);
+    const projected     = simulateDesignTurnarounds(designableQueue, graduatingCohorts, simCapacity);
+    const atNovemberIdx = Math.min(weeksToNovember, WEEKS - 1);
+    const projectedAtNovember = projected[atNovemberIdx] ?? null;
+    // The last PRESERVATION_WEEKS entries of any simulation are structurally null
+    // (their graduation week falls past the 52-week horizon) regardless of capacity —
+    // exclude them, and cap how far past November we require the goal to hold so a
+    // handful of near-tail cohorts don't dominate the solve (see SUSTAIN_CHECK_WEEKS).
+    const lastCheckableWeek = Math.max(1, Math.min(WEEKS - PRESERVATION_WEEKS - 1, atNovemberIdx + SUSTAIN_CHECK_WEEKS));
+
+    // Worst overage (weeks above the ceiling) from the November checkpoint onward.
+    function worstOverage(capacity: number[]): number {
+      if (atNovemberIdx > lastCheckableWeek) return 0;
+      const sim = simulateDesignTurnarounds(designableQueue, graduatingCohorts, capacity);
+      let worst = 0;
+      for (let w = atNovemberIdx; w <= lastCheckableWeek; w++) {
+        const t = sim[w];
+        if (t === null) return Infinity;
+        if (t > DESIGN_TARGET_MAX) worst = Math.max(worst, t - DESIGN_TARGET_MAX);
+      }
+      return worst;
+    }
+
+    // Declining ramp: extra[w] = peak at w=0, linearly down to 0 by lastCheckableWeek.
+    // Binary search the single "peak" scalar against the real simulation so the
+    // curve is verified to actually work, not just a plausible-looking taper.
+    function rampExtra(peak: number, w: number): number {
+      return Math.max(0, peak * (1 - w / lastCheckableWeek));
+    }
+    function worstOverageWithRamp(peak: number): number {
+      return worstOverage(simCapacity.map((f, w) => f + rampExtra(peak, w)));
+    }
+    let peak = 0;
+    if (worstOverage(simCapacity) > 0) {
+      let lo = 0, hi = Math.max(40, ...simCapacity, 1);
+      while (worstOverageWithRamp(hi) > 0 && hi < 5000) hi *= 2;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        if (worstOverageWithRamp(mid) > 0) lo = mid; else hi = mid;
+      }
+      peak = Math.ceil(hi);
+    }
+
+    const requiredCapacity = simCapacity.map((f, w) => f + Math.round(rampExtra(peak, w)));
+    const onTrack = peak === 0 && worstOverage(simCapacity) !== Infinity;
+
+    // First intake week (as currently scheduled/actual, no ramp) whose projected
+    // turnaround breaks the ceiling — a pointer back to where in the Weekly Schedule
+    // capacity starts falling short, rather than just the aggregate target number.
+    let firstOverWeek: number | null = null;
+    for (let w = 0; w <= lastCheckableWeek; w++) {
+      const t = projected[w];
+      if (t === null || t > DESIGN_TARGET_MAX) { firstOverWeek = w; break; }
+    }
+
+    // Hours equivalent — frames are the real planning unit (they drive the queue
+    // simulation), so hours are derived from each week's actual scheduled hours/frame
+    // ratio, falling back to a blended ratio across all scheduled weeks for weeks
+    // with nothing entered yet (e.g. far-future weeks, or the gap frames, which have
+    // no hours of their own to derive a ratio from).
+    const baseHours = weeklyTotals.map(t => t.totalHours);
+    let ratioSumFrames = 0, ratioSumHours = 0;
+    weeklyTotals.forEach(t => { if (t.totalFrames > 0) { ratioSumFrames += t.totalFrames; ratioSumHours += t.totalHours; } });
+    const blendedRatio = ratioSumFrames > 0 ? ratioSumHours / ratioSumFrames
+      : (designers.length > 0 ? designers.reduce((s, d) => s + d.ratio, 0) / designers.length : 0);
+    const hoursPerFrame = weeklyTotals.map(t => t.totalFrames > 0 ? t.totalHours / t.totalFrames : blendedRatio);
+    // Gap always compares the target against the PLAN (baseCapacity), not the
+    // actual-aware simCapacity, since this is what tells a manager how much more
+    // to schedule — a week that already over-delivered vs. plan shouldn't show a
+    // gap just because the ramp math used its higher actual internally.
+    const frameGap    = baseCapacity.map((f, w) => Math.max(0, requiredCapacity[w] - f));
+    const requiredHours = baseHours.map((h, w) => h + frameGap[w] * hoursPerFrame[w]);
+    const thisWeekTarget      = requiredCapacity[0] ?? 0;
+    const thisWeekTargetHours = requiredHours[0] ?? 0;
+
+    return {
+      novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
+      baseCapacity, requiredCapacity, onTrack, baseHours, requiredHours, firstOverWeek,
+    };
+  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -3966,7 +4442,7 @@ export function SchedulePage({
               ['resin',        'Resin'],
             ] as const).filter(([id]) => {
               if (userRole === 'manager' && userDepartment) {
-                return id === userDepartment;
+                return id === userDepartment || id === 'master';
               }
               if (userRole === 'viewer') {
                 return ['design', 'preservation', 'resin'].includes(id);
@@ -4026,6 +4502,9 @@ export function SchedulePage({
           countsLoading={countsLoading}
           teamActuals={teamActuals}
           canViewCPO={canViewCPO}
+          paidHolidays={paidHolidays}
+          personTimeOff={personTimeOff}
+          masterAvailability={settings.masterAvailability}
           presHours={settings.presHours}
           presDailyHours={presDailyHours}
           presCheckHours={presCheckHours}
@@ -4088,6 +4567,9 @@ export function SchedulePage({
           onMgrTotalDailyHoursChange={(h) => update('mgrTotalDailyHours', h)}
           ffDailyHoursProp={settings.ffDailyHours}
           onFfDailyHoursChange={(h) => update('ffDailyHours', h)}
+          paidHolidays={paidHolidays}
+          personTimeOff={personTimeOff}
+          masterAvailability={settings.masterAvailability}
           onActualsSaved={() => {
             fetch(`/api/actuals?location=${location}&type=team&weeks=52`)
               .then(r => r.json())
@@ -4175,6 +4657,109 @@ export function SchedulePage({
             )}
           </div>
 
+          {/* ── Turnaround capacity goal ─────────────────────────────────────── */}
+          <div className="bg-white border border-slate-100 rounded-xl p-5">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">Turnaround goal — before November</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Stretch goal: {DESIGN_TARGET_MIN}–{DESIGN_TARGET_MAX} wks design-only ({TOTAL_TARGET_MIN}–{TOTAL_TARGET_MAX} wks incl. ~{FULFILLMENT_WEEKS}-wk fulfillment), held all year — not just at one deadline.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-slate-500 whitespace-nowrap">
+                  wk of {getMondayDate(capacityGoal.weeksToNovember).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {' · '}{capacityGoal.weeksToNovember} wk{capacityGoal.weeksToNovember !== 1 ? 's' : ''} away
+                </span>
+                <InputModeToggle mode={goalUnit} onChange={setGoalUnit} unitLabel="Frames" />
+              </div>
+            </div>
+
+            {capacityGoal.projectedAtNovember !== null ? (() => {
+              const t       = capacityGoal.projectedAtNovember;
+              const onTrack = t >= DESIGN_TARGET_MIN && t <= DESIGN_TARGET_MAX;
+              const over    = t > DESIGN_TARGET_MAX;
+              const gap     = over ? t - DESIGN_TARGET_MAX : (onTrack ? 0 : DESIGN_TARGET_MIN - t);
+              const barColor  = onTrack ? 'bg-green-400' : over ? (t <= 18 ? 'bg-amber-400' : 'bg-red-600') : 'bg-orange-400';
+              const textColor = onTrack ? 'text-green-700' : over ? (t <= 18 ? 'text-amber-700' : 'text-red-800') : 'text-orange-700';
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 w-28 shrink-0">Projected, {getWeekLabel(capacityGoal.weeksToNovember)}</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden relative">
+                      <div className="absolute top-0 bottom-0 bg-green-100"
+                        style={{ left: `${(DESIGN_TARGET_MIN / 22) * 100}%`, width: `${((DESIGN_TARGET_MAX - DESIGN_TARGET_MIN) / 22) * 100}%` }} />
+                      <div className={`h-2.5 relative ${barColor}`} style={{ width: `${Math.min(100, (t / 22) * 100)}%` }} />
+                    </div>
+                    <span className={`text-xs font-semibold w-48 text-right shrink-0 ${textColor}`}>
+                      ~{t} wks{onTrack ? ' — on track' : over ? ' — over goal' : ' — ahead of goal'}
+                    </span>
+                  </div>
+                  {onTrack ? (
+                    <p className="text-xs text-green-700">Currently scheduled capacity holds design-only turnaround in the target band through the planning window.</p>
+                  ) : over ? (
+                    <>
+                      <p className={`text-xs font-medium ${textColor}`}>
+                        {gap} wk{gap !== 1 ? 's' : ''} over the {DESIGN_TARGET_MAX}-wk ceiling as scheduled — needs to ramp up to ~{goalUnit === 'output' ? capacityGoal.thisWeekTarget : capacityGoal.thisWeekTargetHours}{goalUnit === 'output' ? 'f' : 'h'} this week, tapering down toward the current pace as the backlog clears through November.
+                      </p>
+                      {capacityGoal.firstOverWeek !== null && (
+                        <p className="text-xs text-slate-400">
+                          As scheduled, turnaround first breaks {DESIGN_TARGET_MAX} wks for orders arriving {getWeekLabel(capacityGoal.firstOverWeek)} — check Weekly Schedule capacity around then (a common cause: designer hours not yet entered that far out).
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className={`text-xs ${textColor}`}>{gap} wk{gap !== 1 ? 's' : ''} ahead of the {DESIGN_TARGET_MIN}-wk floor — team may be overstaffed relative to intake.</p>
+                  )}
+                  {!capacityGoal.onTrack && (() => {
+                    const scheduledSeries = goalUnit === 'output' ? capacityGoal.baseCapacity     : capacityGoal.baseHours;
+                    const neededSeries    = goalUnit === 'output' ? capacityGoal.requiredCapacity : capacityGoal.requiredHours;
+                    const unit = goalUnit === 'output' ? 'f' : 'h';
+                    // Show every week through the November checkpoint (not just an
+                    // arbitrary first-8), so the gap stays visible all the way to
+                    // the actual goal date instead of cutting off around 8/31.
+                    const weeksShown = Math.min(Math.max(capacityGoal.weeksToNovember, capacityGoal.weeksToNov9) + 1, WEEKS - PRESERVATION_WEEKS - 1);
+                    return (
+                      <div className="overflow-x-auto -mx-1">
+                        <table className="text-xs min-w-full">
+                          <thead>
+                            <tr className="text-slate-400">
+                              <th className="sticky left-0 bg-white text-left font-medium px-1 py-1">Week</th>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <th key={w} className="text-center font-medium px-2 py-1 min-w-[64px]">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="whitespace-nowrap">{getWeekLabel(w)}</span>
+                                    {w === 0 && <span className="text-[9px] bg-indigo-100 text-indigo-600 rounded px-1 leading-tight">now</span>}
+                                  </div>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Scheduled</td>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <td key={w} className="text-center px-2 py-1 text-slate-600">{Math.round(scheduledSeries[w])}{unit}</td>
+                              ))}
+                            </tr>
+                            <tr>
+                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Needed</td>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <td key={w} className="text-center px-2 py-1 font-semibold text-amber-700">{Math.round(neededSeries[w])}{unit}</td>
+                              ))}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })() : (
+              <p className="text-xs text-red-600 italic">Queue isn&apos;t projected to clear within the 52-week planning window — increase capacity to get a projection.</p>
+            )}
+          </div>
+
           {/* Inner tabs */}
           <div className="flex border-b border-slate-200">
             {([
@@ -4206,9 +4791,12 @@ export function SchedulePage({
               const key = `${isoMonday(designThisWeekOffset)}-${id}`;
               const prev = designDailyHours[key] ?? [];
               const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-              const next = { ...designDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
+              const nextDaily = padded.map((h: number, j: number) => j === di ? val : h);
+              const next = { ...designDailyHours, [key]: nextDaily };
               setDesignDailyHours(next);
               update('designDailyHours', next);
+              const monday = isoMonday(designThisWeekOffset);
+              update('designHours', { ...settings.designHours, [id]: { ...(settings.designHours[id] ?? {}), [monday]: sumDaily(nextDaily) } });
             }
             function getMgrTotalDH(id: string, di: number) {
               return settings.mgrTotalDailyHours[`${isoMonday(designThisWeekOffset)}-${id}`]?.[di] ?? getDH(id, di);
@@ -4217,8 +4805,11 @@ export function SchedulePage({
               const key = `${isoMonday(designThisWeekOffset)}-${id}`;
               const prev = settings.mgrTotalDailyHours[key] ?? [];
               const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-              const next = { ...settings.mgrTotalDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
+              const nextDaily = padded.map((h: number, j: number) => j === di ? val : h);
+              const next = { ...settings.mgrTotalDailyHours, [key]: nextDaily };
               update('mgrTotalDailyHours', next);
+              const monday = isoMonday(designThisWeekOffset);
+              update('mgrTotalHours', { ...settings.mgrTotalHours, [id]: { ...(settings.mgrTotalHours[id] ?? {}), [monday]: sumDaily(nextDaily) } });
             }
             function dDailyCost(d: Designer, di: number) {
               const isMgr = (d as {isManager?:boolean}).isManager;
@@ -4244,6 +4835,20 @@ export function SchedulePage({
                     <button onClick={() => setDesignThisWeekOffset(Math.min(4, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
                 </div>
+                {(() => {
+                  const required  = capacityGoal.requiredCapacity[designThisWeekOffset] ?? capacityGoal.baseCapacity[designThisWeekOffset] ?? 0;
+                  const remaining = Math.max(0, required - teamWeekFrames);
+                  const onPace    = remaining <= 0.05;
+                  return (
+                    <div className={`px-5 py-2 border-b border-slate-100 flex items-center gap-2 flex-wrap ${onPace ? 'bg-green-50/50' : 'bg-amber-50/50'}`}>
+                      <span className={`text-xs font-medium ${onPace ? 'text-green-700' : 'text-amber-700'}`}>
+                        {onPace
+                          ? `On pace for the turnaround goal — ${Math.round(teamWeekFrames * 10) / 10}f scheduled of ${Math.round(required)}f needed this week.`
+                          : `${Math.round(remaining * 10) / 10} more frame${remaining >= 1.05 || remaining < 0.95 ? 's' : ''} still needed this week to stay on the turnaround goal (${Math.round(teamWeekFrames * 10) / 10}f of ${Math.round(required)}f scheduled).`}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs">
                     <thead>
@@ -4277,8 +4882,18 @@ export function SchedulePage({
                               const frames = d.ratio > 0 && h > 0 ? h / d.ratio : 0;
                               const cost = dDailyCost(d, dayIdx);
                               const cpo = !isMgr && frames > 0 && cost > 0 ? cost / frames : null;
+                              const dIso = days[dayIdx]?.iso ?? '';
+                              const dOff = paidHolidays.includes(dIso) || (personTimeOff[d.id] ?? []).includes(dIso);
+                              const dWorkDays = settings.masterAvailability[d.id]?.workDays ?? [0, 1, 2, 3, 4];
+                              const dNotSched = !dOff && !dWorkDays.includes(dayIdx);
                               return (
                                 <td key={dayIdx} className={`px-2 py-1.5 text-center ${dayIdx === 0 ? 'bg-indigo-50/30' : ''}`}>
+                                  {dOff && (
+                                    <div className="text-[9px] font-medium text-amber-600 mb-0.5">
+                                      {paidHolidays.includes(dIso) ? 'Holiday' : 'OOO'}
+                                    </div>
+                                  )}
+                                  {dNotSched && <div className="text-[9px] font-medium text-slate-400 mb-0.5">Not scheduled</div>}
                                   <input type="number"
                                     value={designInputMode === 'output' ? (frames ? round2(frames) : '') : (h || '')}
                                     min="0" step={designInputMode === 'output' ? '0.1' : '0.5'} placeholder="0"
@@ -4425,6 +5040,28 @@ export function SchedulePage({
                             <div className="text-indigo-700">{Math.round(t.totalFrames)}f</div>
                             {hasRates && t.totalCPO !== null && (
                               <div className="text-amber-600 text-[10px]">{fmt$(t.totalCPO)}</div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* Still needed row — the gap toward the November turnaround goal,
+                        shown right where hours get entered so paging past 8/31 with
+                        Next → makes it obvious how much more each future week needs. */}
+                    <tr className="border-t border-slate-100 bg-amber-50/40">
+                      <td className="sticky left-0 bg-amber-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Still needed</td>
+                      {windowWeeks.map(w => {
+                        const gapFrames = Math.max(0, Math.round(capacityGoal.requiredCapacity[w] - weeklyTotals[w].totalFrames));
+                        const gapHours  = Math.max(0, Math.round((capacityGoal.requiredHours[w] - weeklyTotals[w].totalHours) * 10) / 10);
+                        return (
+                          <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
+                            {gapFrames > 0 ? (
+                              <>
+                                <div className="font-semibold text-amber-700">+{gapFrames}f</div>
+                                <div className="text-[10px] text-slate-400">+{gapHours}h</div>
+                              </>
+                            ) : (
+                              <div className="text-green-600 text-[10px]">on pace</div>
                             )}
                           </td>
                         );
@@ -4632,89 +5269,16 @@ export function SchedulePage({
 
           {/* ── MONTHLY SUMMARY TAB ─────────────────────────────────────────── */}
           {activeTab === 'monthly' && (
-            <div className="space-y-6">
-              <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100">
-                  <h2 className="text-sm font-semibold text-slate-700">Monthly summary</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">Each week attributed to the month of its Monday. Monthly ratio = total hours ÷ total frames.</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        <th className="px-4 py-2 text-left font-medium text-slate-500">Month</th>
-                        <th className="px-3 py-2 text-right font-medium text-slate-500">Weeks</th>
-                        <th className="px-3 py-2 text-right font-medium text-slate-500">Total frames</th>
-                        <th className="px-3 py-2 text-right font-medium text-slate-500">Total hours</th>
-                        <th className="px-3 py-2 text-right font-medium text-slate-500">Monthly ratio</th>
-                        {hasRates && <th className="px-3 py-2 text-right font-medium text-slate-500">Total labor</th>}
-                        {hasRates && <th className="px-3 py-2 text-right font-medium text-slate-500">Monthly CPO</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthlyData.map((m, i) => (
-                        <tr key={m.monthKey} className={`border-b border-slate-50 ${i === 0 ? 'bg-indigo-50/40' : 'hover:bg-slate-50'}`}>
-                          <td className="px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
-                            {m.monthKey}
-                            {i === 0 && <span className="ml-2 text-[10px] bg-indigo-100 text-indigo-600 rounded px-1 py-px">current</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right text-slate-500">{m.weeks}</td>
-                          <td className="px-3 py-2 text-right font-medium text-indigo-700">{Math.round(m.totalFrames)}</td>
-                          <td className="px-3 py-2 text-right text-slate-500">{Math.round(m.totalHours)}</td>
-                          <td className="px-3 py-2 text-right font-medium text-slate-700">
-                            {m.monthlyRatio !== null ? `${Math.round(m.monthlyRatio * 100) / 100} hrs/frame` : '—'}
-                          </td>
-                          {hasRates && <td className="px-3 py-2 text-right text-slate-500">{m.totalCost > 0 ? fmt$(m.totalCost) : '—'}</td>}
-                          {hasRates && <td className="px-3 py-2 text-right font-medium text-amber-700">{m.monthlyCPO !== null ? fmt$(m.monthlyCPO) : '—'}</td>}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100">
-                  <h2 className="text-sm font-semibold text-slate-700">Per-designer monthly breakdown</h2>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-100">
-                        <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap">Designer</th>
-                        {monthlyData.slice(0, 6).map(m => (
-                          <th key={m.monthKey} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[120px]">
-                            {m.monthKey.split(' ')[0]}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {designers.map((d, di) => (
-                        <tr key={d.id} className={di % 2 === 0 ? '' : 'bg-slate-50/40'}>
-                          <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
-                            {d.name}
-                            {d.payType === 'salary' && <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 rounded px-1 py-px">salary</span>}
-                          </td>
-                          {monthlyData.slice(0, 6).map(m => {
-                            const s = m.byDesigner[d.id];
-                            if (!s || s.frames === 0) return <td key={m.monthKey} className="px-3 py-2 text-center text-slate-200">—</td>;
-                            const mCPO = s.cost > 0 && s.frames > 0 ? s.cost / s.frames : null;
-                            return (
-                              <td key={m.monthKey} className="px-3 py-2 text-center">
-                                <div className="font-medium text-indigo-700">{Math.round(s.frames)}f</div>
-                                <div className="text-slate-400">{Math.round(s.hrs)}h</div>
-                                {hasRates && mCPO !== null && <div className="text-amber-600">{fmt$(mCPO)}</div>}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <MonthlySummarySection
+              monthlyData={monthlyData}
+              members={designers.map(d => ({ id: d.id, name: d.name, payType: d.payType }))}
+              unitLabel="frames"
+              unitAbbrev="f"
+              hasRates={hasRates}
+              memberColumnLabel="Designer"
+              mode={designMonthlyMode}
+              onModeChange={setDesignMonthlyMode}
+            />
           )}
 
           {/* ── HISTORICALS TAB ─────────────────────────────────────────────── */}
@@ -4782,6 +5346,52 @@ export function SchedulePage({
             <p className="text-xs text-slate-400">No paid holidays set.</p>
           )}
         </div>
+
+        <div className="bg-white border border-slate-100 rounded-xl p-4">
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <span className="text-xs font-medium text-slate-500">Time off / OOO</span>
+            <span className="text-[11px] text-slate-400">Per-person — zeroes that day&apos;s hours and reduces their available capacity</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <select value={pendingOOOPerson} onChange={e => setPendingOOOPerson(e.target.value)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+              <option value="">Select person…</option>
+              {(location === 'Utah' ? UTAH_STAFF : GEORGIA_STAFF).map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <input type="date" value={pendingOOODate} onChange={e => setPendingOOODate(e.target.value)}
+              className="border border-slate-200 rounded px-2 py-1.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+            <button onClick={() => { if (pendingOOOPerson && pendingOOODate) { addTimeOff(pendingOOOPerson, pendingOOODate); setPendingOOODate(''); } }}
+              disabled={!pendingOOOPerson || !pendingOOODate}
+              className="px-4 py-1.5 text-xs font-medium bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+              Add
+            </button>
+          </div>
+          {(() => {
+            const staff = location === 'Utah' ? UTAH_STAFF : GEORGIA_STAFF;
+            const entries = staff
+              .map(s => ({ person: s, dates: personTimeOff[s.id] ?? [] }))
+              .filter(e => e.dates.length > 0);
+            return entries.length > 0 ? (
+              <div className="space-y-2">
+                {entries.map(({ person, dates }) => (
+                  <div key={person.id} className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-slate-600 min-w-[120px]">{person.name}</span>
+                    {dates.map(d => (
+                      <span key={d} className="inline-flex items-center gap-1.5 text-xs bg-slate-50 border border-slate-200 text-slate-600 px-2.5 py-1 rounded-full">
+                        {new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        <button onClick={() => removeTimeOff(person.id, d)} className="text-slate-400 hover:text-red-500 transition-colors">×</button>
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">No time off set.</p>
+            );
+          })()}
+        </div>
         <MasterScheduleSection
           location={location}
           masterAvailability={settings.masterAvailability}
@@ -4793,6 +5403,8 @@ export function SchedulePage({
           designRoster={settings.designRoster}
           presRoster={settings.presRoster}
           ffRoster={settings.ffRoster}
+          paidHolidays={paidHolidays}
+          personTimeOff={personTimeOff}
         />
         </>
       )}

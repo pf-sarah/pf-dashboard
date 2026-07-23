@@ -1,6 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  useKpiMetrics,
+  selectEstimated,
+  selectDept,
+  type KpiLocation,
+  type KpiDept,
+  type EstimatedMonthResult,
+} from '@/hooks/useKpiMetrics';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -71,6 +79,14 @@ const PROD_LABEL: Record<string, string> = {
   Design: 'frames', Preservation: 'bouquets', Fulfillment: 'orders', Resin: 'pieces',
 };
 
+// Maps scorecard dept/location keys to the KPI hook's keys, so we can pull the
+// scheduling-based CPO projection (same numbers shown on All KPIs → "Est. next
+// month") in as the source of truth for the Minimum column.
+const SCORECARD_DEPT_TO_KPI_DEPT: Record<DeptOrBlended, KpiDept> = {
+  Design: 'design', Preservation: 'preservation', Fulfillment: 'fulfillment',
+  'G&A': 'ga', Resin: 'resin', Blended: 'combined',
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt$(n: number | null | undefined): string {
@@ -96,6 +112,21 @@ function avg(vals: (number | null)[]): number | null {
 function pctChange(current: number | null, reference: number | null): number | null {
   if (current == null || reference == null || reference === 0) return null;
   return (current - reference) / reference;
+}
+
+// Scheduling-based CPO estimate for a dept+location, sourced from the same
+// roster/hours projection that drives "Est. next month" on All KPIs. This is
+// "what's actually planned" — the intended source for the Minimum column.
+function scheduledCPOFor(
+  estimated: { next?: EstimatedMonthResult } | null,
+  loc:       Location | 'Company',
+  dept:      DeptOrBlended
+): number | null {
+  const kpiDept = SCORECARD_DEPT_TO_KPI_DEPT[dept];
+  const kpiLoc: KpiLocation = loc === 'Company' ? 'Combined' : loc;
+  const period = selectEstimated(estimated?.next, kpiLoc);
+  if (!period) return null;
+  return selectDept(period, kpiDept).cpo;
 }
 
 // ── Goal suggestion engine ────────────────────────────────────────────────────
@@ -245,6 +276,10 @@ export default function ScorecardTab() {
 
   // Goals local state (layered over fetched goals)
   const [localGoals, setLocalGoals] = useState<Record<string, ScorecardGoal>>({});
+
+  // Scheduling-based CPO projection (powers the "Scheduled" reference column
+  // and the Minimum/Goal quick-apply presets below)
+  const { estimated: kpiEstimated } = useKpiMetrics('est-next');
 
   // What-if state
   const [whatIfDept,    setWhatIfDept]    = useState<Dept>('Design');
@@ -411,6 +446,9 @@ export default function ScorecardTab() {
               ))}
               <th className="px-3 py-2.5 text-center font-medium text-slate-400 min-w-[70px]">L3 avg</th>
               <th className="px-3 py-2.5 text-center font-medium text-slate-400 min-w-[70px]">YTD avg</th>
+              <th className="px-3 py-2.5 text-center font-semibold text-purple-600 min-w-[90px] bg-purple-50/40 border-l border-purple-100">
+                Scheduled
+              </th>
               <th className="px-3 py-2.5 text-center font-semibold text-indigo-600 min-w-[110px] bg-indigo-50/50 border-l border-indigo-100">
                 {monthLabel(nextMonth)} goal
               </th>
@@ -433,6 +471,7 @@ export default function ScorecardTab() {
               });
               const l3  = avg(series.slice(-3));
               const ytd = avg(series.filter((v): v is number => v !== null));
+              const scheduled = scheduledCPOFor(kpiEstimated, loc, dept);
 
               const goalLoc = loc === 'Company' ? 'Company' : loc;
               const goal    = getGoal(nextMonth, goalLoc, dept);
@@ -477,6 +516,10 @@ export default function ScorecardTab() {
                   })}
                   <td className="px-3 py-2 text-center text-slate-500 font-medium">{fmt$(l3)}</td>
                   <td className="px-3 py-2 text-center text-slate-500 font-medium">{fmt$(ytd)}</td>
+                  {/* Scheduled cell — from Scheduling tab's roster/hours projection */}
+                  <td className="px-3 py-2 text-center bg-purple-50/20 border-l border-purple-100">
+                    <span className="font-semibold text-purple-700">{fmt$(scheduled)}</span>
+                  </td>
                   {/* Goal cell */}
                   <td className="px-3 py-2 text-center bg-indigo-50/30 border-l border-indigo-100">
                     <div className="flex flex-col items-center gap-1">
@@ -488,6 +531,8 @@ export default function ScorecardTab() {
                       {/* Quick-apply: native select on mobile, pills on desktop */}
                       <QuickApply
                         options={[
+                          { label: 'Sched −5%',  val: scheduled != null ? scheduled * 0.95 : null },
+                          { label: 'Sched −10%', val: scheduled != null ? scheduled * 0.90 : null },
                           { label: 'L3',   val: l3 },
                           { label: 'YTD',  val: ytd },
                           { label: '−5%',  val: l3 != null ? l3 * 0.95 : null },
@@ -508,6 +553,7 @@ export default function ScorecardTab() {
                       <QuickApply
                         variant="amber"
                         options={[
+                          { label: 'Sched', val: scheduled },
                           { label: 'L3',   val: l3 },
                           { label: '+5%',  val: l3 != null ? l3 * 1.05 : null },
                           { label: '+10%', val: l3 != null ? l3 * 1.10 : null },
@@ -966,8 +1012,11 @@ export default function ScorecardTab() {
             <div className="px-5 py-3 border-b border-slate-100">
               <h3 className="text-sm font-semibold text-slate-700">{location} — CPO by Department</h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Click any goal/minimum cell to edit. Quick-apply buttons use last-3-month average.
-                Green = at or below goal. Amber = between goal and minimum. Red = above minimum.
+                Click any goal/minimum cell to edit. <span className="text-purple-600 font-medium">Scheduled</span> is
+                next month&apos;s CPO projected from the Scheduling tab&apos;s planned roster/hours — quick-apply
+                &quot;Sched&quot; to set Minimum from it, then &quot;Sched −5%&quot;/&quot;−10%&quot; for Goal.
+                Other quick-apply buttons use last-3-month average. Green = at or below goal. Amber = between goal
+                and minimum. Red = above minimum.
               </p>
             </div>
             <CPOTable loc={location} />
