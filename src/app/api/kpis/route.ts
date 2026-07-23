@@ -536,8 +536,11 @@ function projectMonthForLocation(
 // Returns: { windows: WindowResult[], estimated: { current?, next? } }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const isSyncCaller = req.headers.get('authorization') === `Bearer ${process.env.SCORECARDS_SYNC_SECRET}`;
+  if (!isSyncCaller) {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const windowsParam = req.nextUrl.searchParams.get('windows')
     ?? 'mtd,qtd,ytd,weekly-12,monthly-12,quarterly-4,est-current,est-next';

@@ -1,6 +1,10 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
-const isPublicRoute = createRouteMatcher(['/api/leads', '/sign-in(.*)', '/sign-up(.*)', '/api/webhooks/(.*)', '/api/cron/(.*)' , '/api/admin/sync-shopify-locations', '/api/cron/sync-shopify-tags', '/api/admin/seed-historicals', '/api/admin/sync-resin-locations']);
+// /api/kpis and /api/scorecard are public at the middleware layer, same as
+// /api/cron/(.*), because they accept a SCORECARDS_SYNC_SECRET bearer token
+// from the pressedfloral-scorecards monthly sync in addition to a Clerk
+// session — that check happens inside each route handler, not here.
+const isPublicRoute = createRouteMatcher(['/api/leads', '/sign-in(.*)', '/sign-up(.*)', '/api/webhooks/(.*)', '/api/cron/(.*)' , '/api/admin/sync-shopify-locations', '/api/cron/sync-shopify-tags', '/api/admin/seed-historicals', '/api/admin/sync-resin-locations', '/api/kpis', '/api/scorecard']);
 
 export default clerkMiddleware(async (auth, req) => {
   if (!isPublicRoute(req)) await auth.protect();
