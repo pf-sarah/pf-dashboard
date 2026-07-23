@@ -9,7 +9,7 @@ import { HistoricalsSection } from './HistoricalsSection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -36,6 +36,21 @@ interface WeekSchedule {
 const WEEKS              = 52;
 const WINDOW             = 8;
 const PRESERVATION_WEEKS = 6;
+// Stretch-goal turnaround bands. Fulfillment always adds FULFILLMENT_WEEKS
+// on top of the design-only figure, so the two bands are meant to line up:
+// 8 + 2 = 10 and 14 + 2 = 16.
+const FULFILLMENT_WEEKS      = 2;
+const DESIGN_TARGET_MIN      = 8;
+const DESIGN_TARGET_MAX      = 14;
+const TOTAL_TARGET_MIN       = DESIGN_TARGET_MIN + FULFILLMENT_WEEKS;
+const TOTAL_TARGET_MAX       = DESIGN_TARGET_MAX + FULFILLMENT_WEEKS;
+// How many weeks past the November checkpoint the capacity solver requires the
+// turnaround to *hold* in-band. Bounded rather than run to the end of the 52-week
+// simulation array — cohorts arriving very late in that array have almost no
+// simulated weeks left to clear regardless of capacity, which would otherwise force
+// the solver to way overshoot chasing an artifact of the horizon length, not a real
+// capacity shortfall.
+const SUSTAIN_CHECK_WEEKS    = 16;
 // Default projection ratio for auto-filled "bouquets received" estimates:
 // same week last year × this multiplier. Editable per week.
 const DEFAULT_INTAKE_MULTIPLIER = 1.2;
@@ -183,6 +198,34 @@ function turnaroundColors(totalWeeks: number | null, overstaffed: boolean) {
   if (totalWeeks <= 10)    return { bar: 'bg-green-400',  text: 'text-green-700',  label: `~${totalWeeks} wks — ideal` };
   if (totalWeeks <= 18)    return { bar: 'bg-amber-400',  text: 'text-amber-700',  label: `~${totalWeeks} wks — backlog building` };
   return                          { bar: 'bg-red-600',    text: 'text-red-800',    label: `~${totalWeeks} wks — large backlog` };
+}
+
+// Pure FIFO simulation: given a starting designable queue, a per-week inflow of
+// cohorts graduating out of preservation, and a per-week design capacity (frames),
+// returns for each week w the total weeks (received → frame completed) for a bouquet
+// received in week w — or null if the queue never clears within the horizon.
+// Shared by the live turnaround projection and the capacity-goal solver below so
+// both always agree on how capacity translates into turnaround.
+function simulateDesignTurnarounds(startQueue: number, graduatingByWeek: number[], frameCapacityByWeek: number[]): (number | null)[] {
+  const weeks = frameCapacityByWeek.length;
+  const queueAtStart: number[] = [startQueue];
+  for (let w = 0; w < weeks - 1; w++) {
+    const afterDrain    = Math.max(0, queueAtStart[w] - frameCapacityByWeek[w]);
+    const afterGraduate = afterDrain + (graduatingByWeek[w + 1] ?? 0);
+    queueAtStart.push(afterGraduate);
+  }
+  return Array.from({ length: weeks }, (_, w) => {
+    const graduateWeek = w + PRESERVATION_WEEKS;
+    if (graduateWeek >= weeks) return null;
+    const queueAhead = queueAtStart[graduateWeek];
+    const cohortSize = graduatingByWeek[w] ?? 0;
+    let remaining    = queueAhead + cohortSize;
+    for (let fw = graduateWeek; fw < weeks; fw++) {
+      remaining -= frameCapacityByWeek[fw];
+      if (remaining <= 0) return fw - w;
+    }
+    return null;
+  });
 }
 
 // ─── RosterEditor ──────────────────────────────────────────────────────────────
@@ -3554,6 +3597,7 @@ export function SchedulePage({
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
+  const [goalUnit, setGoalUnit] = useState<InputMode>('output');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
@@ -3655,13 +3699,14 @@ export function SchedulePage({
   // ── Weekly totals ─────────────────────────────────────────────────────────────
   const weeklyTotals = useMemo(() =>
     Array.from({ length: WEEKS }, (_, w) => {
-      let totalFrames = 0, totalCost = 0;
+      let totalFrames = 0, totalCost = 0, totalHours = 0;
       designers.forEach(d => {
-        const { frames, cost } = weekStats(w, d);
+        const { frames, cost, hrs } = weekStats(w, d);
         totalFrames += frames;
         totalCost   += cost;
+        totalHours  += hrs;
       });
-      return { totalFrames, totalCost, totalCPO: totalFrames > 0 && totalCost > 0 ? totalCost / totalFrames : null };
+      return { totalFrames, totalCost, totalHours, totalCPO: totalFrames > 0 && totalCost > 0 ? totalCost / totalFrames : null };
     }),
     [schedule, designers] // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -3719,13 +3764,13 @@ export function SchedulePage({
     return Math.round(lastYearActual * getIntakeMultiplier(weekOf));
   }
 
-  // ── Future turnaround ────────────────────────────────────────────────────────
-  const futureTurnarounds = useMemo(() => {
+  // ── Graduating cohorts (preservation → designable, per week) ────────────────
+  const graduatingCohorts = useMemo(() => {
     const taByWeek: Record<string, number> = {};
     teamActuals.filter(r => r.department === 'preservation').forEach(r => {
       taByWeek[r.week_of] = (taByWeek[r.week_of] ?? 0) + r.actual_orders;
     });
-    const graduating: number[] = Array.from({ length: WEEKS }, (_, w) => {
+    return Array.from({ length: WEEKS }, (_, w) => {
       const graduatingDate = getMondayDate(w - PRESERVATION_WEEKS);
       const graduatingIso  = graduatingDate.toISOString().split('T')[0];
       const intakeData     = location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE;
@@ -3740,25 +3785,135 @@ export function SchedulePage({
       if (projected !== undefined) return projected;
       return avgIntake;
     });
-    const queueAtStart: number[] = [designableQueue];
-    for (let w = 0; w < WEEKS - 1; w++) {
-      const afterDrain    = Math.max(0, queueAtStart[w] - weeklyTotals[w].totalFrames);
-      const afterGraduate = afterDrain + graduating[w + 1];
-      queueAtStart.push(afterGraduate);
-    }
-    return Array.from({ length: WEEKS }, (_, w) => {
-      const graduateWeek = w + PRESERVATION_WEEKS;
-      if (graduateWeek >= WEEKS) return null;
-      const queueAhead = queueAtStart[graduateWeek];
-      const cohortSize = graduating[w];
-      let remaining    = queueAhead + cohortSize;
-      for (let fw = graduateWeek; fw < WEEKS; fw++) {
-        remaining -= weeklyTotals[fw].totalFrames;
-        if (remaining <= 0) return fw - w;
-      }
-      return null;
+  }, [avgIntake, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
+
+  // ── Future turnaround ────────────────────────────────────────────────────────
+  const futureTurnarounds = useMemo(() => {
+    const frameCapacity = weeklyTotals.map(t => t.totalFrames);
+    return simulateDesignTurnarounds(designableQueue, graduatingCohorts, frameCapacity);
+  }, [designableQueue, graduatingCohorts, weeklyTotals]);
+
+  // Actual completed design output, by week — once entered via Historicals, this
+  // takes over from the schedule/plan for that week when running the simulation,
+  // so real progress (not just what was planned) drives the capacity goal below.
+  const designActualFramesByWeek = useMemo(() => {
+    const map: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'design').forEach(r => {
+      map[r.week_of] = (map[r.week_of] ?? 0) + r.actual_orders;
     });
-  }, [designableQueue, avgIntake, weeklyTotals, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
+    return map;
+  }, [teamActuals]);
+
+  // ── November capacity goal ───────────────────────────────────────────────────
+  // Stretch goal: design-only turnaround should be back inside
+  // [DESIGN_TARGET_MIN, DESIGN_TARGET_MAX] before November and stay there.
+  // Solves (via binary search over the shared FIFO simulation) for a DECLINING
+  // per-week capacity target — front-loaded highest this week, tapering to zero
+  // extra by the end of the checked window — rather than one flat number repeated
+  // everywhere. The taper's slope depends directly on how many weeks are left, and
+  // its starting point uses actual completed output (once entered) instead of the
+  // plan for any week that already happened, so the whole curve responds to real
+  // progress, not just what was scheduled.
+  const capacityGoal = useMemo(() => {
+    const now = getMondayDate(0);
+    let novDate = new Date(now.getFullYear(), 10, 1);
+    if (novDate < now) novDate = new Date(now.getFullYear() + 1, 10, 1);
+    const novMonday = isoMondayFromDate(novDate);
+    const weeksToNovember = Math.max(0, Math.round(
+      (new Date(novMonday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+    ));
+    // Nov 1 can land any day of the week, so the checkpoint's Monday sometimes
+    // rolls back into late October — display through the week of Nov 9 as well
+    // so the goal bubble always visibly reaches into November itself.
+    const nov9Date   = new Date(novDate.getFullYear(), 10, 9);
+    const nov9Monday = isoMondayFromDate(nov9Date);
+    const weeksToNov9 = Math.max(0, Math.round(
+      (new Date(nov9Monday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+    ));
+    const baseCapacity = weeklyTotals.map(t => t.totalFrames);
+    // Prefer actual completed frames over the plan wherever they're known (in
+    // practice this only ever differs for the current/just-passed week — future
+    // weeks have no actuals yet).
+    const simCapacity = baseCapacity.map((f, w) => designActualFramesByWeek[isoMonday(w)] ?? f);
+    const projected     = simulateDesignTurnarounds(designableQueue, graduatingCohorts, simCapacity);
+    const atNovemberIdx = Math.min(weeksToNovember, WEEKS - 1);
+    const projectedAtNovember = projected[atNovemberIdx] ?? null;
+    // The last PRESERVATION_WEEKS entries of any simulation are structurally null
+    // (their graduation week falls past the 52-week horizon) regardless of capacity —
+    // exclude them, and cap how far past November we require the goal to hold so a
+    // handful of near-tail cohorts don't dominate the solve (see SUSTAIN_CHECK_WEEKS).
+    const lastCheckableWeek = Math.max(1, Math.min(WEEKS - PRESERVATION_WEEKS - 1, atNovemberIdx + SUSTAIN_CHECK_WEEKS));
+
+    // Worst overage (weeks above the ceiling) from the November checkpoint onward.
+    function worstOverage(capacity: number[]): number {
+      if (atNovemberIdx > lastCheckableWeek) return 0;
+      const sim = simulateDesignTurnarounds(designableQueue, graduatingCohorts, capacity);
+      let worst = 0;
+      for (let w = atNovemberIdx; w <= lastCheckableWeek; w++) {
+        const t = sim[w];
+        if (t === null) return Infinity;
+        if (t > DESIGN_TARGET_MAX) worst = Math.max(worst, t - DESIGN_TARGET_MAX);
+      }
+      return worst;
+    }
+
+    // Declining ramp: extra[w] = peak at w=0, linearly down to 0 by lastCheckableWeek.
+    // Binary search the single "peak" scalar against the real simulation so the
+    // curve is verified to actually work, not just a plausible-looking taper.
+    function rampExtra(peak: number, w: number): number {
+      return Math.max(0, peak * (1 - w / lastCheckableWeek));
+    }
+    function worstOverageWithRamp(peak: number): number {
+      return worstOverage(simCapacity.map((f, w) => f + rampExtra(peak, w)));
+    }
+    let peak = 0;
+    if (worstOverage(simCapacity) > 0) {
+      let lo = 0, hi = Math.max(40, ...simCapacity, 1);
+      while (worstOverageWithRamp(hi) > 0 && hi < 5000) hi *= 2;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        if (worstOverageWithRamp(mid) > 0) lo = mid; else hi = mid;
+      }
+      peak = Math.ceil(hi);
+    }
+
+    const requiredCapacity = simCapacity.map((f, w) => f + Math.round(rampExtra(peak, w)));
+    const onTrack = peak === 0 && worstOverage(simCapacity) !== Infinity;
+
+    // First intake week (as currently scheduled/actual, no ramp) whose projected
+    // turnaround breaks the ceiling — a pointer back to where in the Weekly Schedule
+    // capacity starts falling short, rather than just the aggregate target number.
+    let firstOverWeek: number | null = null;
+    for (let w = 0; w <= lastCheckableWeek; w++) {
+      const t = projected[w];
+      if (t === null || t > DESIGN_TARGET_MAX) { firstOverWeek = w; break; }
+    }
+
+    // Hours equivalent — frames are the real planning unit (they drive the queue
+    // simulation), so hours are derived from each week's actual scheduled hours/frame
+    // ratio, falling back to a blended ratio across all scheduled weeks for weeks
+    // with nothing entered yet (e.g. far-future weeks, or the gap frames, which have
+    // no hours of their own to derive a ratio from).
+    const baseHours = weeklyTotals.map(t => t.totalHours);
+    let ratioSumFrames = 0, ratioSumHours = 0;
+    weeklyTotals.forEach(t => { if (t.totalFrames > 0) { ratioSumFrames += t.totalFrames; ratioSumHours += t.totalHours; } });
+    const blendedRatio = ratioSumFrames > 0 ? ratioSumHours / ratioSumFrames
+      : (designers.length > 0 ? designers.reduce((s, d) => s + d.ratio, 0) / designers.length : 0);
+    const hoursPerFrame = weeklyTotals.map(t => t.totalFrames > 0 ? t.totalHours / t.totalFrames : blendedRatio);
+    // Gap always compares the target against the PLAN (baseCapacity), not the
+    // actual-aware simCapacity, since this is what tells a manager how much more
+    // to schedule — a week that already over-delivered vs. plan shouldn't show a
+    // gap just because the ramp math used its higher actual internally.
+    const frameGap    = baseCapacity.map((f, w) => Math.max(0, requiredCapacity[w] - f));
+    const requiredHours = baseHours.map((h, w) => h + frameGap[w] * hoursPerFrame[w]);
+    const thisWeekTarget      = requiredCapacity[0] ?? 0;
+    const thisWeekTargetHours = requiredHours[0] ?? 0;
+
+    return {
+      novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
+      baseCapacity, requiredCapacity, onTrack, baseHours, requiredHours, firstOverWeek,
+    };
+  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -4091,6 +4246,109 @@ export function SchedulePage({
             )}
           </div>
 
+          {/* ── Turnaround capacity goal ─────────────────────────────────────── */}
+          <div className="bg-white border border-slate-100 rounded-xl p-5">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700">Turnaround goal — before November</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Stretch goal: {DESIGN_TARGET_MIN}–{DESIGN_TARGET_MAX} wks design-only ({TOTAL_TARGET_MIN}–{TOTAL_TARGET_MAX} wks incl. ~{FULFILLMENT_WEEKS}-wk fulfillment), held all year — not just at one deadline.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs text-slate-500 whitespace-nowrap">
+                  wk of {getMondayDate(capacityGoal.weeksToNovember).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {' · '}{capacityGoal.weeksToNovember} wk{capacityGoal.weeksToNovember !== 1 ? 's' : ''} away
+                </span>
+                <InputModeToggle mode={goalUnit} onChange={setGoalUnit} unitLabel="Frames" />
+              </div>
+            </div>
+
+            {capacityGoal.projectedAtNovember !== null ? (() => {
+              const t       = capacityGoal.projectedAtNovember;
+              const onTrack = t >= DESIGN_TARGET_MIN && t <= DESIGN_TARGET_MAX;
+              const over    = t > DESIGN_TARGET_MAX;
+              const gap     = over ? t - DESIGN_TARGET_MAX : (onTrack ? 0 : DESIGN_TARGET_MIN - t);
+              const barColor  = onTrack ? 'bg-green-400' : over ? (t <= 18 ? 'bg-amber-400' : 'bg-red-600') : 'bg-orange-400';
+              const textColor = onTrack ? 'text-green-700' : over ? (t <= 18 ? 'text-amber-700' : 'text-red-800') : 'text-orange-700';
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 w-28 shrink-0">Projected, {getWeekLabel(capacityGoal.weeksToNovember)}</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden relative">
+                      <div className="absolute top-0 bottom-0 bg-green-100"
+                        style={{ left: `${(DESIGN_TARGET_MIN / 22) * 100}%`, width: `${((DESIGN_TARGET_MAX - DESIGN_TARGET_MIN) / 22) * 100}%` }} />
+                      <div className={`h-2.5 relative ${barColor}`} style={{ width: `${Math.min(100, (t / 22) * 100)}%` }} />
+                    </div>
+                    <span className={`text-xs font-semibold w-48 text-right shrink-0 ${textColor}`}>
+                      ~{t} wks{onTrack ? ' — on track' : over ? ' — over goal' : ' — ahead of goal'}
+                    </span>
+                  </div>
+                  {onTrack ? (
+                    <p className="text-xs text-green-700">Currently scheduled capacity holds design-only turnaround in the target band through the planning window.</p>
+                  ) : over ? (
+                    <>
+                      <p className={`text-xs font-medium ${textColor}`}>
+                        {gap} wk{gap !== 1 ? 's' : ''} over the {DESIGN_TARGET_MAX}-wk ceiling as scheduled — needs to ramp up to ~{goalUnit === 'output' ? capacityGoal.thisWeekTarget : capacityGoal.thisWeekTargetHours}{goalUnit === 'output' ? 'f' : 'h'} this week, tapering down toward the current pace as the backlog clears through November.
+                      </p>
+                      {capacityGoal.firstOverWeek !== null && (
+                        <p className="text-xs text-slate-400">
+                          As scheduled, turnaround first breaks {DESIGN_TARGET_MAX} wks for orders arriving {getWeekLabel(capacityGoal.firstOverWeek)} — check Weekly Schedule capacity around then (a common cause: designer hours not yet entered that far out).
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className={`text-xs ${textColor}`}>{gap} wk{gap !== 1 ? 's' : ''} ahead of the {DESIGN_TARGET_MIN}-wk floor — team may be overstaffed relative to intake.</p>
+                  )}
+                  {!capacityGoal.onTrack && (() => {
+                    const scheduledSeries = goalUnit === 'output' ? capacityGoal.baseCapacity     : capacityGoal.baseHours;
+                    const neededSeries    = goalUnit === 'output' ? capacityGoal.requiredCapacity : capacityGoal.requiredHours;
+                    const unit = goalUnit === 'output' ? 'f' : 'h';
+                    // Show every week through the November checkpoint (not just an
+                    // arbitrary first-8), so the gap stays visible all the way to
+                    // the actual goal date instead of cutting off around 8/31.
+                    const weeksShown = Math.min(Math.max(capacityGoal.weeksToNovember, capacityGoal.weeksToNov9) + 1, WEEKS - PRESERVATION_WEEKS - 1);
+                    return (
+                      <div className="overflow-x-auto -mx-1">
+                        <table className="text-xs min-w-full">
+                          <thead>
+                            <tr className="text-slate-400">
+                              <th className="sticky left-0 bg-white text-left font-medium px-1 py-1">Week</th>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <th key={w} className="text-center font-medium px-2 py-1 min-w-[64px]">
+                                  <div className="flex flex-col items-center gap-0.5">
+                                    <span className="whitespace-nowrap">{getWeekLabel(w)}</span>
+                                    {w === 0 && <span className="text-[9px] bg-indigo-100 text-indigo-600 rounded px-1 leading-tight">now</span>}
+                                  </div>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Scheduled</td>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <td key={w} className="text-center px-2 py-1 text-slate-600">{Math.round(scheduledSeries[w])}{unit}</td>
+                              ))}
+                            </tr>
+                            <tr>
+                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Needed</td>
+                              {Array.from({ length: weeksShown }, (_, w) => (
+                                <td key={w} className="text-center px-2 py-1 font-semibold text-amber-700">{Math.round(neededSeries[w])}{unit}</td>
+                              ))}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })() : (
+              <p className="text-xs text-red-600 italic">Queue isn&apos;t projected to clear within the 52-week planning window — increase capacity to get a projection.</p>
+            )}
+          </div>
+
           {/* Inner tabs */}
           <div className="flex border-b border-slate-200">
             {([
@@ -4160,6 +4418,20 @@ export function SchedulePage({
                     <button onClick={() => setDesignThisWeekOffset(Math.min(4, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
                 </div>
+                {(() => {
+                  const required  = capacityGoal.requiredCapacity[designThisWeekOffset] ?? capacityGoal.baseCapacity[designThisWeekOffset] ?? 0;
+                  const remaining = Math.max(0, required - teamWeekFrames);
+                  const onPace    = remaining <= 0.05;
+                  return (
+                    <div className={`px-5 py-2 border-b border-slate-100 flex items-center gap-2 flex-wrap ${onPace ? 'bg-green-50/50' : 'bg-amber-50/50'}`}>
+                      <span className={`text-xs font-medium ${onPace ? 'text-green-700' : 'text-amber-700'}`}>
+                        {onPace
+                          ? `On pace for the turnaround goal — ${Math.round(teamWeekFrames * 10) / 10}f scheduled of ${Math.round(required)}f needed this week.`
+                          : `${Math.round(remaining * 10) / 10} more frame${remaining >= 1.05 || remaining < 0.95 ? 's' : ''} still needed this week to stay on the turnaround goal (${Math.round(teamWeekFrames * 10) / 10}f of ${Math.round(required)}f scheduled).`}
+                      </span>
+                    </div>
+                  );
+                })()}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs">
                     <thead>
@@ -4341,6 +4613,28 @@ export function SchedulePage({
                             <div className="text-indigo-700">{Math.round(t.totalFrames)}f</div>
                             {hasRates && t.totalCPO !== null && (
                               <div className="text-amber-600 text-[10px]">{fmt$(t.totalCPO)}</div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* Still needed row — the gap toward the November turnaround goal,
+                        shown right where hours get entered so paging past 8/31 with
+                        Next → makes it obvious how much more each future week needs. */}
+                    <tr className="border-t border-slate-100 bg-amber-50/40">
+                      <td className="sticky left-0 bg-amber-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Still needed</td>
+                      {windowWeeks.map(w => {
+                        const gapFrames = Math.max(0, Math.round(capacityGoal.requiredCapacity[w] - weeklyTotals[w].totalFrames));
+                        const gapHours  = Math.max(0, Math.round((capacityGoal.requiredHours[w] - weeklyTotals[w].totalHours) * 10) / 10);
+                        return (
+                          <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
+                            {gapFrames > 0 ? (
+                              <>
+                                <div className="font-semibold text-amber-700">+{gapFrames}f</div>
+                                <div className="text-[10px] text-slate-400">+{gapHours}h</div>
+                              </>
+                            ) : (
+                              <div className="text-green-600 text-[10px]">on pace</div>
                             )}
                           </td>
                         );
