@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabase } from '@/lib/supabase';
+import { syncRosterRoles } from '@/lib/rosterRoleSync';
 
 function normalizeLocation(raw: string): string {
   if (!raw) return '';
@@ -21,7 +22,7 @@ function normalizeDept(raw: string): string {
 
 function inferRole(title: string): 'specialist' | 'senior' | 'master' {
   const t = (title ?? '').toLowerCase();
-  if (t.includes('manager') || t.includes('head of') || t.includes('director')) return 'master';
+  if (t.includes('manager') || t.includes('head of') || t.includes('director') || t.includes('master')) return 'master';
   if (t.includes('senior')) return 'senior';
   return 'specialist';
 }
@@ -69,10 +70,15 @@ export async function POST(req: NextRequest) {
       .upsert(records, { onConflict: 'full_name,location,department' });
     if (error) throw error;
 
+    // Propagate any new/changed roles into the live Scheduling rosters so
+    // Expected/Goal projections in /api/kpis stay current automatically.
+    const { updated: rosterRoleUpdates } = await syncRosterRoles(supabase);
+
     return NextResponse.json({
       ok: true,
       inserted: records.length,
       employees: records.map(r => ({ name: r.full_name, location: r.location, department: r.department, title: r.title, role: r.role })),
+      rosterRoleUpdates,
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

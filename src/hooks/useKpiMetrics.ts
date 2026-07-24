@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { WindowResult, EstimatedMonthResult, PeriodKpis, KpiMetrics } from '@/app/api/kpis/route';
+import type { WindowResult, EstimatedMonthResult, RatioVariantResult, PeriodKpis, KpiMetrics } from '@/app/api/kpis/route';
 
 // Re-export for consumers
-export type { WindowResult, EstimatedMonthResult, PeriodKpis, KpiMetrics };
+export type { WindowResult, EstimatedMonthResult, RatioVariantResult, PeriodKpis, KpiMetrics };
+
+export type RatioVariant = 'estimate' | 'expected' | 'goal';
 
 export type KpiLocation = 'Utah' | 'Georgia' | 'Combined';
 export type KpiDept     = 'design' | 'preservation' | 'fulfillment' | 'resin' | 'ga' | 'combined';
@@ -67,12 +69,14 @@ export function selectLocation(window: WindowResult, location: KpiLocation): Per
 
 export function selectEstimated(
   result:   EstimatedMonthResult | undefined,
-  location: KpiLocation
+  location: KpiLocation,
+  variant:  RatioVariant = 'estimate'
 ): PeriodKpis | null {
   if (!result) return null;
-  if (location === 'Utah')    return result.utah;
-  if (location === 'Georgia') return result.georgia;
-  return result.combined;
+  const v = result[variant];
+  if (location === 'Utah')    return v.utah;
+  if (location === 'Georgia') return v.georgia;
+  return v.combined;
 }
 
 // ── Window type filters ───────────────────────────────────────────────────────

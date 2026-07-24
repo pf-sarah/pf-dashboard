@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { RATIO_TARGETS } from '@/lib/ratioTargets';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,15 +53,6 @@ interface ScorecardData {
 const CPO_DEPTS: Dept[] = ['Design', 'Preservation', 'Fulfillment', 'G&A', 'Resin'];
 const BLENDED_DEPTS: Dept[] = ['Design', 'Preservation', 'Fulfillment', 'G&A'];
 const PROD_DEPTS: Dept[] = ['Design', 'Preservation', 'Fulfillment', 'Resin'];
-
-// Ratio targets from the scorecard image (hours per order)
-const RATIO_TARGETS: Record<Dept, Record<'specialist' | 'senior' | 'master', number>> = {
-  Preservation: { specialist: 1.00, senior: 0.80, master: 0.60 },
-  Design:       { specialist: 2.00, senior: 1.60, master: 1.20 },
-  Fulfillment:  { specialist: 0.50, senior: 0.40, master: 0.30 },
-  'G&A':        { specialist: 0,    senior: 0,    master: 0 },
-  Resin:        { specialist: 0,    senior: 0,    master: 0 },
-};
 
 const DEPT_LABELS: Record<string, string> = {
   Design: 'Design', Preservation: 'Preservation', Fulfillment: 'Fulfillment',
