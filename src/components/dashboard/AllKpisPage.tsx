@@ -21,7 +21,9 @@ import {
   type KpiMetrics,
   type WindowResult,
   type EstimatedMonthResult,
+  type RatioVariant,
 } from '@/hooks/useKpiMetrics';
+import { RATIO_TARGETS, type RatioDept } from '@/lib/ratioTargets';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -84,11 +86,13 @@ function KpiCell({
   section,
   showGM,
   dept,
+  colorClassOverride,
 }: {
   metrics:  KpiMetrics;
   section:  KpiSection;
   showGM:   boolean;
   dept:     KpiDept;
+  colorClassOverride?: string;
 }) {
   if (!metrics.hasData) {
     return <span className="text-slate-300 text-sm">—</span>;
@@ -98,7 +102,7 @@ function KpiCell({
     const val = metrics.ratio;
     return (
       <div className="space-y-0.5">
-        <div className={`text-lg font-semibold tabular-nums ${val == null ? 'text-slate-300' : 'text-slate-800'}`}>
+        <div className={`text-lg font-semibold tabular-nums ${colorClassOverride ?? (val == null ? 'text-slate-300' : 'text-slate-800')}`}>
           {fmtRatio(val)}
         </div>
         {val != null && (
@@ -202,46 +206,133 @@ function RollingCard({
   );
 }
 
-// Estimated month card
-function EstCard({
+// Maps a ratio-section dept to its RATIO_TARGETS key. Combined (and, in the
+// CPO section, G&A) has no single tier target of its own, so it's left out
+// of this map — those cells just render uncolored.
+const RATIO_TIER_DEPT: Partial<Record<KpiDept, RatioDept>> = {
+  design:       'Design',
+  preservation: 'Preservation',
+  fulfillment:  'Fulfillment',
+};
+
+function tierColorClass(dept: KpiDept, ratio: number | null): string | undefined {
+  const key = RATIO_TIER_DEPT[dept];
+  if (!key || ratio == null) return undefined;
+  const t = RATIO_TARGETS[key];
+  if (ratio <= t.master)     return 'text-green-700';
+  if (ratio <= t.senior)     return 'text-amber-600';
+  if (ratio <= t.specialist) return 'text-slate-600';
+  return 'text-red-600';
+}
+
+const EXPECTATION_DEPTS: Record<KpiSection, KpiDept[]> = {
+  ratio: ['design', 'preservation', 'fulfillment', 'combined'],
+  cpo:   ['design', 'preservation', 'fulfillment', 'ga', 'combined'],
+};
+
+const EXPECTATION_ROWS: { key: RatioVariant; label: string; dotClass: string }[] = [
+  { key: 'goal',     label: 'Goal',      dotClass: 'bg-green-400'  },
+  { key: 'expected', label: 'Expected',  dotClass: 'bg-amber-400'  },
+  { key: 'estimate', label: 'Estimated', dotClass: 'bg-indigo-400' },
+];
+
+// Goal / Expected / Estimated comparison table for the est-current / est-next
+// tabs — covers both Ratio (role-tier target ratio) and CPO (role-average
+// pay rate) sections, reusing KpiCell for value/substat formatting so both
+// stay in sync with the regular historical views.
+function ExpectationTable({
   result,
-  section,
   location,
-  depts,
+  section,
   showGM,
 }: {
   result:   EstimatedMonthResult;
-  section:  KpiSection;
   location: KpiLocation;
-  depts:    KpiDept[];
+  section:  KpiSection;
   showGM:   boolean;
 }) {
-  const period = selectEstimated(result, location);
-  if (!period) return null;
+  const depts = EXPECTATION_DEPTS[section];
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{result.label}</div>
         {result.isSnapshot
           ? <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">Locked snapshot</span>
           : <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">Live estimate</span>
         }
+        {section === 'ratio' && (
+          <div className="flex gap-3 sm:ml-auto text-[10px] text-slate-500">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-green-700 inline-block" />
+              Master tier
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+              Senior tier
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block" />
+              Specialist tier
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" />
+              Above specialist
+            </span>
+          </div>
+        )}
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        {depts.map(dept => {
-          if (!showResin(location, dept)) return null;
-          const metrics = selectDept(period, dept);
-          return (
-            <div key={dept} className="space-y-1">
-              <div className="text-xs text-slate-500 font-medium">{DEPT_LABELS[dept]}</div>
-              <KpiCell metrics={metrics} section={section} showGM={showGM} dept={dept} />
-              {dept === 'ga' && section === 'cpo' && result.gaSourceMonths.length > 0 && (
-                <div className="text-[10px] text-slate-400">Avg of {result.gaSourceMonths.join(', ')}</div>
-              )}
-            </div>
-          );
-        })}
+      <div className="sm:hidden flex items-center gap-1 text-[10px] text-slate-400 px-4 pt-2 pb-1.5">
+        <span>Swipe to see more</span>
+        <span aria-hidden>→</span>
       </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-100">
+              <th className="sticky left-0 bg-slate-50 px-4 py-2 text-left text-xs font-medium text-slate-500 min-w-[110px]">Metric</th>
+              {depts.map(dept => (
+                <th key={dept} className="px-4 py-2 text-left text-xs font-medium text-slate-500 min-w-[130px] whitespace-nowrap">
+                  {DEPT_LABELS[dept]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {EXPECTATION_ROWS.map(row => {
+              const period = selectEstimated(result, location, row.key);
+              return (
+                <tr key={row.key} className="border-t border-slate-100">
+                  <td className="sticky left-0 bg-white px-4 py-3 text-sm font-medium text-slate-600 whitespace-nowrap">
+                    <span className={`w-2 h-2 rounded-full inline-block mr-1.5 ${row.dotClass}`} />
+                    {row.label}
+                  </td>
+                  {depts.map(dept => {
+                    const metrics = period ? selectDept(period, dept) : null;
+                    if (!metrics) return <td key={dept} className="px-4 py-3 text-sm text-slate-300">—</td>;
+                    const colorClassOverride = section === 'ratio' && row.key === 'estimate' ? tierColorClass(dept, metrics.ratio) : undefined;
+                    return (
+                      <td key={dept} className="px-4 py-3">
+                        <KpiCell metrics={metrics} section={section} showGM={showGM} dept={dept} colorClassOverride={colorClassOverride} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {section === 'ratio' && (
+        <div className="px-5 py-2 bg-slate-50/50 border-t border-slate-100 text-[10px] text-slate-400 space-y-0.5">
+          <p>Colors on the Estimated row show which tier that department&apos;s projected ratio falls into (same bands as the Scorecards tab — exact hrs/unit vary by department, Combined has no single band so it&apos;s left uncolored).</p>
+          <p>G&amp;A cost has no per-tier target — not shown here. See the CPO tab for its trailing average (from {result.gaSourceMonths.join(', ')}).</p>
+        </div>
+      )}
+      {section === 'cpo' && result.gaSourceMonths.length > 0 && (
+        <div className="px-5 py-2 bg-slate-50/50 border-t border-slate-100 text-[10px] text-slate-400">
+          G&amp;A cost is a trailing 3-month actual average (from {result.gaSourceMonths.join(', ')}) — identical across Goal/Expected/Estimated; only its share of the growing production base shifts.
+        </div>
+      )}
     </div>
   );
 }
@@ -473,7 +564,7 @@ export default function AllKpisPage() {
           {/* Estimated current month */}
           {timeWindow === 'est-current' && (
             estimated?.current
-              ? <EstCard result={estimated.current} section={section} location={location} depts={depts} showGM={showGM} />
+              ? <ExpectationTable result={estimated.current} location={location} section={section} showGM={showGM} />
               : <div className="text-sm text-slate-400 py-8 text-center bg-white border border-slate-200 rounded-xl">
                   No estimate available — check that schedule settings are configured
                 </div>
@@ -482,7 +573,7 @@ export default function AllKpisPage() {
           {/* Estimated next month */}
           {timeWindow === 'est-next' && (
             estimated?.next
-              ? <EstCard result={estimated.next} section={section} location={location} depts={depts} showGM={showGM} />
+              ? <ExpectationTable result={estimated.next} location={location} section={section} showGM={showGM} />
               : <div className="text-sm text-slate-400 py-8 text-center bg-white border border-slate-200 rounded-xl">
                   No estimate available — check that schedule settings are configured
                 </div>
@@ -498,13 +589,28 @@ export default function AllKpisPage() {
             <p><strong>Ratio</strong> = hours worked ÷ production completed. Lower is more efficient.</p>
             <p><strong>Combined ratio</strong> = Design ratio + Preservation ratio + Fulfillment ratio (additive, not averaged).</p>
             <p>Resin ratio = resin hours ÷ resin production. Utah only.</p>
+            {(timeWindow === 'est-current' || timeWindow === 'est-next') && (
+              <>
+                <p><strong>Estimated</strong> = each team member&apos;s own roster ratio × their scheduled hours for the month.</p>
+                <p><strong>Expected</strong> = each member&apos;s role-tier target ratio (Master/Senior/Specialist) × their scheduled hours — ignores their personal roster ratio.</p>
+                <p><strong>Goal</strong> = the stricter (lower) of a member&apos;s roster ratio and their tier target, per member.</p>
+              </>
+            )}
           </>
         )}
         {section === 'cpo' && (
           <>
-            <p><strong>CPO</strong> = total labor cost ÷ production. Includes manager pay. Excludes GM unless "Incl. GM" is selected.</p>
+            <p><strong>CPO</strong> = total labor cost ÷ production. Includes manager pay. Excludes GM unless &quot;Incl. GM&quot; is selected.</p>
             <p><strong>Combined CPO</strong> = Design CPO + Preservation CPO + Fulfillment CPO + (G&A cost ÷ total production).</p>
             <p>Salary manager costs are computed at annual salary ÷ 52 weeks and split across their departments.</p>
+            {(timeWindow === 'est-current' || timeWindow === 'est-next') && (
+              <>
+                <p><strong>Estimated</strong> = each team member&apos;s own actual pay rate × their scheduled hours, over production at their own roster ratio.</p>
+                <p><strong>Expected</strong> = the official wage target for that role/department/location × scheduled hours, over production at the role-tier ratio — ignores this specific person&apos;s actual rate. Managers use their real pay instead, since management pay isn&apos;t on the Specialist/Senior/Master scale.</p>
+                <p><strong>Goal</strong> = the cheaper of a member&apos;s actual rate and their role&apos;s wage target, over production at the stricter (lower) ratio. Managers always use actual pay.</p>
+                <p>Wage targets are a fixed table per location + department + role (e.g. Utah Design senior vs Utah Fulfillment senior differ) since pay varies by all three, not just role.</p>
+              </>
+            )}
           </>
         )}
       </div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getMondayDate } from '@/lib/weekDates';
 import { DEPARTMENT_MANAGERS, getSalaryMgrCostForWeeks } from '@/lib/managers';
+import { RATIO_TARGETS } from '@/lib/ratioTargets';
 
 export interface RosterMember {
   name: string;
@@ -74,9 +75,9 @@ export interface HistoricalMetrics {
 }
 
 const ROLE_RATIOS: Record<string, Record<string, number>> = {
-  design:       { specialist: 2.00, senior: 1.60, master: 1.20 },
-  preservation: { specialist: 1.00, senior: 0.80, master: 0.60 },
-  fulfillment:  { specialist: 0.50, senior: 0.40, master: 0.30 },
+  design:       RATIO_TARGETS.Design,
+  preservation: RATIO_TARGETS.Preservation,
+  fulfillment:  RATIO_TARGETS.Fulfillment,
 };
 
 function isoDate(d: Date): string {

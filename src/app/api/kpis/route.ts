@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabase } from '@/lib/supabase';
 import { DEPARTMENT_MANAGERS, getSalaryMgrCostForWeeks, getGmCostForWeeks } from '@/lib/managers';
+import { RATIO_TARGETS, type RatioTier } from '@/lib/ratioTargets';
+import { WAGE_TARGETS, type WageLocation, type WageDept } from '@/lib/wageTargets';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,15 +58,24 @@ export interface WindowResult {
   combined:    PeriodKpis;   // Utah + Georgia pooled
 }
 
+export interface RatioVariantResult {
+  utah:     PeriodKpis;
+  georgia:  PeriodKpis;
+  combined: PeriodKpis;
+}
+
 export interface EstimatedMonthResult {
   label:          string;
   monthStart:     string;
   isSnapshot:     boolean;
   // The 3 trailing calendar months G&A cost was averaged from, e.g. ['Apr 2026','May 2026','Jun 2026']
   gaSourceMonths: string[];
-  utah:           PeriodKpis;
-  georgia:        PeriodKpis;
-  combined:       PeriodKpis;
+  // "estimate" = each member's own roster ratio (today's behavior).
+  // "expected" = each member's role-tier target ratio (Master/Senior/Specialist), ignoring their roster ratio.
+  // "goal"     = min(roster ratio, tier target) per member — whichever is stricter.
+  estimate:       RatioVariantResult;
+  expected:       RatioVariantResult;
+  goal:           RatioVariantResult;
 }
 
 // ── Salary managers ───────────────────────────────────────────────────────────
@@ -355,8 +366,8 @@ function averageGaCostForMonths(
 //   ffRoster:     { [id]: { ratio, rate, name, payType?, annualSalary? } }
 //   designHours / presHours / ffHours: { [memberId]: { [isoMonday]: hours } }
 
-interface DesignRosterEntry  { ratio: number; payType?: string; hourlyRate?: number; annualSalary?: number; name: string; isManager?: boolean }
-interface PresRosterEntry    { ratio: number; rate?: number;    payType?: string;    annualSalary?: number; name: string; isManager?: boolean }
+interface DesignRosterEntry  { ratio: number; payType?: string; hourlyRate?: number; annualSalary?: number; name: string; isManager?: boolean; role?: RatioTier }
+interface PresRosterEntry    { ratio: number; rate?: number;    payType?: string;    annualSalary?: number; name: string; isManager?: boolean; role?: RatioTier }
 interface HoursMap           { [memberId: string]: Record<string, number> }
 interface DailyHoursMap      { [weekOfMemberKey: string]: number[] }  // "${isoMonday}-${memberId}" -> [mon..fri]
 
@@ -386,16 +397,24 @@ function holidayHoursForMember(
   return holidayHours;
 }
 
+const FULL_TIME_HOURS_PER_YEAR = 2080; // 52wk × 40hr, for salary→hourly-equivalent comparisons
+
 function projectDept(
   roster:      Record<string, DesignRosterEntry | PresRosterEntry>,
   hours:       HoursMap,
   dailyHours:  DailyHoursMap,
   weekOfs:     string[],         // Mondays in the month (isoMonday strings)
   location:    string,
-  dept:        string,           // 'Design' | 'Preservation' | 'Fulfillment'
-  holidaySet:  Set<string>
+  dept:        WageDept,
+  holidaySet:  Set<string>,
+  mode:        'estimate' | 'expected' | 'goal'
 ): { hours: number; production: number; laborCost: number } {
   let totalHours = 0, totalProduction = 0, totalCost = 0;
+  // Names whose pay was already added below via their own roster entry — the
+  // SALARY_MANAGERS fallback further down exists to cover managers whose pay
+  // never appears anywhere else, so it must skip anyone already counted here
+  // or their salary gets added twice.
+  const costedNames = new Set<string>();
 
   for (const [memberId, member] of Object.entries(roster)) {
     if ((member as { _removed?: boolean })._removed) continue;
@@ -404,26 +423,68 @@ function projectDept(
 
     totalHours += memberHours;
     if (member.ratio > 0) {
+      const tierRatio = RATIO_TARGETS[dept][member.role ?? 'specialist'];
+      const effectiveRatio =
+        mode === 'estimate' ? member.ratio :
+        mode === 'expected' ? tierRatio :
+        /* goal */             Math.min(member.ratio, tierRatio);
+
       const holidayHours   = holidayHoursForMember(memberId, weekOfs, hours, dailyHours, holidaySet);
       const productiveHours = Math.max(0, memberHours - holidayHours);
-      totalProduction += productiveHours / member.ratio;
+      if (effectiveRatio > 0) totalProduction += productiveHours / effectiveRatio;
     }
 
     const payType     = member.payType ?? 'hourly';
     const hourlyRate  = (member as DesignRosterEntry).hourlyRate ?? (member as PresRosterEntry).rate ?? 0;
     const annualSal   = member.annualSalary ?? 0;
 
-    if (payType === 'salary' && annualSal > 0) {
-      totalCost += (annualSal / 52) * weekOfs.length;
-    } else if (hourlyRate > 0) {
-      totalCost += memberHours * hourlyRate;
+    // Managers have no wage-tier target (WAGE_TARGETS only covers
+    // specialist/senior/master production rates) — their real pay (hourly or
+    // salary prorated for the month) is always included in total cost as-is.
+    if (mode === 'estimate' || member.isManager) {
+      if (payType === 'salary' && annualSal > 0) {
+        totalCost += (annualSal / 52) * weekOfs.length;
+        costedNames.add(member.name.trim().toLowerCase());
+      } else if (hourlyRate > 0) {
+        totalCost += memberHours * hourlyRate;
+        costedNames.add(member.name.trim().toLowerCase());
+      }
+    } else {
+      const ownRateHr    = payType === 'salary' && annualSal > 0 ? annualSal / FULL_TIME_HOURS_PER_YEAR : hourlyRate;
+      const targetRateHr = WAGE_TARGETS[location as WageLocation]?.[dept]?.[member.role ?? 'specialist'] ?? ownRateHr;
+      const effectiveRateHr =
+        mode === 'expected' ? targetRateHr :
+        /* goal */            (ownRateHr > 0 ? Math.min(ownRateHr, targetRateHr) : targetRateHr);
+      if (effectiveRateHr > 0) {
+        totalCost += memberHours * effectiveRateHr;
+        costedNames.add(member.name.trim().toLowerCase());
+      }
     }
   }
 
-  // Add salary manager cost for this dept
-  totalCost += getSalaryMgrCostForWeeks(SALARY_MANAGERS, location, dept, weekOfs);
+  // Add salary manager cost for this dept — a specific named individual's
+  // fixed pay, not subject to a role-average hypothetical, so it's the same
+  // across all three modes, same as G&A. Skip anyone whose pay is already
+  // counted above via their own roster entry (isManager + a real rate on
+  // file) — this list exists only to cover managers whose pay never appears
+  // on the roster at all.
+  const uncostedManagers = SALARY_MANAGERS.filter(mgr => !costedNames.has(mgr.name.trim().toLowerCase()));
+  totalCost += getSalaryMgrCostForWeeks(uncostedManagers, location, dept, weekOfs);
 
   return { hours: totalHours, production: totalProduction, laborCost: totalCost };
+}
+
+function buildRatioVariant(
+  settings:      ScheduleSettingRow[],
+  monthKey:      string,
+  utahGaCost:    number,
+  georgiaGaCost: number,
+  paidHolidays:  string[],
+  mode:          'estimate' | 'expected' | 'goal'
+): RatioVariantResult {
+  const utah    = projectMonthForLocation(settings, 'Utah',    monthKey, utahGaCost,    paidHolidays, mode);
+  const georgia = projectMonthForLocation(settings, 'Georgia', monthKey, georgiaGaCost, paidHolidays, mode);
+  return { utah, georgia, combined: poolLocations(utah, georgia) };
 }
 
 function projectMonthForLocation(
@@ -431,7 +492,8 @@ function projectMonthForLocation(
   location:   string,
   monthStart: string,
   gaCost:     number,
-  paidHolidays: string[]
+  paidHolidays: string[],
+  mode:       'estimate' | 'expected' | 'goal'
 ): PeriodKpis {
   const monthEnd = new Date(monthStart + 'T12:00:00');
   monthEnd.setMonth(monthEnd.getMonth() + 1);
@@ -451,9 +513,9 @@ function projectMonthForLocation(
   const presDailyHours   = get('presDailyHours')   as DailyHoursMap;
   const ffDailyHours     = get('ffDailyHours')     as DailyHoursMap;
 
-  const designMetrics = projectDept(designRoster, designHours, designDailyHours, weekOfs, location, 'Design',       holidaySet);
-  const presMetrics   = projectDept(presRoster,   presHours,   presDailyHours,   weekOfs, location, 'Preservation', holidaySet);
-  const ffMetrics     = projectDept(ffRoster,     ffHours,     ffDailyHours,     weekOfs, location, 'Fulfillment',  holidaySet);
+  const designMetrics = projectDept(designRoster, designHours, designDailyHours, weekOfs, location, 'Design',       holidaySet, mode);
+  const presMetrics   = projectDept(presRoster,   presHours,   presDailyHours,   weekOfs, location, 'Preservation', holidaySet, mode);
+  const ffMetrics     = projectDept(ffRoster,     ffHours,     ffDailyHours,     weekOfs, location, 'Fulfillment',  holidaySet, mode);
 
   function toMetrics(m: { hours: number; production: number; laborCost: number }): KpiMetrics {
     return {
@@ -678,34 +740,30 @@ export async function GET(req: NextRequest) {
 
         const useSettings     = snapSettings.length > 0 ? snapSettings : liveSettings;
         const isSnapshot      = snapSettings.length > 0;
-        const utahEst         = projectMonthForLocation(useSettings, 'Utah',    currentMonthKey, utahGa.avg,    paidHolidays);
-        const georgiaEst      = projectMonthForLocation(useSettings, 'Georgia', currentMonthKey, georgiaGa.avg, paidHolidays);
 
         estimated.current = {
           label:      `Est. ${monthLabel(currentMonthKey.slice(0, 7))}`,
           monthStart: currentMonthKey,
           isSnapshot,
           gaSourceMonths,
-          utah:       utahEst,
-          georgia:    georgiaEst,
-          combined:   poolLocations(utahEst, georgiaEst),
+          estimate: buildRatioVariant(useSettings, currentMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'estimate'),
+          expected: buildRatioVariant(useSettings, currentMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'expected'),
+          goal:     buildRatioVariant(useSettings, currentMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'goal'),
         };
       }
 
       if (requested.includes('est-next')) {
         const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
         const nextMonthKey  = isoDate(nextMonthDate);
-        const utahEst       = projectMonthForLocation(liveSettings, 'Utah',    nextMonthKey, utahGa.avg,    paidHolidays);
-        const georgiaEst    = projectMonthForLocation(liveSettings, 'Georgia', nextMonthKey, georgiaGa.avg, paidHolidays);
 
         estimated.next = {
           label:      `Est. ${monthLabel(nextMonthKey.slice(0, 7))}`,
           monthStart: nextMonthKey,
           isSnapshot: false,
           gaSourceMonths,
-          utah:       utahEst,
-          georgia:    georgiaEst,
-          combined:   poolLocations(utahEst, georgiaEst),
+          estimate: buildRatioVariant(liveSettings, nextMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'estimate'),
+          expected: buildRatioVariant(liveSettings, nextMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'expected'),
+          goal:     buildRatioVariant(liveSettings, nextMonthKey, utahGa.avg, georgiaGa.avg, paidHolidays, 'goal'),
         };
       }
     }
