@@ -248,7 +248,7 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
       const rows = (data.teamActuals ?? [])
         .filter(r => r.department === 'design' && r.member_name === d.name)
         .sort((a, b) => b.week_of.localeCompare(a.week_of))
-        .slice(0, 4);
+        .slice(0, 8);
       const totalHours  = rows.reduce((s, r) => s + r.actual_hours,  0);
       const totalOrders = rows.reduce((s, r) => s + r.actual_orders, 0);
       if (totalOrders > 0 && totalHours > 0) {
@@ -292,7 +292,7 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
               <input type="number" value={d.ratio} step="0.1" min="0.1"
                 onChange={e => onChange(d.id, 'ratio', e.target.value)}
                 className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => refreshRatio(d)} title="Update ratio from last 4 weeks of historicals"
+              <button onClick={() => refreshRatio(d)} title="Update ratio from last 8 weeks of historicals"
                 className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
                 disabled={refreshingId === d.id}>
                 {refreshingId === d.id ? '…' : '↻'}
@@ -1280,7 +1280,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
                 <input type="number" value={m.ratio} step="0.05" min="0.05"
                   onChange={e => onUpdateRoster(m.id, 'ratio', parseFloat(e.target.value) || 0)}
                   className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+                <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 8 weeks"
                   className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
               </div>
               <button onClick={() => onRemove(m.id)}
@@ -1365,7 +1365,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
               <input type="number" value={m.ratio} step="0.05" min="0.05"
                 onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
                 className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 8 weeks"
                 className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
             </div>
             <button onClick={() => onRemove(m.id)}
@@ -1959,7 +1959,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                     try {
                       const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
                       const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
-                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'preservation' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 4);
+                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'preservation' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 8);
                       const h = rows.reduce((s, r) => s + r.actual_hours, 0);
                       const o = rows.reduce((s, r) => s + r.actual_orders, 0);
                       if (o > 0 && h > 0) updateRoster(id, 'ratio', Math.round(h / o * 100) / 100);
@@ -2767,7 +2767,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                     try {
                       const res = await fetch(`/api/actuals?location=${location}&type=team&weeks=100`);
                       const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
-                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'fulfillment' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 4);
+                      const rows = (data.teamActuals ?? []).filter(r => r.department === 'fulfillment' && r.member_name === name).sort((a, b) => b.week_of.localeCompare(a.week_of)).slice(0, 8);
                       const h = rows.reduce((s, r) => s + r.actual_hours, 0);
                       const o = rows.reduce((s, r) => s + r.actual_orders, 0);
                       if (o > 0 && h > 0) updateRoster(team.findIndex(m => m.id === id), 'ratio', Math.round(h / o * 100) / 100);
