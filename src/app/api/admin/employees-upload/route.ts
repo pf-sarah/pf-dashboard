@@ -17,6 +17,7 @@ function normalizeDept(raw: string): string {
   if (l.includes('design'))        return 'Design';
   if (l.includes('preservation'))  return 'Preservation';
   if (l.includes('fulfillment'))   return 'Fulfillment';
+  if (l.includes('resin'))         return 'Resin';
   return raw;
 }
 

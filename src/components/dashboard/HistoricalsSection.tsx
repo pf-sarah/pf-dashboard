@@ -17,7 +17,7 @@ interface TeamMember {
 
 interface HistoricalsSectionProps {
   excludeFromCPONames?: string[];
-  department:    'design' | 'preservation' | 'fulfillment';
+  department:    'design' | 'preservation' | 'fulfillment' | 'resin';
   location:      'Utah' | 'Georgia';
   members:       TeamMember[];
   ordersLabel:   string;
@@ -54,6 +54,10 @@ function getAllWeeks(): string[] {
 
 export function HistoricalsSection({ department, location, members, ordersLabel, onRatioUpdate, excludeFromCPONames = [], presActuals = {}, onReceivedSaved }: HistoricalsSectionProps) {
   const { enrichedActuals, loading, refresh, getWeekCosts } = useActualsWithPayroll(location);
+  // team_member_week_actuals stores resin rows as 'Resin' (capitalized) — the
+  // other three departments store lowercase. This is the one place that
+  // casing difference needs to be bridged.
+  const actualsDept = department === 'resin' ? 'Resin' : department;
   const [localEdits, setLocalEdits] = useState<Record<string, Record<string, { hours: number; orders: number }>>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [managerHours, setManagerHours] = useState<Record<string, number>>({});
@@ -94,10 +98,10 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
   // Filter to this dept — for preservation also include checks_unboxing rows
   const deptActuals = useMemo(() =>
     enrichedActuals.filter(r =>
-      r.department === department ||
+      r.department === actualsDept ||
       (department === 'preservation' && r.department === 'checks_unboxing')
     ),
-    [enrichedActuals, department]
+    [enrichedActuals, department, actualsDept]
   );
 
   // Separate checks_unboxing rows for display tinting
@@ -165,7 +169,7 @@ export function HistoricalsSection({ department, location, members, ordersLabel,
         await fetch('/api/actuals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'team', location, weekOf, department, memberName: name, actualHours: updated.hours, actualOrders: updated.orders }),
+          body: JSON.stringify({ type: 'team', location, weekOf, department: actualsDept, memberName: name, actualHours: updated.hours, actualOrders: updated.orders }),
         });
         // No refresh() — localEdits already reflects the change, avoids disrupting input focus
       } catch {}

@@ -4,16 +4,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useScheduleSettings } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
+import { HistoricalsSection } from './HistoricalsSection';
+import { EmployeeAutocomplete, type RipplingEmployee } from './EmployeeAutocomplete';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-interface ResinMember {
+export interface ResinMember {
   id:          string;
   name:        string;
   ratio:       number;   // hours per unit
   payType:     'hourly' | 'salary';
   hourlyRate:  number;
   annualSalary: number;
+  isManager?:  boolean;
+  role?:       'specialist' | 'senior' | 'master';
 }
 
 interface CohortRow {
@@ -36,8 +40,8 @@ interface QueueSummary {
 const WEEKS = 52;
 const WINDOW = 8;  // weeks visible in the schedule grid at once
 
-const DEFAULT_RESIN_ROSTER: ResinMember[] = [
-  { id: 'resin-1', name: 'Preslee Peterson', ratio: 1.5, payType: 'hourly', hourlyRate: 0, annualSalary: 0 },
+export const DEFAULT_RESIN_ROSTER: ResinMember[] = [
+  { id: 'resin-1', name: 'Preslee Peterson', ratio: 1.5, payType: 'hourly', hourlyRate: 0, annualSalary: 0, isManager: true, role: 'master' },
 ];
 
 function mondayOf(dateStr: string): Date {
@@ -49,22 +53,10 @@ function mondayOf(dateStr: string): Date {
   return d;
 }
 
-function isoDate(d: Date): string {
-  return d.toISOString().split('T')[0];
-}
-
 // ─── Persistence helpers ───────────────────────────────────────────────────────
 
 function useResinSettings() {
   const { settings, loading, saveState, update } = useScheduleSettings('Utah');
-  const [actuals, setActualsState] = useState<{ weekOf: string; memberId: string; memberName: string; hours: number; units: number }[]>([]);
-
-  useEffect(() => {
-    fetch('/api/actuals?dept=resin')
-      .then(r => r.json())
-      .then(d => { if (d.actuals) setActualsState(d.actuals); })
-      .catch(() => {});
-  }, []);
 
   const resinDailyHours: Record<string, number[]> = settings.resinDailyHours ?? {};
 
@@ -77,19 +69,32 @@ function useResinSettings() {
   // Date-keyed: isoMonday -> { memberId -> hours }
   const hours: Record<string, Record<string, number>> = settings.resinHours ?? {};
 
+  // Manager production-vs-total hours — shared keys with design/preservation/
+  // fulfillment (member ids don't collide across departments), same pattern
+  // used there: production hours drive units/ratio, total hours drive cost.
+  const mgrTotalHours: Record<string, Record<string, number>> = settings.mgrTotalHours ?? {};
+  const mgrTotalDailyHours: Record<string, number[]> = settings.mgrTotalDailyHours ?? {};
+
   function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
   function setHours(h: Record<string, Record<string, number>>) { update('resinHours', h); }
+  function setMgrTotalHours(h: Record<string, Record<string, number>>) { update('mgrTotalHours', h); }
+  function setMgrTotalDailyHours(h: Record<string, number[]>) { update('mgrTotalDailyHours', h); }
 
-  return { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState };
+  return {
+    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
+    mgrTotalHours, setMgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
+    loading, saveState,
+  };
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface ResinPageProps {
   resinQueue?: number;  // live count from dashboard (if wired up)
+  canViewCPO?: boolean;
 }
 
-export default function ResinPage({ resinQueue }: ResinPageProps) {
+export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPageProps) {
   const [activeTab, setActiveTab] = useState<'thisweek' | 'schedule' | 'queue' | 'historicals'>('thisweek');
   const [thisWeekOffset, setThisWeekOffset] = useState(0);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -101,9 +106,14 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [moveLoading, setMoveLoading] = useState(false);
   const [moveResult, setMoveResult] = useState<string | null>(null);
+  const [showRoster, setShowRoster] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
-  const { roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours, actuals, setActualsState, loading, saveState } =
-    useResinSettings();
+  const {
+    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
+    mgrTotalHours, setMgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
+    loading, saveState,
+  } = useResinSettings();
 
   // Fetch queue summary
   useEffect(() => {
@@ -123,6 +133,28 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
       const h = schedule[m.id] ?? 0;
       return sum + (m.ratio > 0 ? h / m.ratio : 0);
     }, 0);
+  }
+
+  // Production hours drive units/ratio; managers' total hours (production +
+  // managerial) drive cost instead, and managers are excluded from CPO since
+  // their per-unit number isn't meaningful. Mirrors Design's weekStats.
+  function weekMemberStats(weekIdx: number, m: ResinMember) {
+    const hrs      = hours[isoMonday(weekIdx)]?.[m.id] ?? 0;
+    const units    = m.ratio > 0 ? hrs / m.ratio : 0;
+    const totalHrs = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(weekIdx)] ?? hrs) : hrs;
+    const cost     = m.payType === 'salary' ? m.annualSalary / 52 : totalHrs * m.hourlyRate;
+    const cpo      = !m.isManager && units > 0 && cost > 0 ? cost / units : null;
+    return { hrs, units, cost, cpo };
+  }
+
+  function weekTotals(weekIdx: number) {
+    let totalUnits = 0, totalCost = 0;
+    roster.forEach(m => {
+      const { units, cost } = weekMemberStats(weekIdx, m);
+      totalUnits += units;
+      totalCost  += cost;
+    });
+    return { totalUnits, totalCost, totalCPO: totalUnits > 0 && totalCost > 0 ? totalCost / totalUnits : null };
   }
 
   const avgWeeklyCapacity = (() => {
@@ -170,7 +202,44 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     setHours(next);
   }
 
-  function updateRosterField(id: string, field: keyof ResinMember, val: string | number) {
+  function updateMgrTotalHours(weekIdx: number, memberId: string, val: number) {
+    const key = isoMonday(weekIdx);
+    const next = { ...mgrTotalHours, [key]: { ...(mgrTotalHours[key] ?? {}), [memberId]: val } };
+    setMgrTotalHours(next);
+  }
+
+  function applyToAllWeeks(memberId: string, val: number) {
+    if (!window.confirm(`Copy ${val} hours to all ${WEEKS} weeks for this team member?`)) return;
+    const next = { ...hours };
+    for (let w = 0; w < WEEKS; w++) {
+      const key = isoMonday(w);
+      next[key] = { ...(next[key] ?? {}), [memberId]: val };
+    }
+    setHours(next);
+  }
+
+  function getDH(memberId: string, weekIdx: number, di: number): number {
+    return resinDailyHours[`${isoMonday(weekIdx)}-${memberId}`]?.[di] ?? 0;
+  }
+
+  function getMgrTotalDH(memberId: string, weekIdx: number, di: number): number {
+    return mgrTotalDailyHours[`${isoMonday(weekIdx)}-${memberId}`]?.[di] ?? getDH(memberId, weekIdx, di);
+  }
+
+  function setMgrTotalDH(memberId: string, weekIdx: number, di: number, val: number) {
+    const key = `${isoMonday(weekIdx)}-${memberId}`;
+    const prev = mgrTotalDailyHours[key] ?? [];
+    const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
+    const next = { ...mgrTotalDailyHours, [key]: padded.map((h, j) => j === di ? val : h) };
+    setMgrTotalDailyHours(next);
+  }
+
+  function dailyCost(m: ResinMember, weekIdx: number, di: number): number {
+    const h = m.isManager ? getMgrTotalDH(m.id, weekIdx, di) : getDH(m.id, weekIdx, di);
+    return m.payType === 'salary' ? m.annualSalary / 260 : h * m.hourlyRate;
+  }
+
+  function updateRosterField(id: string, field: keyof ResinMember, val: string | number | boolean) {
     setRoster(roster.map(m => m.id === id ? { ...m, [field]: val } : m));
   }
 
@@ -181,6 +250,24 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
 
   function removeMember(id: string) {
     setRoster(roster.filter(m => m.id !== id));
+  }
+
+  async function refreshRatio(m: ResinMember) {
+    setRefreshingId(m.id);
+    try {
+      const res = await fetch(`/api/actuals?location=Utah&type=team&weeks=100`);
+      const data = await res.json() as { teamActuals?: { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[] };
+      const rows = (data.teamActuals ?? [])
+        .filter(r => r.department === 'Resin' && r.member_name === m.name)
+        .sort((a, b) => b.week_of.localeCompare(a.week_of))
+        .slice(0, 8);
+      const totalHours  = rows.reduce((s, r) => s + r.actual_hours,  0);
+      const totalOrders = rows.reduce((s, r) => s + r.actual_orders, 0);
+      if (totalOrders > 0 && totalHours > 0) {
+        updateRosterField(m.id, 'ratio', Math.round(totalHours / totalOrders * 100) / 100);
+      }
+    } catch {}
+    setRefreshingId(null);
   }
 
   async function syncQueue() {
@@ -221,7 +308,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
     }
   }
 
-  const hasRates = roster.some(m => m.hourlyRate > 0 || m.annualSalary > 0);
+  const hasRates = canViewCPO && roster.some(m => m.hourlyRate > 0 || m.annualSalary > 0);
 
   const TABS = [
     { id: 'thisweek'    as const, label: 'This week' },
@@ -322,110 +409,72 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
       )}
 
       {/* ── Roster ────────────────────────────────────────────────────────────── */}
-      <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-          <h3 className="text-sm font-semibold text-slate-700">Resin Team</h3>
-          <button
-            onClick={addMember}
-            className="text-xs border border-slate-200 rounded px-2.5 py-1 text-slate-600 hover:bg-slate-50"
-          >
-            + Add member
-          </button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap">Name</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Ratio (hrs/unit)</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Pay type</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">Rate</th>
-                <th className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap">CPO</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {roster.map((m, i) => {
-                const cpo = m.ratio > 0 && (m.hourlyRate > 0 || m.annualSalary > 0)
-                  ? m.payType === 'hourly'
-                    ? m.ratio * m.hourlyRate
-                    : (m.annualSalary / 52) / (m.ratio > 0 ? (40 / m.ratio) : 1)
-                  : null;
-
-                return (
-                  <tr key={m.id} className={`border-b border-slate-50 ${i % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                    <td className="px-4 py-1.5">
-                      <input
+      <div>
+        <button onClick={() => setShowRoster(r => !r)}
+          className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">
+          {showRoster ? '▲ Hide' : '▼ Edit'} resin roster, ratios &amp; pay rates
+        </button>
+        {showRoster && (
+          <div className="mt-3 bg-white border border-slate-100 rounded-xl p-5">
+            <div className="grid grid-cols-[1fr_80px_90px_20px] gap-2 mb-2 px-1 text-xs font-medium text-slate-400">
+              <span>Name</span>
+              <span className="text-center">Role</span>
+              <span className="text-center">Ratio</span>
+              <span />
+            </div>
+            <div className="space-y-2">
+              {roster.map(m => (
+                <div key={m.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="flex-1 min-w-0">
+                      <EmployeeAutocomplete
                         value={m.name}
-                        onChange={e => updateRosterField(m.id, 'name', e.target.value)}
-                        className="w-full bg-transparent border-0 outline-none text-slate-700 font-medium text-xs"
+                        location="Utah"
+                        department="Resin"
+                        onChange={val => updateRosterField(m.id, 'name', val)}
+                        onSelect={(emp: RipplingEmployee) => {
+                          updateRosterField(m.id, 'name', emp.full_name);
+                          updateRosterField(m.id, 'role', emp.role);
+                          updateRosterField(m.id, 'payType', emp.pay_type);
+                          updateRosterField(m.id, 'hourlyRate', emp.hourly_rate ?? 0);
+                          updateRosterField(m.id, 'annualSalary', emp.annual_salary ?? 0);
+                          updateRosterField(m.id, 'isManager', /manager|head of|director/i.test(emp.title ?? ''));
+                        }}
                       />
-                    </td>
-                    <td className="px-3 py-1.5 text-center">
-                      <input
-                        type="number"
-                        value={m.ratio}
-                        step={0.01}
-                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0)}
-                        className="w-16 text-center bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
-                      />
-                    </td>
-                    <td className="px-3 py-1.5 text-center">
-                      <select
-                        value={m.payType}
-                        onChange={e => updateRosterField(m.id, 'payType', e.target.value)}
-                        className="bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
-                      >
-                        <option value="hourly">Hourly</option>
-                        <option value="salary">Salary</option>
-                      </select>
-                    </td>
-                    <td className="px-3 py-1.5 text-center">
-                      {m.payType === 'hourly' ? (
-                        <div className="flex items-center justify-center gap-0.5">
-                          <span className="text-slate-400">$</span>
-                          <input
-                            type="number"
-                            value={m.hourlyRate || ''}
-                            placeholder="0"
-                            min={0}
-                            onChange={e => updateRosterField(m.id, 'hourlyRate', parseFloat(e.target.value) || 0)}
-                            className="w-16 text-center bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
-                          />
-                          <span className="text-slate-400">/hr</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center gap-0.5">
-                          <span className="text-slate-400">$</span>
-                          <input
-                            type="number"
-                            value={m.annualSalary || ''}
-                            placeholder="0"
-                            min={0}
-                            onChange={e => updateRosterField(m.id, 'annualSalary', parseFloat(e.target.value) || 0)}
-                            className="w-20 text-center bg-white border border-slate-200 rounded px-1 py-0.5 text-xs"
-                          />
-                          <span className="text-slate-400">/yr</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-1.5 text-center text-slate-600">
-                      {cpo !== null ? `$${cpo.toFixed(2)}` : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="px-3 py-1.5 text-center">
-                      {roster.length > 1 && (
-                        <button
-                          onClick={() => removeMember(m.id)}
-                          className="text-slate-300 hover:text-red-400 text-xs"
-                        >✕</button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                    {m.isManager && (
+                      <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+                    )}
+                  </div>
+                  <select value={m.role ?? 'specialist'} onChange={e => updateRosterField(m.id, 'role', e.target.value)}
+                    className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                    <option value="specialist">Specialist</option>
+                    <option value="senior">Senior</option>
+                    <option value="master">Master</option>
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <input type="number" value={m.ratio} step="0.01" min="0.01"
+                      onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0)}
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                    <button onClick={() => refreshRatio(m)} title="Update ratio from last 8 weeks of historicals"
+                      className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
+                      disabled={refreshingId === m.id}>
+                      {refreshingId === m.id ? '…' : '↻'}
+                    </button>
+                  </div>
+                  {roster.length > 1 ? (
+                    <button onClick={() => removeMember(m.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+                  ) : <span />}
+                </div>
+              ))}
+            </div>
+            <button onClick={addMember}
+              className="mt-3 text-xs px-3 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 transition-colors">
+              + Add member
+            </button>
+            <p className="mt-3 text-xs text-slate-400">Pay rates &amp; titles come from Rippling upload. Ratio = hours per unit.</p>
+          </div>
+        )}
       </div>
 
       {/* ── Tabs ──────────────────────────────────────────────────────────────── */}
@@ -455,6 +504,7 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               Hours — {thisWeekOffset === 0 ? 'this week' : thisWeekOffset === 1 ? 'next week' : `week +${thisWeekOffset}`}
             </h3>
             <div className="flex items-center gap-2">
+              {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
               <InputModeToggle mode={resinInputMode} onChange={setResinInputMode} unitLabel="Orders" />
               <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0}
                 className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
@@ -475,8 +525,10 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
               </thead>
               <tbody>
                 {roster.map((m, mi) => {
-                  const weekTotal = [0,1,2,3,4,5,6].reduce((s, di) => s + (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
+                  const weekTotal = [0,1,2,3,4,5,6].reduce((s, di) => s + getDH(m.id, thisWeekOffset, di), 0);
                   const units = m.ratio > 0 ? weekTotal / m.ratio : 0;
+                  const weekCost = [0,1,2,3,4,5,6].reduce((s, di) => s + dailyCost(m, thisWeekOffset, di), 0);
+                  const weekCPO = !m.isManager && units > 0 && weekCost > 0 ? weekCost / units : null;
                   return (
                     <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
                       <td className="sticky left-0 bg-inherit px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
@@ -484,13 +536,17 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                         <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
                       </td>
                       {[0,1,2,3,4,5,6].map(di => {
-                        const dayVal = resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0;
+                        const dayVal = getDH(m.id, thisWeekOffset, di);
                         const dayUnits = m.ratio > 0 ? dayVal / m.ratio : 0;
+                        const totalDayVal = m.isManager ? getMgrTotalDH(m.id, thisWeekOffset, di) : dayVal;
+                        const cost = dailyCost(m, thisWeekOffset, di);
+                        const cpo = !m.isManager && dayUnits > 0 && cost > 0 ? cost / dayUnits : null;
                         return (
                           <td key={di} className={`px-1 py-1.5 text-center ${di === 0 ? 'bg-indigo-50/20' : ''}`}>
                             <input type="number"
                               value={resinInputMode === 'output' ? (dayUnits ? round2(dayUnits) : '') : (dayVal || '')}
                               placeholder="0" min={0} step={resinInputMode === 'output' ? 0.1 : 0.5}
+                              title={m.isManager ? 'Production hours' : undefined}
                               onChange={e => {
                                 const raw = parseFloat(e.target.value) || 0;
                                 const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
@@ -500,12 +556,23 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                                 setResinDailyHours(next);
                               }}
                               className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
+                            {m.isManager && (
+                              <input type="number" value={totalDayVal || ''} min={0} step={0.5} placeholder="total h"
+                                title="Total hours (production + managerial)"
+                                onChange={e => setMgrTotalDH(m.id, thisWeekOffset, di, parseFloat(e.target.value) || 0)}
+                                className="w-12 mt-0.5 text-center bg-violet-50 border border-violet-200 rounded px-1 py-0.5 text-[10px] text-violet-600 focus:outline-none focus:ring-1 focus:ring-violet-300" />
+                            )}
+                            {resinInputMode === 'output'
+                              ? (dayVal > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{round2(dayVal)}h</div>)
+                              : (dayUnits > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{round2(dayUnits)}u</div>)}
+                            {hasRates && cpo !== null && <div className="text-[10px] text-purple-500">${cpo.toFixed(2)}</div>}
                           </td>
                         );
                       })}
                       <td className="px-2 py-1.5 text-center text-xs font-medium text-indigo-700">
                         {weekTotal > 0 ? weekTotal.toFixed(1) : '—'}
                         {units > 0 && <div className="text-[10px] text-slate-400">{units.toFixed(1)}u</div>}
+                        {hasRates && weekCPO !== null && <div className="text-[10px] text-purple-500">${weekCPO.toFixed(2)}</div>}
                       </td>
                     </tr>
                   );
@@ -513,11 +580,14 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                 <tr className="bg-purple-50 border-t border-purple-100 font-medium">
                   <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Day total</td>
                   {[0,1,2,3,4,5,6].map(di => {
-                    const dayTotal = roster.reduce((s, m) => s + (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0), 0);
-                    const dayUnits = roster.reduce((s, m) => s + (m.ratio > 0 ? (resinDailyHours[`${isoMonday(thisWeekOffset)}-${m.id}`]?.[di] ?? 0) / m.ratio : 0), 0);
+                    const dayTotal = roster.reduce((s, m) => s + getDH(m.id, thisWeekOffset, di), 0);
+                    const dayUnits = roster.reduce((s, m) => s + (m.ratio > 0 ? getDH(m.id, thisWeekOffset, di) / m.ratio : 0), 0);
+                    const dayCost  = roster.reduce((s, m) => s + dailyCost(m, thisWeekOffset, di), 0);
+                    const dayCPO   = dayUnits > 0 && dayCost > 0 ? dayCost / dayUnits : null;
                     return (
                       <td key={di} className="px-2 py-2 text-center text-xs text-purple-700">
                         {dayTotal > 0 ? <><div>{dayTotal.toFixed(1)}h</div><div className="text-[10px]">{dayUnits.toFixed(1)}u</div></> : <span className="text-slate-300">—</span>}
+                        {hasRates && dayCPO !== null && <div className="text-[10px]">${dayCPO.toFixed(2)}</div>}
                       </td>
                     );
                   })}
@@ -587,8 +657,8 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                     {windowWeeks.map(w => {
                       const h    = hours[isoMonday(w)]?.[m.id] ?? 0;
                       const units = m.ratio > 0 ? h / m.ratio : 0;
-                      const cost  = m.payType === 'hourly' ? h * m.hourlyRate : (m.annualSalary / 52 / 5) * (h / 8);
-                      const cpo   = units > 0 && cost > 0 ? cost / units : null;
+                      const { cpo }  = weekMemberStats(w, m);
+                      const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? h) : h;
                       return (
                         <td key={w} className="px-1 py-1 text-center">
                           <input
@@ -601,8 +671,18 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                               const raw = parseFloat(e.target.value) || 0;
                               updateHours(w, m.id, resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
                             }}
+                            onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, h); }}
+                            title={m.isManager ? 'Production hours' : 'Right-click to apply to all weeks'}
                             className="w-full text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none"
                           />
+                          {m.isManager && (
+                            <input
+                              type="number" value={totalH || ''} min={0} step={1} placeholder="total h"
+                              title="Total hours (production + managerial)"
+                              onChange={e => updateMgrTotalHours(w, m.id, parseFloat(e.target.value) || 0)}
+                              className="w-full mt-0.5 text-center bg-violet-50 border border-violet-200 rounded px-1 py-0.5 text-[10px] text-violet-600 focus:outline-none focus:ring-1 focus:ring-violet-300"
+                            />
+                          )}
                           {resinInputMode === 'output'
                             ? (h > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{round2(h)}h</div>)
                             : (h > 0 && (
@@ -624,9 +704,11 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
                   <td className="sticky left-0 bg-purple-50 px-4 py-2 text-xs text-purple-700">Week total</td>
                   {windowWeeks.map(w => {
                     const cap = weeklyCapacity(w);
+                    const { totalCPO } = weekTotals(w);
                     return (
                       <td key={w} className="px-3 py-2 text-center text-xs text-purple-700">
                         {cap > 0 ? `${cap.toFixed(0)}u` : <span className="text-slate-300">—</span>}
+                        {showCPO && totalCPO !== null && <div className="text-[10px]">${totalCPO.toFixed(2)}</div>}
                       </td>
                     );
                   })}
@@ -754,10 +836,14 @@ export default function ResinPage({ resinQueue }: ResinPageProps) {
 
       {/* ── HISTORICALS TAB ───────────────────────────────────────────────────── */}
       {activeTab === 'historicals' && (
-        <ResinHistoricalsSection
-          roster={roster}
-          actuals={actuals}
-          onActualsChange={setActualsState}
+        <HistoricalsSection
+          department="resin"
+          location="Utah"
+          members={roster.map(m => ({
+            id: m.id, name: m.name, payType: m.payType, hourlyRate: m.hourlyRate, annualSalary: m.annualSalary, isManager: m.isManager,
+          }))}
+          ordersLabel="pieces"
+          onRatioUpdate={(id, ratio) => updateRosterField(id, 'ratio', ratio)}
         />
       )}
     </div>
@@ -892,141 +978,6 @@ function ResinQueueTable() {
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
-
-// ─── Historicals sub-component ─────────────────────────────────────────────────
-
-interface ResinActual {
-  weekOf:     string;
-  memberId:   string;
-  memberName: string;
-  hours:      number;
-  units:      number;
-}
-
-function ResinHistoricalsSection({
-  roster,
-  actuals,
-  onActualsChange,
-}: {
-  roster:           ResinMember[];
-  actuals:          ResinActual[];
-  onActualsChange:  (a: ResinActual[]) => void;
-}) {
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-  // Past 8 weeks
-  const weeks = Array.from({ length: 8 }, (_, i) => {
-    const d = getMondayDate(-(i + 1));
-    return isoDate(d);
-  }).reverse();
-
-  function getActual(weekOf: string, member: ResinMember): ResinActual | undefined {
-    return actuals.find(a => a.weekOf === weekOf &&
-      (a.memberId === member.id || a.memberName === member.name || a.memberId === member.name));
-  }
-
-  async function updateActual(weekOf: string, member: ResinMember, field: 'hours' | 'units', val: number) {
-    const existing = getActual(weekOf, member);
-    const updated: ResinActual = {
-      weekOf,
-      memberId:   member.id,
-      memberName: member.name,
-      hours:      field === 'hours' ? val : (existing?.hours ?? 0),
-      units:      field === 'units' ? val : (existing?.units ?? 0),
-    };
-
-    const next = actuals.filter(a => !(a.weekOf === weekOf &&
-      (a.memberId === member.id || a.memberName === member.name || a.memberId === member.name)));
-    next.push(updated);
-    onActualsChange(next);
-
-    setSaveState('saving');
-    try {
-      await fetch('/api/actuals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'resin', weekOf: updated.weekOf, memberName: updated.memberName, actualHours: updated.hours, actualUnits: updated.units }),
-      });
-      setSaveState('saved');
-      setTimeout(() => setSaveState('idle'), 2000);
-    } catch { setSaveState('error'); }
-  }
-
-  function mondayLabel(iso: string): string {
-    return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  }
-
-  return (
-    <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-        <h3 className="text-sm font-semibold text-slate-700">Resin Historicals — actual hours & units</h3>
-        <span className="text-xs text-slate-400">
-          {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Past 8 weeks'}
-        </span>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-xs">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-100">
-              <th className="px-4 py-2 text-left font-medium text-slate-500 whitespace-nowrap sticky left-0 bg-slate-50">
-                Team Member
-              </th>
-              {weeks.map(w => (
-                <th key={w} className="px-3 py-2 text-center font-medium text-slate-500 whitespace-nowrap min-w-[90px]">
-                  {mondayLabel(w)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {roster.map((m, mi) => (
-              <tr key={m.id} className={`border-b border-slate-50 ${mi % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
-                <td className="px-4 py-1.5 font-medium text-slate-700 whitespace-nowrap sticky left-0 bg-white">
-                  {m.name}
-                </td>
-                {weeks.map(w => {
-                  const a    = getActual(w, m);
-                  const cpo  = a && a.hours > 0 && a.units > 0 && (m.hourlyRate > 0 || m.annualSalary > 0)
-                    ? (m.payType === 'hourly' ? a.hours * m.hourlyRate : (m.annualSalary / 52) * (a.hours / 40)) / a.units
-                    : null;
-                  return (
-                    <td key={w} className="px-1 py-1 text-center">
-                      <div className="flex flex-col gap-0.5">
-                        <input
-                          type="number"
-                          value={a?.hours || ''}
-                          placeholder="hrs"
-                          min={0}
-                          onChange={e => updateActual(w, m, 'hours', parseFloat(e.target.value) || 0)}
-                          className="w-full text-center bg-white border border-slate-100 rounded px-1 py-0.5 text-xs hover:border-purple-300"
-                        />
-                        <input
-                          type="number"
-                          value={a?.units || ''}
-                          placeholder="units"
-                          min={0}
-                          onChange={e => updateActual(w, m, 'units', parseFloat(e.target.value) || 0)}
-                          className="w-full text-center bg-purple-50 border border-purple-100 rounded px-1 py-0.5 text-xs hover:border-purple-300"
-                        />
-                        {cpo !== null && (
-                          <span className="text-[10px] text-purple-500">${cpo.toFixed(2)} cpo</span>
-                        )}
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="px-5 py-3 text-xs text-slate-400 border-t border-slate-50">
-        Top row = hours worked · Bottom row = units completed · CPO auto-calculated from your rate above
-      </p>
     </div>
   );
 }

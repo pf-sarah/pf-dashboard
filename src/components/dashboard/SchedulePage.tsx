@@ -1,5 +1,5 @@
 'use client';
-import ResinPage from './ResinPage';
+import ResinPage, { DEFAULT_RESIN_ROSTER, type ResinMember } from './ResinPage';
 import { RipplingUpload } from './RipplingUpload';
 import { EmployeeAutocomplete } from './EmployeeAutocomplete';
 import type { RipplingEmployee } from './EmployeeAutocomplete';
@@ -2913,7 +2913,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
 interface StaffMember {
   id:       string;
   name:     string;
-  homeDept: 'design' | 'preservation' | 'fulfillment';
+  homeDept: 'design' | 'preservation' | 'fulfillment' | 'resin';
   onCall:   boolean;
 }
 
@@ -2931,6 +2931,7 @@ const UTAH_STAFF: StaffMember[] = [
   { id: 'ut-f2',  name: 'Warner Neuenschwander',   homeDept: 'fulfillment',  onCall: false },
   { id: 'ut-f3',  name: 'Owen Shaw',               homeDept: 'fulfillment',  onCall: false },
   { id: 'ut-f4',  name: 'Emma Van Dyke',            homeDept: 'fulfillment',  onCall: false },
+  { id: 'resin-1', name: 'Preslee Peterson',       homeDept: 'resin',       onCall: false },
 ];
 
 const GEORGIA_STAFF: StaffMember[] = [
@@ -2948,6 +2949,7 @@ const DEPT_COLOR: Record<string, string> = {
   design:       'bg-indigo-100 text-indigo-700',
   preservation: 'bg-green-100 text-green-700',
   fulfillment:  'bg-amber-100 text-amber-700',
+  resin:        'bg-purple-100 text-purple-700',
 };
 
 // Returns next N weekdays (Mon-Fri) from today, optionally offset by weeks
@@ -2974,7 +2976,7 @@ function getWeekdays(weekOffset: number): { iso: string; label: string; dateStr:
 // ─── MasterScheduleSection ────────────────────────────────────────────────────
 
 function MasterScheduleSection({ location, masterAvailability, onAvailabilityChange,
-  designHours, designSchedule, presHours, ffHours, designRoster, presRoster, ffRoster }: {
+  designHours, designSchedule, presHours, ffHours, resinHours, designRoster, presRoster, ffRoster }: {
   location:             'Utah' | 'Georgia';
   masterAvailability:   Record<string, { defaultHours: number; overrides: Record<string, number> }>;
   onAvailabilityChange: (a: Record<string, { defaultHours: number; overrides: Record<string, number> }>) => void;
@@ -2982,6 +2984,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   designSchedule:       WeekSchedule[];
   presHours:            Record<string, Record<string, number>>;
   ffHours:              Record<string, Record<string, number>>;
+  resinHours:           Record<string, Record<string, number>>;
   designRoster:         Record<string, { ratio: number; name: string }>;
   presRoster:           Record<string, { ratio: number; name: string }>;
   ffRoster:             Record<string, { ratio: number; name: string }>;
@@ -2996,7 +2999,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   // ── Weekly totals per person ──────────────────────────────────────────────
   // designSchedule is already merged (persisted + defaults) — use it directly
   function getWeeklyScheduled(person: StaffMember): {
-    design: number; preservation: number; fulfillment: number; total: number;
+    design: number; preservation: number; fulfillment: number; resin: number; total: number;
   } {
     // Design: read from the already-merged schedule array
     const dHrs = designSchedule[weekIdx]?.[person.id] ?? 0;
@@ -3004,7 +3007,9 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
     const pHrs = Object.values(presHours[person.id] ?? {}).reduce((a, b) => a + b, 0);
     // Fulfillment: persisted weekly hours
     const fHrs = ffHours[person.id]?.[isoMonday(weekIdx)] ?? 0;
-    return { design: dHrs, preservation: pHrs, fulfillment: fHrs, total: dHrs + pHrs + fHrs };
+    // Resin: stored week-of-first (opposite nesting from design/ff)
+    const rHrs = resinHours[isoMonday(weekIdx)]?.[person.id] ?? 0;
+    return { design: dHrs, preservation: pHrs, fulfillment: fHrs, resin: rHrs, total: dHrs + pHrs + fHrs + rHrs };
   }
 
   // Weekly available = defaultHours × 5, overridable per week
@@ -3053,7 +3058,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
         <div>
           <h2 className="text-sm font-semibold text-slate-700">{location} master schedule</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Weekly availability vs scheduled hours. Design &amp; fulfillment show weekly totals. Preservation shows daily.
+            Weekly availability vs scheduled hours. Design, fulfillment &amp; resin show weekly totals. Preservation shows daily.
             <span className="ml-2 text-red-500 font-medium">Red ⚠ = over-scheduled</span>
           </p>
         </div>
@@ -3070,15 +3075,15 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
 
       {/* Legend */}
       <div className="flex gap-3 flex-wrap">
-        {(['design','preservation','fulfillment'] as const).map(d => (
+        {(['design','preservation','fulfillment','resin'] as const).map(d => (
           <span key={d} className={`text-xs rounded px-2 py-0.5 ${DEPT_COLOR[d]}`}>{d.charAt(0).toUpperCase()+d.slice(1)}</span>
         ))}
         <span className="text-xs bg-slate-100 text-slate-500 rounded px-2 py-0.5">On call</span>
         <span className="text-xs bg-red-100 text-red-700 rounded px-2 py-0.5">⚠ Over-scheduled</span>
       </div>
 
-      {/* ── DESIGN + FULFILLMENT staff — weekly view ─────────────────────────── */}
-      {(['design','fulfillment'] as const).map(deptKey => {
+      {/* ── DESIGN + FULFILLMENT + RESIN staff — weekly view ─────────────────── */}
+      {(['design','fulfillment','resin'] as const).map(deptKey => {
         const deptMembers = staff.filter(s => s.homeDept === deptKey);
         if (deptMembers.length === 0) return null;
         return (
@@ -3095,6 +3100,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                   <th className="px-3 py-2 text-center font-medium text-slate-500 text-indigo-600">Design<br/>hrs</th>
                   <th className="px-3 py-2 text-center font-medium text-green-700">Pres<br/>hrs</th>
                   <th className="px-3 py-2 text-center font-medium text-amber-700">FF<br/>hrs</th>
+                  <th className="px-3 py-2 text-center font-medium text-purple-700">Resin<br/>hrs</th>
                   <th className="px-3 py-2 text-center font-medium text-slate-500">Total<br/>scheduled</th>
                   <th className="px-3 py-2 text-center font-medium text-slate-500">Remaining<br/>for flex</th>
                 </tr>
@@ -3129,6 +3135,7 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
                       <td className="px-3 py-2 text-center font-medium text-indigo-700">{sched.design || '—'}</td>
                       <td className="px-3 py-2 text-center font-medium text-green-700">{sched.preservation || '—'}</td>
                       <td className="px-3 py-2 text-center font-medium text-amber-700">{sched.fulfillment || '—'}</td>
+                      <td className="px-3 py-2 text-center font-medium text-purple-700">{sched.resin || '—'}</td>
                       <td className="px-3 py-2 text-center font-semibold text-slate-700">{sched.total || '—'}</td>
                       <td className={`px-3 py-2 text-center font-semibold ${over ? 'text-red-600' : remain > 0 ? 'text-green-700' : 'text-slate-400'}`}>
                         {over ? `⚠ ${Math.abs(remain)}h over` : remain > 0 ? `${remain}h free` : '—'}
@@ -3314,7 +3321,7 @@ function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
 }
 
 function DeptKPIBar({ dept, location, metrics, showCPO }: {
-  dept: 'design' | 'preservation' | 'fulfillment';
+  dept: 'design' | 'preservation' | 'fulfillment' | 'resin';
   location: string;
   metrics: ReturnType<typeof import('./useHistoricalMetrics').useHistoricalMetrics>;
   showCPO: boolean;
@@ -3539,6 +3546,10 @@ export function SchedulePage({
       .map(([id, r]) => ({ id, name: r.name, rate: r.rate ?? 0, ratio: r.ratio ?? 1, isManager: false, role: undefined as string | undefined, isRoster: true }));
     return [...base, ...custom];
   })();
+  const resinRoster: ResinMember[] = Array.isArray(settings.resinRoster)
+    ? (settings.resinRoster as unknown as ResinMember[])
+    : DEFAULT_RESIN_ROSTER;
+
   const historicalMetrics = useHistoricalMetrics(location, {
     design: fullDesigners.map(d => ({
       name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, ratio: d.ratio,
@@ -3569,6 +3580,16 @@ export function SchedulePage({
         mgrTotalHours: settings.mgrTotalHours[m.id],
       };
     }),
+    // Resin is Utah-only — its roster lives in the same schedule-settings row
+    // as Utah's design/preservation/fulfillment rosters.
+    resin: (location === 'Utah' ? resinRoster : []).map(m => ({
+      name: m.name, payType: m.payType, hourlyRate: m.hourlyRate, annualSalary: m.annualSalary, ratio: m.ratio,
+      isManager: !!m.isManager,
+      role: m.role ?? 'specialist',
+      scheduledHours: Object.fromEntries(
+        Object.entries(settings.resinHours ?? {}).map(([week, byMember]) => [week, byMember[m.id] ?? 0])
+      ),
+    })),
   });
   const hasAnyRates = canViewCPO && [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
     const anyM = m as {rate?: number; hourlyRate?: number; annualSalary?: number; payType?: string};
@@ -4961,7 +4982,10 @@ export function SchedulePage({
       )}
 
       {dept === 'resin' && (
-        <ResinPage />
+        <>
+        <DeptKPIBar dept="resin" location="Utah" metrics={historicalMetrics} showCPO={hasAnyRates} />
+        <ResinPage canViewCPO={canViewCPO} />
+        </>
       )}
       {dept === 'master' && (
         <>
@@ -5000,6 +5024,7 @@ export function SchedulePage({
           designSchedule={schedule}
           presHours={settings.presHours}
           ffHours={settings.ffHours}
+          resinHours={settings.resinHours}
           designRoster={settings.designRoster}
           presRoster={settings.presRoster}
           ffRoster={settings.ffRoster}
