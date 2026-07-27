@@ -55,6 +55,9 @@ export interface PeriodMetrics {
   design:        DeptMetrics;
   preservation:  DeptMetrics;
   fulfillment:   DeptMetrics;
+  // Resin is a separate product line with its own standalone KPI — computed
+  // here but never folded into combinedRatio/combinedCPO below.
+  resin:         DeptMetrics;
   combinedRatio: number | null;
   combinedCPO:   number | null;
   combinedGoalRatio: number | null;
@@ -78,6 +81,9 @@ const ROLE_RATIOS: Record<string, Record<string, number>> = {
   design:       RATIO_TARGETS.Design,
   preservation: RATIO_TARGETS.Preservation,
   fulfillment:  RATIO_TARGETS.Fulfillment,
+  // team_member_week_actuals stores resin rows as 'Resin' (capitalized) —
+  // the other three departments store lowercase.
+  Resin:        RATIO_TARGETS.Resin,
 };
 
 function isoDate(d: Date): string {
@@ -264,13 +270,14 @@ function buildPeriod(
   rows: ActualRow[],
   weekStart: string,
   weekEnd: string,
-  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] },
-  payrollByDept: { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap },
+  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[]; resin: RosterMember[] },
+  payrollByDept: { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; resin: PayrollMap; ga: PayrollMap },
   location: string
 ): PeriodMetrics {
   const design       = computeActualDeptMetrics(rows, 'design',       weekStart, weekEnd, rosters.design,       payrollByDept.design,       location);
   const preservation = computeActualDeptMetrics(rows, 'preservation', weekStart, weekEnd, rosters.preservation, payrollByDept.preservation, location);
   const fulfillment  = computeActualDeptMetrics(rows, 'fulfillment',  weekStart, weekEnd, rosters.fulfillment,  payrollByDept.fulfillment,  location);
+  const resin        = computeActualDeptMetrics(rows, 'Resin',        weekStart, weekEnd, rosters.resin,        payrollByDept.resin,        location);
 
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
@@ -289,7 +296,7 @@ function buildPeriod(
   const anyActual = [...design.actualPayroll, ...preservation.actualPayroll, ...fulfillment.actualPayroll].length > 0;
 
   return {
-    design, preservation, fulfillment,
+    design, preservation, fulfillment, resin,
     combinedRatio:     totalOrders > 0 && totalHours > 0 ? totalHours / totalOrders : null,
     combinedCPO,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) / gRatios.length : null,
@@ -302,17 +309,18 @@ function buildPeriod(
 function buildGoalPeriod(
   weekStart: string,
   weekEnd: string,
-  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] }
+  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[]; resin: RosterMember[] }
 ): PeriodMetrics {
   const design       = computeScheduledDeptGoal('design',       weekStart, weekEnd, rosters.design);
   const preservation = computeScheduledDeptGoal('preservation', weekStart, weekEnd, rosters.preservation);
   const fulfillment  = computeScheduledDeptGoal('fulfillment',  weekStart, weekEnd, rosters.fulfillment);
+  const resin        = computeScheduledDeptGoal('Resin',        weekStart, weekEnd, rosters.resin);
 
   const gRatios = [design.goalRatio, preservation.goalRatio, fulfillment.goalRatio].filter(r => r !== null) as number[];
   const gCpos   = [design.goalCPO,   preservation.goalCPO,   fulfillment.goalCPO  ].filter(c => c !== null) as number[];
 
   return {
-    design, preservation, fulfillment,
+    design, preservation, fulfillment, resin,
     combinedRatio: null, combinedCPO: null,
     combinedGoalRatio: gRatios.length > 0 ? gRatios.reduce((a, b) => a + b, 0) : null,
     combinedGoalCPO:   gCpos.length   > 0 ? gCpos.reduce((a, b) => a + b, 0)   : null,
@@ -356,20 +364,20 @@ async function fetchPayrollForPeriod(
 
 export function useHistoricalMetrics(
   location: 'Utah' | 'Georgia',
-  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[] }
+  rosters: { design: RosterMember[]; preservation: RosterMember[]; fulfillment: RosterMember[]; resin: RosterMember[] }
 ): HistoricalMetrics {
   const [rows,    setRows]    = useState<ActualRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Payroll maps per dept per period
   const [payroll, setPayroll] = useState<{
-    thisMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
-    lastMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
-    lastWeek:   { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; ga: PayrollMap };
+    thisMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; resin: PayrollMap; ga: PayrollMap };
+    lastMonth:  { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; resin: PayrollMap; ga: PayrollMap };
+    lastWeek:   { design: PayrollMap; preservation: PayrollMap; fulfillment: PayrollMap; resin: PayrollMap; ga: PayrollMap };
   }>({
-    thisMonth:  { design: {}, preservation: {}, fulfillment: {}, ga: {} },
-    lastMonth:  { design: {}, preservation: {}, fulfillment: {}, ga: {} },
-    lastWeek:   { design: {}, preservation: {}, fulfillment: {}, ga: {} },
+    thisMonth:  { design: {}, preservation: {}, fulfillment: {}, resin: {}, ga: {} },
+    lastMonth:  { design: {}, preservation: {}, fulfillment: {}, resin: {}, ga: {} },
+    lastWeek:   { design: {}, preservation: {}, fulfillment: {}, resin: {}, ga: {} },
   });
 
   useEffect(() => {
@@ -387,8 +395,8 @@ export function useHistoricalMetrics(
     const lastMonth = getMonthBounds(-1);
     const lastWeekStart = isoDate(getMondayDate(-1));
     const lastWeekEnd   = isoDate(new Date(new Date(lastWeekStart + 'T12:00:00').getTime() + 6 * 86400000));
-    const depts = ['Design', 'Preservation', 'Fulfillment'] as const;
-    const deptKeys = ['design', 'preservation', 'fulfillment'] as const;
+    const depts = ['Design', 'Preservation', 'Fulfillment', 'Resin'] as const;
+    const deptKeys = ['design', 'preservation', 'fulfillment', 'resin'] as const;
 
     Promise.all([
       // thisMonth
@@ -402,9 +410,9 @@ export function useHistoricalMetrics(
       fetchPayrollForPeriod(location, 'G&A', lastWeekStart, lastWeekEnd).then(m => ({ period: 'lastWeek', dept: 'ga', map: m })),
     ]).then(results => {
       const next = {
-        thisMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
-        lastMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
-        lastWeek:   { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, ga: {} as PayrollMap },
+        thisMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, resin: {} as PayrollMap, ga: {} as PayrollMap },
+        lastMonth:  { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, resin: {} as PayrollMap, ga: {} as PayrollMap },
+        lastWeek:   { design: {} as PayrollMap, preservation: {} as PayrollMap, fulfillment: {} as PayrollMap, resin: {} as PayrollMap, ga: {} as PayrollMap },
       };
       results.forEach(r => {
         (next[r.period as keyof typeof next] as Record<string, PayrollMap>)[r.dept] = r.map;

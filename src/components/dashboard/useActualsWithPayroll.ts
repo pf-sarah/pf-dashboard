@@ -97,7 +97,10 @@ export function useActualsWithPayroll(location: 'Utah' | 'Georgia') {
   // Get weekly cost per dept including G&A and salary managers
   function getWeekCosts(weekOf: string): WeekCost[] {
     const costs: WeekCost[] = [];
-    const depts = ['Design', 'Preservation', 'Fulfillment', 'G&A'];
+    // Resin's own labor cost is included here (for its standalone CPO display)
+    // but intentionally excluded from getWeekCPO's blended-CPO loop below —
+    // Resin is a separate product line, not part of the frame-building CPO.
+    const depts = ['Design', 'Preservation', 'Fulfillment', 'G&A', 'Resin'];
 
     // From weekly labor upload
     const weekRows = laborRows.filter(r => r.week_of === weekOf);

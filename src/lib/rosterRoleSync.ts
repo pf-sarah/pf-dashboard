@@ -20,6 +20,7 @@ const DEPT_FOR_ROSTER_KEY: Record<string, string> = {
   designRoster: 'Design',
   presRoster:   'Preservation',
   ffRoster:     'Fulfillment',
+  resinRoster:  'Resin',
 };
 
 const MANAGER_TITLE_RE = /manager|head of|director/i;
@@ -65,6 +66,9 @@ export async function syncRosterRoles(supabase: SupabaseClient): Promise<RosterR
 
   for (const row of rosterRows ?? []) {
     const dept   = DEPT_FOR_ROSTER_KEY[row.key];
+    // resinRoster is stored as an array (not an id-keyed object like the other
+    // three rosters) — Object.values() still yields its elements by reference,
+    // so mutating `member` below and re-saving `roster` works for both shapes.
     const roster = row.value as Record<string, RosterMemberRow>;
     let changed  = false;
 

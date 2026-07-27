@@ -52,25 +52,6 @@ export async function GET(req: NextRequest) {
       result.teamActuals = data ?? [];
     }
 
-    // Resin actuals — stored in team_member_week_actuals with department='Resin'
-    const dept = req.nextUrl.searchParams.get('dept');
-    if (dept === 'resin') {
-      const { data, error } = await supabase
-        .from('team_member_week_actuals')
-        .select('week_of, member_name, actual_hours, actual_orders')
-        .eq('department', 'Resin')
-        .gte('week_of', sinceIso)
-        .order('week_of', { ascending: true });
-      if (error) throw error;
-      return NextResponse.json({ actuals: (data ?? []).map(r => ({
-        weekOf: r.week_of,
-        memberId: r.member_name,
-        memberName: r.member_name,
-        hours: r.actual_hours,
-        units: r.actual_orders,
-      })) });
-    }
-
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
@@ -86,11 +67,13 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as Record<string, unknown>;
   const { type, location, weekOf } = body as { type: string; location: string; weekOf: string };
+  const department = (body as { department?: string }).department;
 
-  // Enforce 31-day edit window
+  // Enforce edit window — Resin gets a longer window since its queue-based
+  // turnaround means actuals often get entered further after the fact.
   const weekDate = new Date(weekOf + 'T12:00:00');
   const daysDiff = (Date.now() - weekDate.getTime()) / (1000 * 60 * 60 * 24);
-  const editWindowDays = type === 'resin' ? 62 : 31;
+  const editWindowDays = department === 'Resin' ? 62 : 31;
   if (daysDiff > editWindowDays) {
     return NextResponse.json({ error: `Cannot edit actuals older than ${editWindowDays} days` }, { status: 403 });
   }
@@ -117,24 +100,6 @@ export async function POST(req: NextRequest) {
           member_name: memberName,
           actual_hours: actualHours,
           actual_orders: actualOrders,
-          entered_by: userId,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'location,department,week_of,member_name' });
-      if (error) throw error;
-      return NextResponse.json({ ok: true });
-    }
-
-    if (type === 'resin') {
-      const { memberName, actualHours, actualUnits } = body as {
-        memberName: string; actualHours: number; actualUnits: number;
-      };
-      const { error } = await supabase
-        .from('team_member_week_actuals')
-        .upsert({
-          location: 'Utah', department: 'Resin', week_of: weekOf,
-          member_name: memberName,
-          actual_hours: actualHours,
-          actual_orders: actualUnits,
           entered_by: userId,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'location,department,week_of,member_name' });
