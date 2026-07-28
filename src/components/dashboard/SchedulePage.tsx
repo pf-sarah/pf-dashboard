@@ -9,7 +9,7 @@ import { HistoricalsSection } from './HistoricalsSection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
 import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate } from '@/lib/weekDates';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate, weeksUntilEndOfYear } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -1418,6 +1418,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const [presInputMode, setPresInputMode] = useState<InputMode>('hours');
   const [activePresTab, setActivePresTab] = useState<'weekly' | '52week'>('weekly');
   const [presThisWeekOffset, setPresThisWeekOffset] = useState(0);
+  const maxPresThisWeekOffset = weeksUntilEndOfYear();
 
   // Date range for the 7-day delivery estimates
   const dateFrom = presSettings.dateFrom ?? mondayIso;
@@ -1629,7 +1630,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   // Build 5 weekdays starting from the loaded dateFrom
   const fiveDays = (() => {
     const days: { iso: string; utahEst: number; gaEst: number; utahDefault: number; gaDefault: number; label: string; dateStr: string }[] = [];
-    // Use presThisWeekOffset to support toggling forward up to 4 weeks
+    // Use presThisWeekOffset to support toggling forward through the end of the year
     const _today = new Date();
     _today.setHours(0, 0, 0, 0);
     const _dow = _today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
@@ -2051,7 +2052,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
                   <InputModeToggle mode={presInputMode} onChange={setPresInputMode} unitLabel="Frames" />
                   <button onClick={() => setPresThisWeekOffset(Math.max(0, presThisWeekOffset - 1))} disabled={presThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-                  <button onClick={() => setPresThisWeekOffset(Math.min(4, presThisWeekOffset + 1))} disabled={presThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                  <button onClick={() => setPresThisWeekOffset(Math.min(maxPresThisWeekOffset, presThisWeekOffset + 1))} disabled={presThisWeekOffset >= maxPresThisWeekOffset} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                 </div>
               </div>
               <div className="overflow-x-auto">
@@ -2482,6 +2483,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   const [ffTab,      setFfTab]      = useState<'thisweek' | 'schedule' | 'historicals'>('thisweek');
   const [ffInputMode, setFfInputMode] = useState<InputMode>('hours');
   const [ffThisWeekOffset, setFfThisWeekOffset] = useState(0);
+  const maxFfThisWeekOffset = weeksUntilEndOfYear();
   const [ffDailyHours, setFfDailyHours] = useState<Record<string, number[]>>(ffDailyHoursProp ?? {});
   useEffect(() => { if (ffDailyHoursProp && Object.keys(ffDailyHoursProp).length > 0) setFfDailyHours(ffDailyHoursProp); }, [JSON.stringify(ffDailyHoursProp)]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pre-populate daily hours from weekly schedule on first load
@@ -2657,7 +2659,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                 {ffHasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
                 <InputModeToggle mode={ffInputMode} onChange={setFfInputMode} unitLabel="Frames" />
                 <button onClick={() => setFfThisWeekOffset(Math.max(0, ffThisWeekOffset - 1))} disabled={ffThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-                <button onClick={() => setFfThisWeekOffset(Math.min(4, ffThisWeekOffset + 1))} disabled={ffThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                <button onClick={() => setFfThisWeekOffset(Math.min(maxFfThisWeekOffset, ffThisWeekOffset + 1))} disabled={ffThisWeekOffset >= maxFfThisWeekOffset} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -3621,6 +3623,7 @@ export function SchedulePage({
   const [goalUnit, setGoalUnit] = useState<InputMode>('output');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
+  const maxDesignThisWeekOffset = weeksUntilEndOfYear();
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
   const [presDailyHours, setPresDailyHours] = useState<Record<string, number[]>>(settings.presDailyHours ?? {});
   const [presCheckHours, setPresCheckHours] = useState<Record<string, number[]>>(settings.presCheckHours ?? {});
@@ -4436,7 +4439,7 @@ export function SchedulePage({
                     {hasRates && <span className="text-xs text-slate-400 mr-2">CPO shown when rate is set</span>}
                     <InputModeToggle mode={designInputMode} onChange={setDesignInputMode} unitLabel="Frames" />
                     <button onClick={() => setDesignThisWeekOffset(Math.max(0, designThisWeekOffset - 1))} disabled={designThisWeekOffset === 0} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-                    <button onClick={() => setDesignThisWeekOffset(Math.min(4, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= 4} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
+                    <button onClick={() => setDesignThisWeekOffset(Math.min(maxDesignThisWeekOffset, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= maxDesignThisWeekOffset} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
                 </div>
                 {(() => {
