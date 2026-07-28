@@ -3956,8 +3956,8 @@ export function SchedulePage({
     // gap just because the ramp math used its higher actual internally.
     const frameGap    = baseCapacity.map((f, w) => Math.max(0, requiredCapacity[w] - f));
     const requiredHours = baseHours.map((h, w) => h + frameGap[w] * hoursPerFrame[w]);
-    const thisWeekTarget      = requiredCapacity[0] ?? 0;
-    const thisWeekTargetHours = requiredHours[0] ?? 0;
+    const thisWeekTarget      = Math.round(requiredCapacity[0] ?? 0);
+    const thisWeekTargetHours = Math.round(requiredHours[0] ?? 0);
 
     return {
       novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
