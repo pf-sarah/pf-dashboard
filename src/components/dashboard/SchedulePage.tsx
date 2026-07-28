@@ -3626,6 +3626,7 @@ export function SchedulePage({
   const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
   const [goalUnit, setGoalUnit] = useState<InputMode>('output');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
+  const [showDoneCohorts, setShowDoneCohorts] = useState(false);
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
   const maxDesignThisWeekOffset = weeksUntilEndOfYear();
   const [designDailyHours, setDesignDailyHours] = useState<Record<string, number[]>>(settings.designDailyHours ?? {});
@@ -3831,6 +3832,41 @@ export function SchedulePage({
     });
     return map;
   }, [teamActuals]);
+
+  // ── Clocked-vs-scheduled hours trend ────────────────────────────────────────
+  // For weeks that have BOTH a schedule entered (settings.designHours) and actual
+  // hours logged (teamActuals), how does the team's real clocked time compare to
+  // what was scheduled? Used only to widen the Future Turnaround estimate into a
+  // range (best case = as-scheduled, worst case = trend-adjusted) — informational,
+  // not fed into the capacity-goal ramp math, since the sample is still thin.
+  const hoursTrendRatio = useMemo(() => {
+    const scheduledByWeek: Record<string, number> = {};
+    Object.values(settings.designHours).forEach(perWeek => {
+      Object.entries(perWeek ?? {}).forEach(([weekOf, hrs]) => {
+        scheduledByWeek[weekOf] = (scheduledByWeek[weekOf] ?? 0) + (hrs ?? 0);
+      });
+    });
+    const actualByWeek: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'design').forEach(r => {
+      actualByWeek[r.week_of] = (actualByWeek[r.week_of] ?? 0) + (r.actual_hours ?? 0);
+    });
+    const ratios = Object.keys(actualByWeek)
+      .filter(w => (scheduledByWeek[w] ?? 0) > 0)
+      .map(w => actualByWeek[w] / scheduledByWeek[w]);
+    if (ratios.length === 0) return { ratio: null as number | null, sampleWeeks: 0 };
+    return { ratio: ratios.reduce((s, r) => s + r, 0) / ratios.length, sampleWeeks: ratios.length };
+  }, [settings.designHours, teamActuals]);
+
+  // Same FIFO simulation as futureTurnarounds, but with capacity scaled down by the
+  // clocked-hours trend — only meaningfully different when the team tends to log
+  // fewer hours than scheduled (ratio < 1), which stretches turnaround further than
+  // the as-scheduled projection above shows.
+  const futureTurnaroundsTrendAdjusted = useMemo(() => {
+    const { ratio } = hoursTrendRatio;
+    if (ratio === null) return null;
+    const frameCapacity = weeklyTotals.map(t => t.totalFrames * ratio);
+    return simulateDesignTurnarounds(designableQueue, graduatingCohorts, frameCapacity);
+  }, [designableQueue, graduatingCohorts, weeklyTotals, hoursTrendRatio]);
 
   // ── November capacity goal ───────────────────────────────────────────────────
   // Stretch goal: design-only turnaround should be back inside
@@ -4358,7 +4394,7 @@ export function SchedulePage({
                   ) : over ? (
                     <>
                       <p className={`text-xs font-medium ${textColor}`}>
-                        {gap} wk{gap !== 1 ? 's' : ''} over the {DESIGN_TARGET_MAX}-wk ceiling as scheduled — needs to ramp up to ~{goalUnit === 'output' ? capacityGoal.thisWeekTarget : capacityGoal.thisWeekTargetHours}{goalUnit === 'output' ? 'f' : 'h'} this week, tapering down toward the current pace as the backlog clears through November.
+                        {gap} wk{gap !== 1 ? 's' : ''} over the {DESIGN_TARGET_MAX}-wk ceiling as scheduled — needs to ramp up to ~{Math.round(goalUnit === 'output' ? capacityGoal.thisWeekTarget : capacityGoal.thisWeekTargetHours)}{goalUnit === 'output' ? 'f' : 'h'} this week, tapering down toward the current pace as the backlog clears through November.
                       </p>
                       {capacityGoal.firstOverWeek !== null && (
                         <p className="text-xs text-slate-400">
@@ -4730,11 +4766,19 @@ export function SchedulePage({
                   Includes fixed {PRESERVATION_WEEKS}-week preservation pipeline.
                 </p>
                 <p className="text-xs text-amber-600 mb-4">Under 8 weeks total = overstaffed.</p>
+                {hoursTrendRatio.ratio !== null && hoursTrendRatio.ratio < 0.99 && (
+                  <p className="text-xs text-slate-400 mb-4 -mt-2">
+                    Based on the last {hoursTrendRatio.sampleWeeks} wk{hoursTrendRatio.sampleWeeks !== 1 ? 's' : ''} of clocked hours, {location} design has logged ~{Math.round(hoursTrendRatio.ratio * 100)}% of scheduled hours —
+                    weeks below show a range where the higher end reflects turnaround if that pace continues instead of the full schedule.
+                  </p>
+                )}
                 <div className="space-y-2.5">
                   {futureTurnarounds.map((designWait, w) => {
                     const total       = designWait;
                     const overstaffed = total !== null && total < 8;
                     const { bar, text, label } = turnaroundColors(total, overstaffed);
+                    const adjustedTotal = futureTurnaroundsTrendAdjusted?.[w] ?? null;
+                    const showAdjusted  = adjustedTotal !== null && total !== null && adjustedTotal > total;
                     const weekIso = isoMonday(w);
                     const _weVal = weeklyEstimates[weekIso];
                     const hasOverride = _weVal !== undefined;
@@ -4783,7 +4827,19 @@ export function SchedulePage({
                                 <div className={`${bar} flex-1`} />
                               </div>
                             </div>
-                            <span className={`text-xs font-medium w-44 text-right shrink-0 ${text}`}>{label}</span>
+                            <span className={`text-xs font-medium w-44 text-right shrink-0 ${text}`}>
+                              {showAdjusted ? label.replace(/^~\d+ wks/, `~${total}–${adjustedTotal} wks`) : label}
+                              {showAdjusted && (
+                                <span className="block text-[10px] text-slate-400 font-normal" title="Upper end assumes the recent clocked-hours pace instead of the full schedule">
+                                  at recent clocked pace
+                                </span>
+                              )}
+                              {adjustedTotal === null && total !== null && hoursTrendRatio.ratio !== null && hoursTrendRatio.ratio < 0.99 && (
+                                <span className="block text-[10px] text-red-400 font-normal" title="At the recent clocked-hours pace, this cohort wouldn't clear within 52 weeks">
+                                  could exceed 52 wks at recent pace
+                                </span>
+                              )}
+                            </span>
                           </>
                         ) : (
                           <span className="text-xs text-red-600 italic">queue not cleared in 52 wks</span>
@@ -4802,12 +4858,23 @@ export function SchedulePage({
               </div>
 
               <div className="bg-white border border-slate-100 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100">
-                  <h2 className="text-sm font-semibold text-slate-700">Weeks remaining until design — past intake cohorts</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    For bouquets already received: estimated weeks from today until their cohort reaches the front of the FIFO design queue.
-                    Based on {location} designable queue of {designableQueue.toLocaleString()} orders and scheduled capacity.
-                  </p>
+                <div className="px-5 py-3 border-b border-slate-100 flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-700">Weeks remaining until design — past intake cohorts</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      For bouquets already received: estimated weeks from today until their cohort reaches the front of the FIFO design queue.
+                      Based on {location} designable queue of {designableQueue.toLocaleString()} orders and scheduled capacity.
+                    </p>
+                  </div>
+                  {(() => {
+                    const doneCount = historicalRemaining.filter(row => 'alreadyDone' in row && row.alreadyDone).length;
+                    return doneCount > 0 ? (
+                      <button onClick={() => setShowDoneCohorts(v => !v)}
+                        className="shrink-0 text-xs px-2.5 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 whitespace-nowrap">
+                        {showDoneCohorts ? `Hide ${doneCount} completed ▲` : `Show ${doneCount} completed ▼`}
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
                 <div className="overflow-x-auto">
                     <table className="min-w-full text-xs">
@@ -4822,7 +4889,7 @@ export function SchedulePage({
                         </tr>
                       </thead>
                       <tbody>
-                        {historicalRemaining.map((row, i) => {
+                        {historicalRemaining.filter(row => showDoneCohorts || !('alreadyDone' in row && row.alreadyDone)).map((row, i) => {
                           const inPres    = 'inPreservation' in row && row.inPreservation;
                           const done      = 'alreadyDone'   in row && row.alreadyDone;
                           const weeksLeft = row.weeksFromNow;
