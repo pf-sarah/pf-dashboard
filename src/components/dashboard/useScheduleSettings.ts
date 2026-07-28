@@ -54,6 +54,13 @@ export interface ScheduleSettings {
   ffRoster:           TeamRoster;
   masterAvailability: MasterAvailability;
   avgIntake:          number;
+  // Manager-editable ceiling on the November capacity goal's ramp target
+  // (e.g. production support isn't onboarded yet, so the ramp can't ask for
+  // more than this many frames/wk before `capacityCapUntil`). Null disables
+  // the cap entirely. Per-location, like other settings here — same default
+  // applies to both until a manager overrides one.
+  capacityCap:        number | null;
+  capacityCapUntil:   string | null;
   weeklyEstimates:    Record<string, { ut: number; ga: number }>;
   // Per-week multiplier applied to same-week-last-year intake to auto-project
   // future "bouquets received" when no manual weeklyEstimates override exists.
@@ -78,6 +85,8 @@ const DEFAULTS: ScheduleSettings = {
   ffHours: {}, ffRoster: {},
   masterAvailability: {},
   avgIntake: 45,
+  capacityCap: 100,
+  capacityCapUntil: null,
   weeklyEstimates: {},
   weeklyMultipliers: {},
   mgrTotalHours: {},
@@ -93,7 +102,7 @@ const DEFAULTS: ScheduleSettings = {
 
 const KEYS: (keyof ScheduleSettings)[] = [
   'designHours','designRoster','presHours','presRoster','presSettings',
-  'ffHours','ffRoster','masterAvailability','avgIntake','weeklyEstimates','weeklyMultipliers',
+  'ffHours','ffRoster','masterAvailability','avgIntake','capacityCap','capacityCapUntil','weeklyEstimates','weeklyMultipliers',
   'mgrTotalHours','mgrTotalDailyHours','designDailyHours','ffDailyHours','presDailyHours','presCheckHours',
   'resinRoster','resinHours','resinDailyHours',
 ];
