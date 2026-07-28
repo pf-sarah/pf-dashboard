@@ -24,6 +24,18 @@ export function getMonthKey(offsetWeeks: number): string {
   return getMondayDate(offsetWeeks).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+// Offset (in weeks from "this week") of the week containing Dec 31 of the
+// current year — used to cap "This Week" navigation at the end of the year
+// instead of an arbitrary fixed number of weeks.
+export function weeksUntilEndOfYear(): number {
+  const now = getMondayDate(0);
+  const dec31 = new Date(now.getFullYear(), 11, 31);
+  const dec31Monday = isoMondayFromDate(dec31);
+  return Math.max(0, Math.round(
+    (new Date(dec31Monday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+  ));
+}
+
 // Converts an arbitrary Date to the ISO date of the Monday of its week.
 export function isoMondayFromDate(d: Date): string {
   const day = d.getDay();
