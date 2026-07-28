@@ -35,7 +35,7 @@ interface WeekSchedule {
 
 const WEEKS              = 52;
 const WINDOW             = 8;
-const PRESERVATION_WEEKS = 6;
+const PRESERVATION_WEEKS = 8;
 // Stretch-goal turnaround bands. Fulfillment always adds FULFILLMENT_WEEKS
 // on top of the design-only figure, so the two bands are meant to line up:
 // 8 + 2 = 10 and 14 + 2 = 16.
@@ -3615,6 +3615,10 @@ export function SchedulePage({
 
   const avgIntake = settings.avgIntake;
   function setAvgIntake(v: number) { update('avgIntake', v); }
+  const capacityCap = settings.capacityCap;
+  function setCapacityCap(v: number | null) { update('capacityCap', v); }
+  const capacityCapUntil = settings.capacityCapUntil;
+  function setCapacityCapUntil(v: string | null) { update('capacityCapUntil', v); }
 
   const [showRoster,   setShowRoster]  = useState(false);
   const [weekOffset,   setWeekOffset]  = useState(0);
@@ -3859,6 +3863,22 @@ export function SchedulePage({
     // practice this only ever differs for the current/just-passed week — future
     // weeks have no actuals yet).
     const simCapacity = baseCapacity.map((f, w) => designActualFramesByWeek[isoMonday(w)] ?? f);
+
+    // ── Manager-editable capacity cap ────────────────────────────────────────
+    // Production support isn't fully onboarded yet, so the ramp target can't
+    // realistically ask for more than `capacityCap` frames/wk until the cutoff
+    // date (defaults to the next end-of-August). Weeks at/after the cutoff are
+    // left unconstrained so the solver can still ask for a catch-up ramp once
+    // that capacity comes online. Setting the cap to null disables this.
+    let defaultCapUntil = new Date(now.getFullYear(), 7, 31);
+    if (defaultCapUntil < now) defaultCapUntil = new Date(now.getFullYear() + 1, 7, 31);
+    const capUntilDate = capacityCapUntil ? new Date(capacityCapUntil + 'T12:00:00') : defaultCapUntil;
+    const weeksToCapUntil = Math.max(0, Math.round(
+      (capUntilDate.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
+    ));
+    function withCap(w: number, total: number): number {
+      return (capacityCap != null && w < weeksToCapUntil) ? Math.min(total, capacityCap) : total;
+    }
     const projected     = simulateDesignTurnarounds(designableQueue, graduatingCohorts, simCapacity);
     const atNovemberIdx = Math.min(weeksToNovember, WEEKS - 1);
     const projectedAtNovember = projected[atNovemberIdx] ?? null;
@@ -3888,7 +3908,7 @@ export function SchedulePage({
       return Math.max(0, peak * (1 - w / lastCheckableWeek));
     }
     function worstOverageWithRamp(peak: number): number {
-      return worstOverage(simCapacity.map((f, w) => f + rampExtra(peak, w)));
+      return worstOverage(simCapacity.map((f, w) => withCap(w, f + rampExtra(peak, w))));
     }
     let peak = 0;
     if (worstOverage(simCapacity) > 0) {
@@ -3901,8 +3921,14 @@ export function SchedulePage({
       peak = Math.ceil(hi);
     }
 
-    const requiredCapacity = simCapacity.map((f, w) => f + Math.round(rampExtra(peak, w)));
+    const requiredCapacity = simCapacity.map((f, w) => withCap(w, f + Math.round(rampExtra(peak, w))));
     const onTrack = peak === 0 && worstOverage(simCapacity) !== Infinity;
+    // True once the cap actually held the ramp below what the uncapped solve
+    // would have asked for in at least one pre-cutoff week — i.e. the goal
+    // isn't fully achievable within the current capacity limit.
+    const cappedBelowNeed = capacityCap != null && simCapacity.some((f, w) =>
+      w < weeksToCapUntil && (f + rampExtra(peak, w)) > capacityCap
+    );
 
     // First intake week (as currently scheduled/actual, no ramp) whose projected
     // turnaround breaks the ceiling — a pointer back to where in the Weekly Schedule
@@ -3936,8 +3962,9 @@ export function SchedulePage({
     return {
       novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
       baseCapacity, requiredCapacity, onTrack, baseHours, requiredHours, firstOverWeek,
+      capUntilDate, cappedBelowNeed,
     };
-  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek]);
+  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek, capacityCap, capacityCapUntil]);
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -4278,6 +4305,24 @@ export function SchedulePage({
                 <p className="text-xs text-slate-400 mt-0.5">
                   Stretch goal: {DESIGN_TARGET_MIN}–{DESIGN_TARGET_MAX} wks design-only ({TOTAL_TARGET_MIN}–{TOTAL_TARGET_MAX} wks incl. ~{FULFILLMENT_WEEKS}-wk fulfillment), held all year — not just at one deadline.
                 </p>
+                <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1.5">
+                  <input type="checkbox" checked={capacityCap != null}
+                    onChange={e => setCapacityCap(e.target.checked ? 100 : null)}
+                    className="accent-slate-500" />
+                  <span>Cap ramp target at</span>
+                  <input type="number" min={0}
+                    value={capacityCap ?? 100}
+                    disabled={capacityCap == null}
+                    onChange={e => setCapacityCap(parseInt(e.target.value) || 0)}
+                    className="w-14 border border-slate-200 rounded px-1 py-0.5 text-slate-600 disabled:bg-slate-50 disabled:text-slate-300" />
+                  <span>f/wk through</span>
+                  <input type="date"
+                    value={capacityCapUntil ?? isoMondayFromDate(capacityGoal.capUntilDate)}
+                    disabled={capacityCap == null}
+                    onChange={e => setCapacityCapUntil(e.target.value || null)}
+                    className="border border-slate-200 rounded px-1 py-0.5 text-slate-600 disabled:bg-slate-50 disabled:text-slate-300" />
+                  <span>(production support ramp-up)</span>
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs text-slate-500 whitespace-nowrap">
@@ -4318,6 +4363,11 @@ export function SchedulePage({
                       {capacityGoal.firstOverWeek !== null && (
                         <p className="text-xs text-slate-400">
                           As scheduled, turnaround first breaks {DESIGN_TARGET_MAX} wks for orders arriving {getWeekLabel(capacityGoal.firstOverWeek)} — check Weekly Schedule capacity around then (a common cause: designer hours not yet entered that far out).
+                        </p>
+                      )}
+                      {capacityGoal.cappedBelowNeed && (
+                        <p className="text-xs text-amber-700">
+                          Ramp target is capped at {capacityCap}f/wk through {capacityGoal.capUntilDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (production support isn&apos;t ramped up yet) — the November goal may not be fully reachable until that cap lifts.
                         </p>
                       )}
                     </>
