@@ -1,5 +1,5 @@
 'use client';
-import ResinPage, { DEFAULT_RESIN_ROSTER, type ResinMember } from './ResinPage';
+import ResinPage from './ResinPage';
 import { RipplingUpload } from './RipplingUpload';
 import { EmployeeAutocomplete } from './EmployeeAutocomplete';
 import type { RipplingEmployee } from './EmployeeAutocomplete';
@@ -7,7 +7,11 @@ import type { RipplingEmployee } from './EmployeeAutocomplete';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
 import { DisapprovalRateSection } from './DisapprovalRateSection';
-import { useHistoricalMetrics } from './useHistoricalMetrics';
+import {
+  useKpiMetrics, getWindowsByType, selectLocation, selectDept, selectEstimated,
+  fmtRatio, fmtCPO, fmtUnits, DEPT_LABELS, DEPT_PRODUCTION_UNIT,
+  type KpiDept, type KpiLocation, type KpiState,
+} from '@/hooks/useKpiMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate, weeksUntilEndOfYear } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
@@ -1856,20 +1860,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
         <div className="space-y-4">
 
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Preservation queue</p>
-              <p className="text-xs text-slate-400 mb-2">Bouquet Received → In Progress</p>
-              <div className="flex items-center gap-2">
-                <p className="text-xl font-semibold text-green-700">{countsLoading ? '…' : preservationQueue.toLocaleString()}</p>
-                <span className="text-[10px] bg-green-100 text-green-600 rounded px-1.5 py-0.5">live</span>
-              </div>
-            </div>
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
-              <p className="text-xs text-slate-400 mb-2">orders processable</p>
-              <p className="text-xl font-semibold text-slate-900">{Math.round(weeklyTotals[0] * 100) / 100} <span className="text-sm font-normal text-slate-400">orders</span></p>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white border border-slate-100 rounded-xl p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Event-date orders loaded</p>
               <p className="text-xs text-slate-400 mb-2">{dateFrom} → {dateTo}</p>
@@ -2575,40 +2566,8 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
   }
 
-  const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(0)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0);
-  const weekCost   = team.reduce((s, m) => s + (m.hours[isoMonday(0)] ?? m.defaultHrs ?? 0) * m.rate, 0);
-  const teamCPO    = weekCap > 0 && weekCost > 0 ? weekCost / weekCap : null;
-  const weeksToClr = weekCap > 0 ? Math.ceil(fulfillmentQueue / weekCap) : null;
-  const hasRates   = canViewCPO && team.some(m => m.rate > 0);
-
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Fulfillment queue</p>
-          <p className="text-xs text-slate-400 mb-2">Approved + Glued</p>
-          <div className="flex items-center gap-2">
-            <p className="text-xl font-semibold text-amber-700">{countsLoading ? '\u2026' : fulfillmentQueue.toLocaleString()}</p>
-            <span className="text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">live</span>
-          </div>
-        </div>
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
-          <p className="text-xs text-slate-400 mb-2">&nbsp;</p>
-          <p className="text-xl font-semibold text-slate-900">{Math.round(weekCap * 100) / 100} <span className="text-sm font-normal text-slate-400">orders</span></p>
-        </div>
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Team CPO</p>
-          <p className="text-xs text-slate-400 mb-2">weighted avg this week</p>
-          <p className="text-xl font-semibold text-slate-900">{teamCPO !== null ? fmt$(teamCPO) : '\u2014'}</p>
-        </div>
-        <div className="bg-white border border-slate-100 rounded-xl p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Weeks to clear queue</p>
-          <p className="text-xs text-slate-400 mb-2">at current pace</p>
-          <p className="text-xl font-semibold text-slate-900">{weeksToClr !== null ? `${weeksToClr}w` : '\u2014'}</p>
-        </div>
-      </div>
-
       <div className="flex border-b border-slate-200">
         {(['thisweek', 'schedule', 'historicals'] as const).filter(t => userRole !== 'viewer').map(t => (
           <button key={t} onClick={() => setFfTab(t)}
@@ -3268,119 +3227,60 @@ function MasterScheduleSection({ location, masterAvailability, onAvailabilityCha
   );
 }
 
-// ─── CompanyMetricsBar ────────────────────────────────────────────────────────
-
-
-function MetricCell({ label, value, sub, warn }: { label: string; value: string | null; sub?: string; warn?: string }) {
-  return (
-    <div className="flex flex-col">
-      <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">{label}</span>
-      <span className={`text-sm font-semibold ${value ? 'text-slate-800' : 'text-slate-300'}`}>
-        {value ?? '—'}
-      </span>
-      {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
-      {warn && <span className="text-[10px] text-amber-500">⚠ {warn}</span>}
-    </div>
-  );
-}
-
-function PeriodBlock({ label, metrics, goalMetrics, showCPO }: {
-  label: string;
-  metrics: { combinedRatio: number | null; combinedCPO: number | null; combinedGoalRatio?: number | null; combinedGoalCPO?: number | null; allActual?: boolean; anyActual?: boolean; design: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] }; preservation: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] }; fulfillment: { missingRates: string[]; actualPayroll?: string[]; estimatedPayroll?: string[] } };
-  goalMetrics?: { combinedGoalRatio: number | null; combinedGoalCPO: number | null } | null;
+// Monthly Ratio/CPO for one department: month-to-date actual vs. this month's
+// Expected and Goal targets — all three pulled from useKpiMetrics, the exact
+// same hook and /api/kpis formulas the All KPIs tab uses, so this card can
+// never drift out of sync with it.
+function DeptKPIBar({ dept, location, kpiState, showCPO }: {
+  dept: KpiDept;
+  location: KpiLocation;
+  kpiState: KpiState;
   showCPO: boolean;
 }) {
-  const allMissing = [...metrics.design.missingRates, ...metrics.preservation.missingRates, ...metrics.fulfillment.missingRates];
-  const uniqueMissing = [...new Set(allMissing)];
-  const gRatio = goalMetrics?.combinedGoalRatio ?? metrics.combinedGoalRatio ?? null;
-  const gCPO   = goalMetrics?.combinedGoalCPO   ?? metrics.combinedGoalCPO   ?? null;
-  const actual = metrics.combinedRatio;
-  const ratioColor = actual !== null && gRatio !== null
-    ? actual <= gRatio ? 'text-green-600' : 'text-red-500'
+  if (kpiState.loading) return null;
+  const mtdWindow = getWindowsByType(kpiState.windows, 'mtd')[0];
+  const actual   = mtdWindow ? selectDept(selectLocation(mtdWindow, location), dept) : null;
+  const expectedPeriod = selectEstimated(kpiState.estimated?.current, location, 'expected');
+  const goalPeriod     = selectEstimated(kpiState.estimated?.current, location, 'goal');
+  const expected = expectedPeriod ? selectDept(expectedPeriod, dept) : null;
+  const goal     = goalPeriod ? selectDept(goalPeriod, dept) : null;
+
+  const ratioColor = actual?.ratio != null && goal?.ratio != null
+    ? actual.ratio <= goal.ratio ? 'text-green-600' : 'text-red-500'
     : 'text-slate-800';
-  return (
-    <div className="flex flex-col gap-1 px-4 border-r border-slate-200 last:border-0">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-      <div className="flex flex-col gap-1">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-[10px] text-slate-400 uppercase tracking-wide w-8">Ratio</span>
-          <span className={`text-sm font-semibold ${ratioColor}`}>{actual !== null ? actual.toFixed(2) : '—'}</span>
-          {gRatio !== null && <span className="text-[10px] text-slate-400">/ <span className="text-green-600 font-medium">{gRatio.toFixed(2)}</span> goal</span>}
-        </div>
-        {showCPO && (
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wide w-8">CPO</span>
-            <span className="text-sm font-semibold text-slate-800">{metrics.combinedCPO !== null ? fmt$(metrics.combinedCPO) : '—'}</span>
-            {metrics.combinedCPO !== null && metrics.allActual && <span className="text-[9px] text-green-600 bg-green-50 rounded px-1 py-px">actual</span>}
-            {metrics.combinedCPO !== null && !metrics.allActual && metrics.anyActual && <span className="text-[9px] text-amber-600 bg-amber-50 rounded px-1 py-px">partial</span>}
-            {metrics.combinedCPO !== null && !metrics.anyActual && <span className="text-[9px] text-slate-400 bg-slate-100 rounded px-1 py-px">est.</span>}
-            {gCPO !== null && <span className="text-[10px] text-slate-400">/ <span className="text-green-600 font-medium">{fmt$(gCPO)}</span> goal</span>}
-            {uniqueMissing.length > 0 && metrics.combinedCPO === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
-function DeptKPIBar({ dept, location, metrics, showCPO }: {
-  dept: 'design' | 'preservation' | 'fulfillment' | 'resin';
-  location: string;
-  metrics: ReturnType<typeof import('./useHistoricalMetrics').useHistoricalMetrics>;
-  showCPO: boolean;
-}) {
-  if (metrics.loading) return null;
-  const tm = metrics.thisMonth[dept];
-  const lm = metrics.lastMonth[dept];
-  const lw = metrics.lastWeek[dept];
-  const tg = metrics.thisMonthGoal[dept];
-  const ng = metrics.nextMonthGoal[dept];
+  const columns: { label: string; d: typeof actual; labelColor: string; valueColor: string }[] = [
+    { label: 'Month to date',  d: actual,   labelColor: 'text-indigo-400', valueColor: ratioColor },
+    { label: 'Expected',       d: expected, labelColor: 'text-amber-500',  valueColor: 'text-slate-700' },
+    { label: 'Goal',           d: goal,     labelColor: 'text-green-500',  valueColor: 'text-green-700' },
+  ];
+
   return (
     <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap gap-y-3">
       <div className="pr-4 mr-2 border-r border-slate-200 shrink-0">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{dept} · {location}</p>
-        <p className="text-[10px] text-slate-400">Rolling KPIs</p>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{DEPT_LABELS[dept]} · {location}</p>
+        <p className="text-[10px] text-slate-400">Monthly KPIs</p>
       </div>
-      {[
-        { label: 'This month', d: tm, g: tg },
-        { label: 'Last month', d: lm, g: null },
-        { label: 'Last week',  d: lw, g: null },
-        { label: 'Next month goal', d: ng, g: ng },
-      ].map(({ label, d, g }) => {
-        const ratioColor = d.ratio !== null && d.goalRatio !== null
-          ? d.ratio <= d.goalRatio ? 'text-green-600' : 'text-red-500'
-          : 'text-slate-800';
-        const isGoalOnly = d.orders === 0 && d.goalRatio !== null;
-        return (
-          <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-indigo-400">{label}</span>
-            <div className="flex flex-col gap-0.5">
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-[10px] text-slate-400 w-8">Ratio</span>
-                {!isGoalOnly && <span className={`text-sm font-semibold ${ratioColor}`}>{d.ratio !== null ? d.ratio.toFixed(2) : '—'}</span>}
-                {(g ?? d).goalRatio !== null && (
-                  <span className="text-[10px] text-slate-400">
-                    {!isGoalOnly && '/ '}<span className="text-green-600 font-medium">{(g ?? d).goalRatio!.toFixed(2)}</span> goal
-                  </span>
-                )}
-              </div>
-              {showCPO && (
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[10px] text-slate-400 w-8">CPO</span>
-                  {!isGoalOnly && <span className="text-sm font-semibold text-slate-800">{d.cpo !== null ? fmt$(d.cpo) : '—'}</span>}
-                  {(g ?? d).goalCPO !== null && (
-                    <span className="text-[10px] text-slate-400">
-                      {!isGoalOnly && '/ '}<span className="text-green-600 font-medium">{fmt$((g ?? d).goalCPO!)}</span> goal
-                    </span>
-                  )}
-                  {d.missingRates.length > 0 && d.cpo === null && <span className="text-[9px] text-amber-500">⚠ rates missing</span>}
-                </div>
-              )}
-              {!isGoalOnly && d.orders > 0 && <span className="text-[10px] text-slate-400">{d.orders} orders</span>}
+      {columns.map(({ label, d, labelColor, valueColor }) => (
+        <div key={label} className="flex flex-col gap-0.5 px-4 border-r border-slate-100 last:border-0">
+          <span className={`text-[10px] font-semibold uppercase tracking-wide ${labelColor}`}>{label}</span>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-[10px] text-slate-400 w-8">Ratio</span>
+              <span className={`text-sm font-semibold ${valueColor}`}>{fmtRatio(d?.ratio ?? null)}</span>
             </div>
+            {showCPO && (
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[10px] text-slate-400 w-8">CPO</span>
+                <span className="text-sm font-semibold text-slate-800">{fmtCPO(d?.cpo ?? null)}</span>
+              </div>
+            )}
+            {label === 'Month to date' && d && d.production > 0 && (
+              <span className="text-[10px] text-slate-400">{fmtUnits(d.production)} {DEPT_PRODUCTION_UNIT[dept]}</span>
+            )}
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -3483,7 +3383,6 @@ export function SchedulePage({
     return base;
   };
   const designers: Designer[] = buildDesigners(false);
-  const fullDesigners: Designer[] = buildDesigners(true);
 
   // Merge persisted hours over defaults — schedule is array of WeekSchedule
   const schedule: WeekSchedule[] = Array.from({ length: WEEKS }, (_, w) => {
@@ -3526,74 +3425,11 @@ export function SchedulePage({
   const weeklyEstimates = settings.weeklyEstimates;
   const weeklyMultipliers = settings.weeklyMultipliers ?? {};
 
-  // ── Historical metrics for KPI bars ─────────────────────────────────────────
-  // Uses the "full" (unfiltered) rosters — includes soft-deleted members and
-  // custom additions — so past scheduled-hours/goal/CPO data for anyone who
-  // ever worked a given period stays in the historical numbers even after
-  // they're removed from the active roster.
-  const fullPresTeam = (() => {
-    const defaultTeamPres = location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM;
-    const base = defaultTeamPres.map(m => ({ ...m, isRoster: false }));
-    const defaultIds = new Set(defaultTeamPres.map(m => m.id));
-    const custom = Object.entries(settings.presRoster)
-      .filter(([id]) => !defaultIds.has(id))
-      .map(([id, r]) => ({ id, name: r.name, rate: r.rate ?? 0, ratio: r.ratio ?? 1, isManager: false, role: undefined as string | undefined, isRoster: true }));
-    return [...base, ...custom];
-  })();
-  const fullFfTeam = (() => {
-    const defaultTeamFf = location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM;
-    const base = defaultTeamFf.map(m => ({ ...m, isRoster: false }));
-    const defaultIds = new Set(defaultTeamFf.map(m => m.id));
-    const custom = Object.entries(settings.ffRoster)
-      .filter(([id]) => !defaultIds.has(id))
-      .map(([id, r]) => ({ id, name: r.name, rate: r.rate ?? 0, ratio: r.ratio ?? 1, isManager: false, role: undefined as string | undefined, isRoster: true }));
-    return [...base, ...custom];
-  })();
-  const resinRoster: ResinMember[] = Array.isArray(settings.resinRoster)
-    ? (settings.resinRoster as unknown as ResinMember[])
-    : DEFAULT_RESIN_ROSTER;
+  // Same hook/endpoint the All KPIs tab uses — the per-department Monthly KPI
+  // bars read from this so the two views can never disagree on formulas
+  // (see /api/kpis for the canonical math).
+  const kpiMetrics = useKpiMetrics();
 
-  const historicalMetrics = useHistoricalMetrics(location, {
-    design: fullDesigners.map(d => ({
-      name: d.name, payType: d.payType, hourlyRate: d.hourlyRate, annualSalary: d.annualSalary, ratio: d.ratio,
-      isManager: !!((settings.designRoster[d.id] as {isManager?:boolean})?.isManager || (d as {isManager?:boolean}).isManager),
-      role: ((settings.designRoster[d.id] as {role?:string})?.role ?? (d as {role?:string}).role ?? 'specialist') as 'specialist'|'senior'|'master',
-      scheduledHours: settings.designHours[d.id] ?? {},
-      mgrTotalHours: settings.mgrTotalHours[d.id],
-    })),
-    preservation: fullPresTeam.map(m => {
-      const r = settings.presRoster[m.id];
-      return {
-        name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
-        hourlyRate: r?.rate ?? m.rate, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
-        isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
-        role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
-        scheduledHours: settings.presHours[m.id] ?? {},
-        mgrTotalHours: settings.mgrTotalHours[m.id],
-      };
-    }),
-    fulfillment: fullFfTeam.map(m => {
-      const r = settings.ffRoster[m.id];
-      return {
-        name: r?.name ?? m.name, payType: r?.payType ?? 'hourly' as const,
-        hourlyRate: r?.rate ?? 0, annualSalary: r?.annualSalary ?? 0, ratio: r?.ratio ?? m.ratio,
-        isManager: (r as {isManager?:boolean})?.isManager ?? m.isManager,
-        role: ((r as {role?:string})?.role ?? m.role ?? 'specialist') as 'specialist'|'senior'|'master',
-        scheduledHours: settings.ffHours[m.id] ?? {},
-        mgrTotalHours: settings.mgrTotalHours[m.id],
-      };
-    }),
-    // Resin is Utah-only — its roster lives in the same schedule-settings row
-    // as Utah's design/preservation/fulfillment rosters.
-    resin: (location === 'Utah' ? resinRoster : []).map(m => ({
-      name: m.name, payType: m.payType, hourlyRate: m.hourlyRate, annualSalary: m.annualSalary, ratio: m.ratio,
-      isManager: !!m.isManager,
-      role: m.role ?? 'specialist',
-      scheduledHours: Object.fromEntries(
-        Object.entries(settings.resinHours ?? {}).map(([week, byMember]) => [week, byMember[m.id] ?? 0])
-      ),
-    })),
-  });
   const hasAnyRates = canViewCPO && [...designers, ...(location === 'Utah' ? UTAH_PRESERVATION_TEAM : GEORGIA_PRESERVATION_TEAM), ...(location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM)].some(m => {
     const anyM = m as {rate?: number; hourlyRate?: number; annualSalary?: number; payType?: string};
     return (anyM.rate ?? anyM.hourlyRate ?? 0) > 0 || (anyM.annualSalary ?? 0) > 0;
@@ -4151,20 +3987,6 @@ export function SchedulePage({
   return (
     <div className="space-y-6">
 
-      {/* ── Company KPI bar ─────────────────────────────────────────────────── */}
-      {!historicalMetrics.loading && (
-        <div className="bg-white border border-slate-100 rounded-xl px-5 py-3 flex items-center gap-0 flex-wrap gap-y-3">
-          <div className="pr-4 mr-2 border-r border-slate-200 shrink-0">
-            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Company · {location}</p>
-            <p className="text-[10px] text-slate-400">All departments combined</p>
-          </div>
-          <PeriodBlock label="This month" metrics={historicalMetrics.thisMonth} goalMetrics={historicalMetrics.thisMonthGoal} showCPO={hasAnyRates} />
-          <PeriodBlock label="Last month" metrics={historicalMetrics.lastMonth} showCPO={hasAnyRates} />
-          <PeriodBlock label="Last week"  metrics={historicalMetrics.lastWeek}  showCPO={hasAnyRates} />
-          <PeriodBlock label="Next month goal" metrics={historicalMetrics.nextMonthGoal} goalMetrics={historicalMetrics.nextMonthGoal} showCPO={hasAnyRates} />
-        </div>
-      )}
-
       {/* ── Dept tabs + Location toggle + Save indicator ────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -4231,7 +4053,7 @@ export function SchedulePage({
       {/* ── PRESERVATION dept ───────────────────────────────────────────────── */}
       {dept === 'preservation' && (
         <>
-        <DeptKPIBar dept="preservation" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
+        <DeptKPIBar dept="preservation" location={location} kpiState={kpiMetrics} showCPO={hasAnyRates} />
         <PreservationSection
           location={location}
           preservationQueue={preservationQueue}
@@ -4283,7 +4105,7 @@ export function SchedulePage({
       {/* ── FULFILLMENT dept ────────────────────────────────────────────────── */}
       {dept === 'fulfillment' && (
         <>
-        <DeptKPIBar dept="fulfillment" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
+        <DeptKPIBar dept="fulfillment" location={location} kpiState={kpiMetrics} showCPO={hasAnyRates} />
         <FulfillmentSection
           location={location}
           fulfillmentQueue={fulfillmentQueue}
@@ -4313,53 +4135,19 @@ export function SchedulePage({
       {/* ── DESIGN dept ─────────────────────────────────────────────────────── */}
       {dept === 'design' && (
         <>
-          <DeptKPIBar dept="design" location={location} metrics={historicalMetrics} showCPO={hasAnyRates} />
-          {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <DeptKPIBar dept="design" location={location} kpiState={kpiMetrics} showCPO={hasAnyRates} />
 
-            {/* Designable queue — live from dept dashboard */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Designable queue</p>
-              <p className="text-xs text-slate-400 mb-2">Ready to Frame + Almost Ready</p>
-              <div className="flex items-center gap-2">
-                <p className="text-xl font-semibold text-indigo-700">
-                  {countsLoading ? '…' : designableQueue.toLocaleString()}
-                </p>
-                <span className="text-[10px] bg-indigo-100 text-indigo-600 rounded px-1.5 py-0.5">live</span>
-              </div>
+          {/* Est. bouquets delivered — fallback intake estimate used when no
+              per-week estimate is set (see Queue & Turnaround); this is the
+              only summary card here that feeds a live calculation, so it
+              stays even with the pure-readout queue/capacity cards removed. */}
+          <div className="bg-white border border-slate-100 rounded-xl p-4 inline-flex items-center gap-3 w-fit">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Est. bouquets/week delivered</p>
+              <p className="text-xs text-slate-400">fallback when no per-week estimate set</p>
             </div>
-
-            {/* Preservation pipeline — live from dept dashboard */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Preservation pipeline</p>
-              <p className="text-xs text-slate-400 mb-2">Bouquet Received → In Progress</p>
-              <div className="flex items-center gap-2">
-                <p className="text-xl font-semibold text-green-700">
-                  {countsLoading ? '…' : preservationQueue.toLocaleString()}
-                </p>
-                <span className="text-[10px] bg-green-100 text-green-600 rounded px-1.5 py-0.5">live</span>
-              </div>
-            </div>
-
-            {/* Est. bouquets delivered — renamed and clarified */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">Est. bouquets/week delivered</p>
-              <p className="text-xs text-slate-400 mb-2">fallback when no per-week estimate set</p>
-              <input type="number" value={avgIntake} onChange={e => setAvgIntake(parseInt(e.target.value) || 0)}
-                className="w-20 border border-slate-200 rounded px-2 py-1 text-xl font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-            </div>
-
-            {/* This week capacity */}
-            <div className="bg-white border border-slate-100 rounded-xl p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400 mb-1">This week capacity</p>
-              <p className="text-xl font-semibold text-slate-900">
-                {Math.round(weeklyTotals[0].totalFrames)}
-                <span className="text-sm font-normal text-slate-400 ml-1">frames</span>
-              </p>
-              {hasRates && weeklyTotals[0].totalCPO !== null && (
-                <p className="text-xs text-amber-600 mt-1 font-medium">CPO: {fmt$(weeklyTotals[0].totalCPO)}</p>
-              )}
-            </div>
+            <input type="number" value={avgIntake} onChange={e => setAvgIntake(parseInt(e.target.value) || 0)}
+              className="w-20 border border-slate-200 rounded px-2 py-1 text-xl font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
           </div>
 
           {/* Roster editor */}
@@ -5214,7 +5002,7 @@ export function SchedulePage({
 
       {dept === 'resin' && (
         <>
-        <DeptKPIBar dept="resin" location="Utah" metrics={historicalMetrics} showCPO={hasAnyRates} />
+        <DeptKPIBar dept="resin" location="Utah" kpiState={kpiMetrics} showCPO={hasAnyRates} />
         <ResinPage canViewCPO={canViewCPO} />
         </>
       )}
