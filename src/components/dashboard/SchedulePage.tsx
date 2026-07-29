@@ -44,12 +44,13 @@ const DESIGN_TARGET_MIN      = 8;
 const DESIGN_TARGET_MAX      = 14;
 const TOTAL_TARGET_MIN       = DESIGN_TARGET_MIN + FULFILLMENT_WEEKS;
 const TOTAL_TARGET_MAX       = DESIGN_TARGET_MAX + FULFILLMENT_WEEKS;
+// Ratio assumed for a hypothetical new hire on the Queue & Turnaround planner —
+// a specialist pace, not the team's blended average, since a new hire isn't
+// presumed to start at whatever mix of senior/junior ratios happens to be
+// scheduled that week.
+const NEW_HIRE_RATIO = 2.0;
 // How many weeks past the November checkpoint the capacity solver requires the
-// turnaround to *hold* in-band. Bounded rather than run to the end of the 52-week
-// simulation array — cohorts arriving very late in that array have almost no
-// simulated weeks left to clear regardless of capacity, which would otherwise force
-// the solver to way overshoot chasing an artifact of the horizon length, not a real
-// capacity shortfall.
+// goal to hold, so a handful of near-tail cohorts don't dominate the solve.
 const SUSTAIN_CHECK_WEEKS    = 16;
 // Default projection ratio for auto-filled "bouquets received" estimates:
 // same week last year × this multiplier. Editable per week.
@@ -3615,16 +3616,13 @@ export function SchedulePage({
 
   const avgIntake = settings.avgIntake;
   function setAvgIntake(v: number) { update('avgIntake', v); }
-  const capacityCap = settings.capacityCap;
-  function setCapacityCap(v: number | null) { update('capacityCap', v); }
-  const capacityCapUntil = settings.capacityCapUntil;
-  function setCapacityCapUntil(v: string | null) { update('capacityCapUntil', v); }
 
   const [showRoster,   setShowRoster]  = useState(false);
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
   const [goalUnit, setGoalUnit] = useState<InputMode>('output');
+  const [queueUnit, setQueueUnit] = useState<InputMode>('hours');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [showDoneCohorts, setShowDoneCohorts] = useState(false);
   const [designThisWeekOffset, setDesignThisWeekOffset] = useState(0);
@@ -3816,12 +3814,6 @@ export function SchedulePage({
     });
   }, [avgIntake, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
 
-  // ── Future turnaround ────────────────────────────────────────────────────────
-  const futureTurnarounds = useMemo(() => {
-    const frameCapacity = weeklyTotals.map(t => t.totalFrames);
-    return simulateDesignTurnarounds(designableQueue, graduatingCohorts, frameCapacity);
-  }, [designableQueue, graduatingCohorts, weeklyTotals]);
-
   // Actual completed design output, by week — once entered via Historicals, this
   // takes over from the schedule/plan for that week when running the simulation,
   // so real progress (not just what was planned) drives the capacity goal below.
@@ -3833,40 +3825,6 @@ export function SchedulePage({
     return map;
   }, [teamActuals]);
 
-  // ── Clocked-vs-scheduled hours trend ────────────────────────────────────────
-  // For weeks that have BOTH a schedule entered (settings.designHours) and actual
-  // hours logged (teamActuals), how does the team's real clocked time compare to
-  // what was scheduled? Used only to widen the Future Turnaround estimate into a
-  // range (best case = as-scheduled, worst case = trend-adjusted) — informational,
-  // not fed into the capacity-goal ramp math, since the sample is still thin.
-  const hoursTrendRatio = useMemo(() => {
-    const scheduledByWeek: Record<string, number> = {};
-    Object.values(settings.designHours).forEach(perWeek => {
-      Object.entries(perWeek ?? {}).forEach(([weekOf, hrs]) => {
-        scheduledByWeek[weekOf] = (scheduledByWeek[weekOf] ?? 0) + (hrs ?? 0);
-      });
-    });
-    const actualByWeek: Record<string, number> = {};
-    teamActuals.filter(r => r.department === 'design').forEach(r => {
-      actualByWeek[r.week_of] = (actualByWeek[r.week_of] ?? 0) + (r.actual_hours ?? 0);
-    });
-    const ratios = Object.keys(actualByWeek)
-      .filter(w => (scheduledByWeek[w] ?? 0) > 0)
-      .map(w => actualByWeek[w] / scheduledByWeek[w]);
-    if (ratios.length === 0) return { ratio: null as number | null, sampleWeeks: 0 };
-    return { ratio: ratios.reduce((s, r) => s + r, 0) / ratios.length, sampleWeeks: ratios.length };
-  }, [settings.designHours, teamActuals]);
-
-  // Same FIFO simulation as futureTurnarounds, but with capacity scaled down by the
-  // clocked-hours trend — only meaningfully different when the team tends to log
-  // fewer hours than scheduled (ratio < 1), which stretches turnaround further than
-  // the as-scheduled projection above shows.
-  const futureTurnaroundsTrendAdjusted = useMemo(() => {
-    const { ratio } = hoursTrendRatio;
-    if (ratio === null) return null;
-    const frameCapacity = weeklyTotals.map(t => t.totalFrames * ratio);
-    return simulateDesignTurnarounds(designableQueue, graduatingCohorts, frameCapacity);
-  }, [designableQueue, graduatingCohorts, weeklyTotals, hoursTrendRatio]);
 
   // ── November capacity goal ───────────────────────────────────────────────────
   // Stretch goal: design-only turnaround should be back inside
@@ -3899,22 +3857,6 @@ export function SchedulePage({
     // practice this only ever differs for the current/just-passed week — future
     // weeks have no actuals yet).
     const simCapacity = baseCapacity.map((f, w) => designActualFramesByWeek[isoMonday(w)] ?? f);
-
-    // ── Manager-editable capacity cap ────────────────────────────────────────
-    // Production support isn't fully onboarded yet, so the ramp target can't
-    // realistically ask for more than `capacityCap` frames/wk until the cutoff
-    // date (defaults to the next end-of-August). Weeks at/after the cutoff are
-    // left unconstrained so the solver can still ask for a catch-up ramp once
-    // that capacity comes online. Setting the cap to null disables this.
-    let defaultCapUntil = new Date(now.getFullYear(), 7, 31);
-    if (defaultCapUntil < now) defaultCapUntil = new Date(now.getFullYear() + 1, 7, 31);
-    const capUntilDate = capacityCapUntil ? new Date(capacityCapUntil + 'T12:00:00') : defaultCapUntil;
-    const weeksToCapUntil = Math.max(0, Math.round(
-      (capUntilDate.getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
-    ));
-    function withCap(w: number, total: number): number {
-      return (capacityCap != null && w < weeksToCapUntil) ? Math.min(total, capacityCap) : total;
-    }
     const projected     = simulateDesignTurnarounds(designableQueue, graduatingCohorts, simCapacity);
     const atNovemberIdx = Math.min(weeksToNovember, WEEKS - 1);
     const projectedAtNovember = projected[atNovemberIdx] ?? null;
@@ -3944,7 +3886,7 @@ export function SchedulePage({
       return Math.max(0, peak * (1 - w / lastCheckableWeek));
     }
     function worstOverageWithRamp(peak: number): number {
-      return worstOverage(simCapacity.map((f, w) => withCap(w, f + rampExtra(peak, w))));
+      return worstOverage(simCapacity.map((f, w) => f + rampExtra(peak, w)));
     }
     let peak = 0;
     if (worstOverage(simCapacity) > 0) {
@@ -3957,14 +3899,8 @@ export function SchedulePage({
       peak = Math.ceil(hi);
     }
 
-    const requiredCapacity = simCapacity.map((f, w) => withCap(w, f + Math.round(rampExtra(peak, w))));
+    const requiredCapacity = simCapacity.map((f, w) => f + Math.round(rampExtra(peak, w)));
     const onTrack = peak === 0 && worstOverage(simCapacity) !== Infinity;
-    // True once the cap actually held the ramp below what the uncapped solve
-    // would have asked for in at least one pre-cutoff week — i.e. the goal
-    // isn't fully achievable within the current capacity limit.
-    const cappedBelowNeed = capacityCap != null && simCapacity.some((f, w) =>
-      w < weeksToCapUntil && (f + rampExtra(peak, w)) > capacityCap
-    );
 
     // First intake week (as currently scheduled/actual, no ramp) whose projected
     // turnaround breaks the ceiling — a pointer back to where in the Weekly Schedule
@@ -3995,12 +3931,130 @@ export function SchedulePage({
     const thisWeekTarget      = requiredCapacity[0] ?? 0;
     const thisWeekTargetHours = requiredHours[0] ?? 0;
 
+    // ── Overstaffing ceiling ──────────────────────────────────────────────────
+    // Mirror of the ramp-up search above, but in the other direction: how much
+    // would a manager need to cut from every week's capacity, right now, to
+    // bring turnaround back up to the DESIGN_TARGET_MIN floor anywhere it's
+    // currently dipping under it in the rolling window? Modeled as a flat
+    // (non-tapering) cut rather than a ramp, since overstaffing is a standing
+    // schedule problem, not a one-time emergency the way a backlog spike is.
+    function worstUnderage(capacity: number[]): number {
+      const sim = simulateDesignTurnarounds(designableQueue, graduatingCohorts, capacity);
+      let worst = 0;
+      for (let w = 0; w <= lastCheckableWeek; w++) {
+        const t = sim[w];
+        if (t !== null && t < DESIGN_TARGET_MIN) worst = Math.max(worst, DESIGN_TARGET_MIN - t);
+      }
+      return worst;
+    }
+    function worstUnderageWithCut(cut: number): number {
+      return worstUnderage(simCapacity.map(f => Math.max(0, f - cut)));
+    }
+    let requiredCut = 0;
+    if (worstUnderage(simCapacity) > 0) {
+      let lo = 0, hi = Math.max(40, ...simCapacity, 1);
+      while (worstUnderageWithCut(hi) > 0 && hi < 5000) hi *= 2;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        if (worstUnderageWithCut(mid) > 0) lo = mid; else hi = mid;
+      }
+      requiredCut = Math.ceil(hi);
+    }
+    const overstaffedByFrames = requiredCut;
+    const overstaffedByHours  = overstaffedByFrames * (hoursPerFrame[0] ?? blendedRatio);
+
     return {
       novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
       baseCapacity, requiredCapacity, onTrack, baseHours, requiredHours, firstOverWeek,
-      capUntilDate, cappedBelowNeed,
+      overstaffedByFrames, overstaffedByHours,
     };
-  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek, capacityCap, capacityCapUntil]);
+  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek]);
+
+  // ── Hiring / what-if plan ────────────────────────────────────────────────────
+  // Powers the Design hours columns on the Queue & Turnaround tab. The only
+  // manager-editable lever is a hypothetical new hire's hours/wk, which carries
+  // forward into every later week once they'd have started. "Planned" is always
+  // exactly Scheduled + those hire hours — the same capacity that drives the
+  // Planned turnaround bar — so the two views can never disagree.
+  const hiringPlan = useMemo(() => {
+    const baseHours    = weeklyTotals.map(t => t.totalHours);
+    const baseCapacity = weeklyTotals.map(t => t.totalFrames);
+    let ratioSumFrames = 0, ratioSumHours = 0;
+    weeklyTotals.forEach(t => { if (t.totalFrames > 0) { ratioSumFrames += t.totalFrames; ratioSumHours += t.totalHours; } });
+    const blendedRatio = ratioSumFrames > 0 ? ratioSumHours / ratioSumFrames
+      : (designers.length > 0 ? designers.reduce((s, d) => s + d.ratio, 0) / designers.length : 1);
+    const hoursPerFrame = weeklyTotals.map(t => t.totalFrames > 0 ? t.totalHours / t.totalFrames : (blendedRatio || 1));
+
+    // New-hire hours carry forward: once someone starts, their hours count
+    // toward every week from their start week on, not just the entry week.
+    let cumulativeHireHours = 0;
+    const hireHoursByWeek: number[] = [];
+    for (let w = 0; w < WEEKS; w++) {
+      cumulativeHireHours += settings.newHireHours[isoMonday(w)] ?? 0;
+      hireHoursByWeek.push(cumulativeHireHours);
+    }
+
+    // "Scheduled" stays exactly what's in the Weekly Schedule tab — hires are a
+    // planning tool, not something that should silently inflate it. A hire's
+    // hours only ever show up on the Planned side, until someone actually goes
+    // and enters them into the real schedule.
+    const scheduledHours = baseHours;
+    const plannedHours   = baseHours.map((h, w) => h + hireHoursByWeek[w]);
+    const planCapacity   = baseCapacity.map((f, w) => f + hireHoursByWeek[w] / NEW_HIRE_RATIO);
+    const planTurnaround = simulateDesignTurnarounds(designableQueue, graduatingCohorts, planCapacity);
+    // Pure as-scheduled turnaround — no hypothetical hires, no overrides — so
+    // "Scheduled" and "Planned" can be shown side by side as a true before/after.
+    const scheduledTurnaround = simulateDesignTurnarounds(designableQueue, graduatingCohorts, baseCapacity);
+
+    // Clocked-vs-scheduled trend: for weeks with both a schedule entered and
+    // actual hours logged, how does real clocked time compare to what was
+    // scheduled? Widens each bar's single number into a range (best case = at
+    // full scheduled pace, worst case = if that trend continues) instead of a
+    // separate row.
+    const scheduledByWeek: Record<string, number> = {};
+    Object.values(settings.designHours).forEach(perWeek => {
+      Object.entries(perWeek ?? {}).forEach(([weekOf, hrs]) => {
+        scheduledByWeek[weekOf] = (scheduledByWeek[weekOf] ?? 0) + (hrs ?? 0);
+      });
+    });
+    const actualByWeek: Record<string, number> = {};
+    teamActuals.filter(r => r.department === 'design').forEach(r => {
+      actualByWeek[r.week_of] = (actualByWeek[r.week_of] ?? 0) + (r.actual_hours ?? 0);
+    });
+    const trendRatios = Object.keys(actualByWeek)
+      .filter(w => (scheduledByWeek[w] ?? 0) > 0)
+      .map(w => actualByWeek[w] / scheduledByWeek[w]);
+    const trendRatio = trendRatios.length > 0 ? trendRatios.reduce((s, r) => s + r, 0) / trendRatios.length : null;
+
+    const scheduledTurnaroundTrend = trendRatio !== null
+      ? simulateDesignTurnarounds(designableQueue, graduatingCohorts, baseCapacity.map(f => f * trendRatio))
+      : scheduledTurnaround;
+    const planTurnaroundTrend = trendRatio !== null
+      ? simulateDesignTurnarounds(designableQueue, graduatingCohorts, planCapacity.map(f => f * trendRatio))
+      : planTurnaround;
+
+    return {
+      scheduledHours, plannedHours, planTurnaround, scheduledTurnaround, hireHoursByWeek,
+      scheduledTurnaroundTrend, planTurnaroundTrend, hoursPerFrame,
+    };
+  }, [weeklyTotals, designers, settings.newHireHours, settings.designHours, teamActuals, designableQueue, graduatingCohorts]);
+
+  // Combine a base turnaround value with its trend-adjusted counterpart into a
+  // single display string — a range when they differ, else just one number.
+  function turnaroundRangeLabel(base: number | null, trend: number | null): string {
+    if (base === null) return '52wk+';
+    if (trend === null) return `${base}w+`;
+    if (trend === base) return `${base}w`;
+    const lo = Math.min(base, trend), hi = Math.max(base, trend);
+    return `${lo}–${hi}w`;
+  }
+
+  function setNewHireHours(weekIso: string, hours: number) {
+    const next = { ...settings.newHireHours };
+    if (hours > 0) next[weekIso] = hours; else delete next[weekIso];
+    update('newHireHours', next);
+  }
+
 
   // ── Historical remaining ─────────────────────────────────────────────────────
   const historicalRemaining = useMemo(() => {
@@ -4341,24 +4395,6 @@ export function SchedulePage({
                 <p className="text-xs text-slate-400 mt-0.5">
                   Stretch goal: {DESIGN_TARGET_MIN}–{DESIGN_TARGET_MAX} wks design-only ({TOTAL_TARGET_MIN}–{TOTAL_TARGET_MAX} wks incl. ~{FULFILLMENT_WEEKS}-wk fulfillment), held all year — not just at one deadline.
                 </p>
-                <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1.5">
-                  <input type="checkbox" checked={capacityCap != null}
-                    onChange={e => setCapacityCap(e.target.checked ? 100 : null)}
-                    className="accent-slate-500" />
-                  <span>Cap ramp target at</span>
-                  <input type="number" min={0}
-                    value={capacityCap ?? 100}
-                    disabled={capacityCap == null}
-                    onChange={e => setCapacityCap(parseInt(e.target.value) || 0)}
-                    className="w-14 border border-slate-200 rounded px-1 py-0.5 text-slate-600 disabled:bg-slate-50 disabled:text-slate-300" />
-                  <span>f/wk through</span>
-                  <input type="date"
-                    value={capacityCapUntil ?? isoMondayFromDate(capacityGoal.capUntilDate)}
-                    disabled={capacityCap == null}
-                    onChange={e => setCapacityCapUntil(e.target.value || null)}
-                    className="border border-slate-200 rounded px-1 py-0.5 text-slate-600 disabled:bg-slate-50 disabled:text-slate-300" />
-                  <span>(production support ramp-up)</span>
-                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs text-slate-500 whitespace-nowrap">
@@ -4390,7 +4426,13 @@ export function SchedulePage({
                     </span>
                   </div>
                   {onTrack ? (
-                    <p className="text-xs text-green-700">Currently scheduled capacity holds design-only turnaround in the target band through the planning window.</p>
+                    capacityGoal.overstaffedByFrames > 0 ? (
+                      <p className="text-xs text-orange-700">
+                        Currently scheduled capacity holds design-only turnaround in the target band through November, but dips under the {DESIGN_TARGET_MIN}-wk floor somewhere in the window — team may be overstaffed by ~{Math.round(capacityGoal.overstaffedByFrames)}f (~{Math.round(capacityGoal.overstaffedByHours)}h)/wk relative to intake.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-green-700">Currently scheduled capacity holds design-only turnaround in the target band through the planning window.</p>
+                    )
                   ) : over ? (
                     <>
                       <p className={`text-xs font-medium ${textColor}`}>
@@ -4399,11 +4441,6 @@ export function SchedulePage({
                       {capacityGoal.firstOverWeek !== null && (
                         <p className="text-xs text-slate-400">
                           As scheduled, turnaround first breaks {DESIGN_TARGET_MAX} wks for orders arriving {getWeekLabel(capacityGoal.firstOverWeek)} — check Weekly Schedule capacity around then (a common cause: designer hours not yet entered that far out).
-                        </p>
-                      )}
-                      {capacityGoal.cappedBelowNeed && (
-                        <p className="text-xs text-amber-700">
-                          Ramp target is capped at {capacityCap}f/wk through {capacityGoal.capUntilDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (production support isn&apos;t ramped up yet) — the November goal may not be fully reachable until that cap lifts.
                         </p>
                       )}
                     </>
@@ -4760,100 +4797,174 @@ export function SchedulePage({
           {activeTab === 'queue' && (
             <div className="space-y-6">
               <div className="bg-white border border-slate-100 rounded-xl p-5">
-                <h2 className="text-sm font-semibold text-slate-700 mb-1">Future turnaround — orders arriving each week</h2>
-                <p className="text-xs text-slate-400 mb-1">
-                  For bouquets received in a future week: estimated total weeks from bouquet received to frame completed.
-                  Includes fixed {PRESERVATION_WEEKS}-week preservation pipeline.
-                </p>
-                <p className="text-xs text-amber-600 mb-4">Under 8 weeks total = overstaffed.</p>
-                {hoursTrendRatio.ratio !== null && hoursTrendRatio.ratio < 0.99 && (
-                  <p className="text-xs text-slate-400 mb-4 -mt-2">
-                    Based on the last {hoursTrendRatio.sampleWeeks} wk{hoursTrendRatio.sampleWeeks !== 1 ? 's' : ''} of clocked hours, {location} design has logged ~{Math.round(hoursTrendRatio.ratio * 100)}% of scheduled hours —
-                    weeks below show a range where the higher end reflects turnaround if that pace continues instead of the full schedule.
-                  </p>
-                )}
-                <div className="space-y-2.5">
-                  {futureTurnarounds.map((designWait, w) => {
-                    const total       = designWait;
-                    const overstaffed = total !== null && total < 8;
-                    const { bar, text, label } = turnaroundColors(total, overstaffed);
-                    const adjustedTotal = futureTurnaroundsTrendAdjusted?.[w] ?? null;
-                    const showAdjusted  = adjustedTotal !== null && total !== null && adjustedTotal > total;
-                    const weekIso = isoMonday(w);
-                    const _weVal = weeklyEstimates[weekIso];
-                    const hasOverride = _weVal !== undefined;
-                    const overrideVal = hasOverride ? (location === 'Utah' ? _weVal.ut : _weVal.ga) : undefined;
-                    const lastYearIso = addDays(weekIso, -364);
-                    const lastYearActual = actualIntakeByWeek[lastYearIso];
-                    const multiplier = getIntakeMultiplier(weekIso);
-                    const projected = getProjectedIntake(weekIso);
-                    const estVal = hasOverride ? overrideVal : (projected !== undefined ? projected : '');
-                    return (
-                      <div key={w} className="flex items-center gap-3">
-                        <span className="text-xs text-slate-500 w-16 shrink-0">{getWeekLabel(w)}</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <input
-                            type="number"
-                            value={estVal}
-                            placeholder={String(avgIntake)}
-                            min="0"
-                            onChange={e => setWeeklyEstimate(weekIso, parseInt(e.target.value) || 0)}
-                            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-xs text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
-                            title="Est. bouquets delivered this week"
-                          />
-                          <span className="text-[10px] text-slate-300">bq</span>
-                        </div>
-                        {lastYearActual !== undefined && (
-                          <div className="flex items-center gap-1 shrink-0" title={`${lastYearActual} bq received ${fmtDate(lastYearIso)} (same week last year)`}>
-                            <span className="text-[10px] text-slate-400">×</span>
-                            <input
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              value={multiplier}
-                              disabled={hasOverride}
-                              onChange={e => setWeeklyMultiplier(weekIso, parseFloat(e.target.value) || DEFAULT_INTAKE_MULTIPLIER)}
-                              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-xs text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:bg-slate-50 disabled:text-slate-300"
-                              title={hasOverride ? 'Clear the bq override to use the LY projection' : 'Multiplier applied to last year’s same week'}
-                            />
-                            <span className="text-[10px] text-slate-300">LY {lastYearActual}</span>
-                          </div>
-                        )}
-                        {total !== null ? (
-                          <>
-                            <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
-                              <div className="h-2 flex rounded-full overflow-hidden" style={{ width: `${Math.min(100, (total / 22) * 100)}%` }}>
-                                <div className="bg-slate-300 shrink-0" style={{ width: `${(PRESERVATION_WEEKS / total) * 100}%` }} />
-                                <div className={`${bar} flex-1`} />
-                              </div>
-                            </div>
-                            <span className={`text-xs font-medium w-44 text-right shrink-0 ${text}`}>
-                              {showAdjusted ? label.replace(/^~\d+ wks/, `~${total}–${adjustedTotal} wks`) : label}
-                              {showAdjusted && (
-                                <span className="block text-[10px] text-slate-400 font-normal" title="Upper end assumes the recent clocked-hours pace instead of the full schedule">
-                                  at recent clocked pace
-                                </span>
-                              )}
-                              {adjustedTotal === null && total !== null && hoursTrendRatio.ratio !== null && hoursTrendRatio.ratio < 0.99 && (
-                                <span className="block text-[10px] text-red-400 font-normal" title="At the recent clocked-hours pace, this cohort wouldn't clear within 52 weeks">
-                                  could exceed 52 wks at recent pace
-                                </span>
-                              )}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-red-600 italic">queue not cleared in 52 wks</span>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="flex items-start justify-between gap-2 flex-wrap mb-1">
+                  <h2 className="text-sm font-semibold text-slate-700">Future turnaround — orders arriving each week</h2>
+                  <InputModeToggle mode={queueUnit} onChange={setQueueUnit} unitLabel="Frames" />
                 </div>
-                <div className="flex gap-4 mt-5 pt-4 border-t border-slate-100 flex-wrap">
-                  <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-slate-300 inline-block" /> 6 wks preservation</span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" /> &lt;8 wks overstaffed</span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block" /> 8–10 ideal</span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> 11–18 backlog</span>
-                  <span className="flex items-center gap-1.5 text-xs text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" /> &gt;18 large backlog</span>
+                <p className="text-xs text-slate-400 mb-4">
+                  Estimated weeks from bouquet received to frame completed, including the fixed {PRESERVATION_WEEKS}-week preservation pipeline.
+                  Add a hypothetical hire below to see how Planned turnaround responds, for that week and every week after.
+                </p>
+                {(() => {
+                  const maxWeeksScale = Math.max(
+                    ...hiringPlan.scheduledTurnaround.filter((t): t is number => t !== null),
+                    ...hiringPlan.planTurnaround.filter((t): t is number => t !== null),
+                    ...hiringPlan.scheduledTurnaroundTrend.filter((t): t is number => t !== null),
+                    ...hiringPlan.planTurnaroundTrend.filter((t): t is number => t !== null),
+                    DESIGN_TARGET_MAX,
+                  ) * 1.05;
+                  return (
+                    <div className="overflow-x-auto -mx-1">
+                      <table className="min-w-full text-xs border-separate" style={{ borderSpacing: 0 }}>
+                        <thead>
+                          <tr className="text-slate-400">
+                            <th className="text-left font-medium px-2 py-1.5 sticky left-0 bg-white whitespace-nowrap">Week</th>
+                            <th className="text-left font-medium px-2 py-1.5 whitespace-nowrap">Bouquets received</th>
+                            <th className="text-left font-medium px-2 py-1.5 whitespace-nowrap">New hire</th>
+                            <th className="text-left font-medium px-2 py-1.5 whitespace-nowrap">Design hours</th>
+                            <th className="text-left font-medium px-2 py-1.5 min-w-[220px]">Turnaround</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {hiringPlan.planTurnaround.map((total, w) => {
+                            const schedTotal = hiringPlan.scheduledTurnaround[w];
+                            const schedTrend  = hiringPlan.scheduledTurnaroundTrend[w];
+                            const planTrend   = hiringPlan.planTurnaroundTrend[w];
+                            // Color by the worse (higher) end of the range, not the optimistic
+                            // as-scheduled number — a week that's only "ideal" if the team works
+                            // full scheduled hours, but "large backlog" at the recent clocked
+                            // pace, should read as the risk it actually is, not green.
+                            const planWorst  = (total === null || planTrend === null) ? null : Math.max(total, planTrend);
+                            const schedWorst = (schedTotal === null || schedTrend === null) ? null : Math.max(schedTotal, schedTrend);
+                            const overstaffed = planWorst !== null && planWorst < DESIGN_TARGET_MIN;
+                            const { bar, text, label } = turnaroundColors(planWorst, overstaffed);
+                            const schedOverstaffed = schedWorst !== null && schedWorst < DESIGN_TARGET_MIN;
+                            const schedColors = turnaroundColors(schedWorst, schedOverstaffed);
+                            const categoryOf = (l: string) => l.split('—')[1]?.trim() ?? l;
+                            const weekIso = isoMonday(w);
+                            const _weVal = weeklyEstimates[weekIso];
+                            const hasOverride = _weVal !== undefined;
+                            const overrideVal = hasOverride ? (location === 'Utah' ? _weVal.ut : _weVal.ga) : undefined;
+                            const lastYearIso = addDays(weekIso, -364);
+                            const lastYearActual = actualIntakeByWeek[lastYearIso];
+                            const multiplier = getIntakeMultiplier(weekIso);
+                            const projected = getProjectedIntake(weekIso);
+                            const estVal = hasOverride ? overrideVal : (projected !== undefined ? projected : '');
+                            const scheduledH = hiringPlan.scheduledHours[w];
+                            const plannedH   = hiringPlan.plannedHours[w];
+                            const hireCum    = hiringPlan.hireHoursByWeek[w];
+                            const hpf = hiringPlan.hoursPerFrame[w] || 1;
+                            const queueUnitLabel = queueUnit === 'output' ? 'f' : 'h';
+                            const scheduledDisplay = queueUnit === 'output' ? round2(scheduledH / hpf) : Math.round(scheduledH);
+                            const plannedDisplay   = queueUnit === 'output' ? round2(plannedH / hpf)   : Math.round(plannedH);
+                            return (
+                              <tr key={w} className={`border-b border-slate-50 align-top ${w % 2 === 0 ? '' : 'bg-slate-50/40'}`}>
+                                <td className="px-2 py-2 sticky left-0 bg-inherit whitespace-nowrap text-slate-500">
+                                  {getWeekLabel(w)}
+                                  {w === 0 && <span className="ml-1 text-[9px] bg-indigo-100 text-indigo-600 rounded px-1">now</span>}
+                                </td>
+                                <td className="px-2 py-2">
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      value={estVal}
+                                      placeholder={String(avgIntake)}
+                                      min="0"
+                                      onChange={e => setWeeklyEstimate(weekIso, parseInt(e.target.value) || 0)}
+                                      className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                                      title="Est. bouquets delivered this week"
+                                    />
+                                    <span className="text-[10px] text-slate-300">bq</span>
+                                  </div>
+                                  {lastYearActual !== undefined && (
+                                    <div className="flex items-center gap-1 mt-0.5" title={`${lastYearActual} bq received ${fmtDate(lastYearIso)} (same week last year)`}>
+                                      <span className="text-[10px] text-slate-400">×</span>
+                                      <input
+                                        type="number"
+                                        step="0.1"
+                                        min="0"
+                                        value={multiplier}
+                                        disabled={hasOverride}
+                                        onChange={e => setWeeklyMultiplier(weekIso, parseFloat(e.target.value) || DEFAULT_INTAKE_MULTIPLIER)}
+                                        className="w-12 border border-slate-200 rounded px-1 py-0.5 text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:bg-slate-50 disabled:text-slate-300"
+                                        title={hasOverride ? 'Clear the bq override to use the LY projection' : 'Multiplier applied to last year’s same week'}
+                                      />
+                                      <span className="text-[10px] text-slate-300">LY {lastYearActual}</span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2">
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number" min="0" step="1" placeholder="0"
+                                      value={settings.newHireHours[weekIso] ?? ''}
+                                      onChange={e => setNewHireHours(weekIso, parseFloat(e.target.value) || 0)}
+                                      className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-center text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-300"
+                                      title="Hours/wk a hypothetical new hire starting this week would average"
+                                    />
+                                    <span className="text-[10px] text-slate-300">h/wk</span>
+                                  </div>
+                                  {hireCum > 0 && (
+                                    <div className="text-[10px] text-emerald-600 mt-0.5 whitespace-nowrap">+{Math.round(hireCum)}h/wk running</div>
+                                  )}
+                                </td>
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-slate-400 w-14 shrink-0">Scheduled</span>
+                                    <span className="text-slate-700 font-medium">{scheduledDisplay}{queueUnitLabel}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <span className="text-emerald-600 w-14 shrink-0">Planned</span>
+                                    <span className="text-emerald-700 font-medium">{plannedDisplay}{queueUnitLabel}</span>
+                                  </div>
+                                </td>
+                                <td className="px-2 py-2">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-slate-400 w-14 shrink-0">Scheduled</span>
+                                      {schedTotal !== null ? (
+                                        <>
+                                          <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+                                            <div className={`h-2 rounded-full ${schedColors.bar}`} style={{ width: `${Math.min(100, ((schedWorst ?? schedTotal) / maxWeeksScale) * 100)}%` }} />
+                                          </div>
+                                          <span className={`text-[10px] font-medium w-14 text-right shrink-0 ${schedColors.text}`}>{turnaroundRangeLabel(schedTotal, schedTrend)}</span>
+                                        </>
+                                      ) : (
+                                        <span className="text-[10px] text-red-500 italic">52wk+</span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-slate-400 w-14 shrink-0">Planned</span>
+                                      {total !== null ? (
+                                        <>
+                                          <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
+                                            <div className={`h-2 rounded-full ${bar}`} style={{ width: `${Math.min(100, ((planWorst ?? total) / maxWeeksScale) * 100)}%` }} />
+                                          </div>
+                                          <span className={`text-[10px] font-semibold w-14 text-right shrink-0 ${text}`}>{turnaroundRangeLabel(total, planTrend)}</span>
+                                        </>
+                                      ) : (
+                                        <span className="text-[10px] text-red-600 italic">52wk+</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {total !== null && (
+                                    <div className={`text-[10px] mt-0.5 ${text}`}>{categoryOf(label)}</div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+                <div className="flex gap-4 mt-4 pt-3 border-t border-slate-100 flex-wrap">
+                  <span className="text-[10px] text-slate-500">Design hours: Scheduled = the real Weekly Schedule. Planned = Scheduled + any new hire above — same numbers driving the Planned bar.</span>
+                  <span className="text-[10px] text-slate-500 border-l border-slate-200 pl-4">Turnaround ranges reflect recent clocked-vs-scheduled hours.</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500 border-l border-slate-200 pl-4"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" /> &lt;{DESIGN_TARGET_MIN} wks overstaffed</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block" /> ≤{DESIGN_TARGET_MAX} wks ideal</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> &gt;{DESIGN_TARGET_MAX} wks over goal</span>
                 </div>
               </div>
 
