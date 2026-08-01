@@ -1757,24 +1757,12 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const key = isoMonday(weekIdx);
     const newHours = { ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [key]: val } };
     onPresHoursChange(newHours);
-
-    // Keep This Week's daily breakdown in sync with the new weekly total.
-    const filled = fillDailyHours(val, presRoster[memberId]?.dailyHoursTemplate) ?? [0, 0, 0, 0, 0, 0, 0];
-    const dailyKey = `${key}-${memberId}`;
-    onPresDailyHoursChange({ ...presDailyHours, [dailyKey]: filled });
   }
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
     const key = `${isoMonday(presThisWeekOffset)}-${memberId}`;
-    const dayValues = [...(presDailyHours[key] ?? Array(7).fill(0))];
-    dayValues[dayIdx] = val;
-    onPresDailyHoursChange({ ...presDailyHours, [key]: dayValues });
-
-    // Keep the weekly total (used by the 52-week planner) in sync. Written
-    // directly (not via updateHours) so it doesn't re-trigger a daily
-    // redistribution that would clobber the exact values just entered.
-    const weekTotal = dayValues.reduce((s, h) => s + h, 0);
-    const weekKey = isoMonday(presThisWeekOffset);
-    onPresHoursChange({ ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [weekKey]: weekTotal } });
+    const newHours = { ...presDailyHours, [key]: [...(presDailyHours[key] ?? Array(7).fill(0))] };
+    newHours[key][dayIdx] = val;
+    onPresDailyHoursChange(newHours);
   }
 
   function updateCheckHours(memberId: string, dayIdx: number, val: number) {
@@ -2602,13 +2590,6 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const key = isoMonday(wi);
     const newHours = { ...ffHours, [id]: { ...(ffHours[id] ?? {}), [key]: val } };
     onFfHoursChange(newHours);
-
-    // Keep This Week's daily breakdown in sync with the new weekly total.
-    const filled = fillDailyHours(val, ffRoster[id]?.dailyHoursTemplate) ?? [0, 0, 0, 0, 0, 0, 0];
-    const dailyKey = `${key}-${id}`;
-    const nextDaily = { ...ffDailyHours, [dailyKey]: filled };
-    setFfDailyHours(nextDaily);
-    onFfDailyHoursChange?.(nextDaily);
   }
   function applyToAllWeeks(id: string, hours: number) {
     if (!window.confirm(`Copy ${hours} hours to all 52 weeks for this team member?`)) return;
@@ -2678,17 +2659,9 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
           const key = `${isoMonday(ffThisWeekOffset)}-${id}`;
           const prev = ffDailyHours[key] ?? [];
           const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-          const dayValues = padded.map((h: number, j: number) => j === di ? val : h);
-          const next = { ...ffDailyHours, [key]: dayValues };
+          const next = { ...ffDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
           setFfDailyHours(next);
           onFfDailyHoursChange?.(next);
-
-          // Keep the weekly total (used by the 52-week planner) in sync. Written
-          // directly (not via updateHours) so it doesn't re-trigger a daily
-          // redistribution that would clobber the exact values just entered.
-          const weekTotal = dayValues.reduce((s, h) => s + h, 0);
-          const weekKey = isoMonday(ffThisWeekOffset);
-          onFfHoursChange({ ...ffHours, [id]: { ...(ffHours[id] ?? {}), [weekKey]: weekTotal } });
         }
         function getMgrTotalFFH(id: string, di: number) {
           return mgrTotalDailyHours[`${isoMonday(ffThisWeekOffset)}-${id}`]?.[di] ?? getFFH(id, di);
@@ -3763,18 +3736,10 @@ export function SchedulePage({
 
   // ── Schedule handlers ─────────────────────────────────────────────────────────
   function handleHoursChange(weekIdx: number, designerId: string, value: string) {
-    const total = parseFloat(value) || 0;
     const newHours = { ...settings.designHours };
     const key = isoMonday(weekIdx);
-    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: total };
+    newHours[designerId] = { ...(newHours[designerId] ?? {}), [key]: parseFloat(value) || 0 };
     update('designHours', newHours);
-
-    // Keep This Week's daily breakdown in sync with the new weekly total.
-    const filled = fillDailyHours(total, settings.designRoster[designerId]?.dailyHoursTemplate) ?? [0, 0, 0, 0, 0, 0, 0];
-    const dailyKey = `${key}-${designerId}`;
-    const nextDaily = { ...designDailyHours, [dailyKey]: filled };
-    setDesignDailyHours(nextDaily);
-    update('designDailyHours', nextDaily);
   }
   function handleMgrTotalHoursChange(weekIdx: number, designerId: string, value: string) {
     const newHours = { ...settings.mgrTotalHours };
@@ -4534,16 +4499,9 @@ export function SchedulePage({
               const key = `${isoMonday(designThisWeekOffset)}-${id}`;
               const prev = designDailyHours[key] ?? [];
               const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-              const dayValues = padded.map((h: number, j: number) => j === di ? val : h);
-              const next = { ...designDailyHours, [key]: dayValues };
+              const next = { ...designDailyHours, [key]: padded.map((h: number, j: number) => j === di ? val : h) };
               setDesignDailyHours(next);
               update('designDailyHours', next);
-
-              // Keep the weekly total (used by the 52-week planner) in sync.
-              const weekKey = isoMonday(designThisWeekOffset);
-              const weekTotal = dayValues.reduce((s, h) => s + h, 0);
-              const newWeeklyHours = { ...settings.designHours, [id]: { ...(settings.designHours[id] ?? {}), [weekKey]: weekTotal } };
-              update('designHours', newWeeklyHours);
             }
             function getMgrTotalDH(id: string, di: number) {
               return settings.mgrTotalDailyHours[`${isoMonday(designThisWeekOffset)}-${id}`]?.[di] ?? getDH(id, di);

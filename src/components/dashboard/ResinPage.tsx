@@ -204,26 +204,13 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
     const key = isoMonday(weekIdx);
     const next = { ...hours, [key]: { ...(hours[key] ?? {}), [memberId]: val } };
     setHours(next);
-
-    // Keep This Week's daily breakdown in sync with the new weekly total.
-    const member = roster.find(m => m.id === memberId);
-    const filled = fillDailyHours(val, member?.dailyHoursTemplate) ?? [0, 0, 0, 0, 0, 0, 0];
-    const dailyKey = `${key}-${memberId}`;
-    setResinDailyHours({ ...resinDailyHours, [dailyKey]: filled });
   }
 
   function setDH(memberId: string, weekIdx: number, di: number, val: number) {
     const key = `${isoMonday(weekIdx)}-${memberId}`;
     const prev = resinDailyHours[key] ?? Array(7).fill(0);
-    const dayValues = prev.map((h: number, j: number) => j === di ? val : h);
-    setResinDailyHours({ ...resinDailyHours, [key]: dayValues });
-
-    // Keep the weekly total (used by the 52-week planner) in sync. Written
-    // directly (not via updateHours) so it doesn't re-trigger a daily
-    // redistribution that would clobber the exact values just entered.
-    const weekTotal = dayValues.reduce((s: number, h: number) => s + h, 0);
-    const weekKey = isoMonday(weekIdx);
-    setHours({ ...hours, [weekKey]: { ...(hours[weekKey] ?? {}), [memberId]: weekTotal } });
+    const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? val : h) };
+    setResinDailyHours(next);
   }
 
   function updateMgrTotalHours(weekIdx: number, memberId: string, val: number) {
