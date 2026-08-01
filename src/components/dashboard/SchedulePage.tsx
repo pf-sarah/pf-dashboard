@@ -3,6 +3,7 @@ import ResinPage, { DEFAULT_RESIN_ROSTER, type ResinMember } from './ResinPage';
 import { RipplingUpload } from './RipplingUpload';
 import { EmployeeAutocomplete } from './EmployeeAutocomplete';
 import type { RipplingEmployee } from './EmployeeAutocomplete';
+import { OpenShiftsSection } from './OpenShiftsSection';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { HistoricalsSection } from './HistoricalsSection';
@@ -11,6 +12,7 @@ import { useHistoricalMetrics } from './useHistoricalMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate, weeksUntilEndOfYear } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
+import { DailyHoursTemplateEditor, fillDailyHours } from './DailyHoursTemplate';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -156,14 +158,6 @@ function buildDefaultUtahSchedule(): WeekSchedule[] {
   }));
 }
 
-// Distribute total weekly hours across 5 days as evenly as possible
-// e.g. 38hrs → [8,8,8,7,7], 37hrs → [8,8,7,7,7]
-function distributeHours(total: number): number[] {
-  if (total <= 0) return [0, 0, 0, 0, 0];
-  const base = Math.floor(total / 5);
-  const rem  = Math.round(total) % 5;
-  return Array.from({ length: 5 }, (_, i) => i < rem ? base + 1 : base);
-}
 
 function buildDefaultGeorgiaSchedule(): WeekSchedule[] {
   return Array.from({ length: WEEKS }, () => ({
@@ -230,9 +224,11 @@ function simulateDesignTurnarounds(startQueue: number, graduatingByWeek: number[
 
 // ─── RosterEditor ──────────────────────────────────────────────────────────────
 
-function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, location }: {
+function RosterEditor({ designers, designRoster, onChange, onDailyHoursTemplateChange, onAdd, onRemove, onReorder, location }: {
   designers: Designer[];
+  designRoster: Record<string, { dailyHoursTemplate?: number[] }>;
   onChange:  (id: string, field: keyof Designer, value: string) => void;
+  onDailyHoursTemplateChange: (id: string, hours: number[]) => void;
   onAdd:     () => void;
   onRemove:  (id: string) => void;
   onReorder?: (newOrder: string[]) => void;
@@ -267,38 +263,41 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
       </div>
       <div className="space-y-2">
         {designers.map(d => (
-          <div key={d.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex-1 min-w-0">
-                <EmployeeAutocomplete
-                  value={d.name}
-                  location={location ?? 'Utah'}
-                  department="Design"
-                  onChange={val => onChange(d.id, 'name', val)}
-                  onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); onChange(d.id, 'hourlyRate', String(emp.hourly_rate ?? 0)); onChange(d.id, 'payType', emp.pay_type); onChange(d.id, 'annualSalary', String(emp.annual_salary ?? 0)); }}
-                />
+          <div key={d.id} className="space-y-1 pb-2 border-b border-slate-50 last:border-0">
+            <div className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex-1 min-w-0">
+                  <EmployeeAutocomplete
+                    value={d.name}
+                    location={location ?? 'Utah'}
+                    department="Design"
+                    onChange={val => onChange(d.id, 'name', val)}
+                    onSelect={(emp: RipplingEmployee) => { onChange(d.id, 'name', emp.full_name); onChange(d.id, 'role', emp.role); onChange(d.id, 'hourlyRate', String(emp.hourly_rate ?? 0)); onChange(d.id, 'payType', emp.pay_type); onChange(d.id, 'annualSalary', String(emp.annual_salary ?? 0)); }}
+                  />
+                </div>
+                {(d as {isManager?:boolean}).isManager && (
+                  <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+                )}
               </div>
-              {(d as {isManager?:boolean}).isManager && (
-                <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
-              )}
+              <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
+                className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                <option value="specialist">Specialist</option>
+                <option value="senior">Senior</option>
+                <option value="master">Master</option>
+              </select>
+              <div className="flex items-center gap-1">
+                <input type="number" value={d.ratio} step="0.1" min="0.1"
+                  onChange={e => onChange(d.id, 'ratio', e.target.value)}
+                  className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                <button onClick={() => refreshRatio(d)} title="Update ratio from last 4 weeks of historicals"
+                  className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
+                  disabled={refreshingId === d.id}>
+                  {refreshingId === d.id ? '…' : '↻'}
+                </button>
+              </div>
+              <button onClick={() => onRemove(d.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
             </div>
-            <select value={(d as {role?:string}).role ?? 'specialist'} onChange={e => onChange(d.id, 'role', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="specialist">Specialist</option>
-              <option value="senior">Senior</option>
-              <option value="master">Master</option>
-            </select>
-            <div className="flex items-center gap-1">
-              <input type="number" value={d.ratio} step="0.1" min="0.1"
-                onChange={e => onChange(d.id, 'ratio', e.target.value)}
-                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => refreshRatio(d)} title="Update ratio from last 4 weeks of historicals"
-                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
-                disabled={refreshingId === d.id}>
-                {refreshingId === d.id ? '…' : '↻'}
-              </button>
-            </div>
-            <button onClick={() => onRemove(d.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+            <DailyHoursTemplateEditor value={designRoster[d.id]?.dailyHoursTemplate} onChange={hours => onDailyHoursTemplateChange(d.id, hours)} />
           </div>
         ))}
       </div>
@@ -1225,10 +1224,11 @@ function useDraggableOrder<T extends { id: string }>(
 }
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
-function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onUpdateDailyHoursTemplate, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {} }: {
   team: (Omit<PresTeamMember, 'hours'> & { hours: unknown })[];
-  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string; _removed?: boolean }>;
+  presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string; _removed?: boolean; dailyHoursTemplate?: number[] }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) => void;
+  onUpdateDailyHoursTemplate: (id: string, hours: number[]) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
@@ -1302,6 +1302,9 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
                 Exclude from CPO cost (flex from another dept)
               </label>
             </div>
+            <div className="ml-6">
+              <DailyHoursTemplateEditor value={presRoster[m.id]?.dailyHoursTemplate} onChange={hours => onUpdateDailyHoursTemplate(m.id, hours)} />
+            </div>
           </div>
           );
         })}
@@ -1312,12 +1315,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 }
 
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
-function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation }: {
+function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onUpdateDailyHoursTemplate, onRemove, onReorder, onRefreshRatio, deptLocation }: {
   team: (Omit<FfTeamMember, 'hours'> & { hours: unknown })[];
-  ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
+  ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean; dailyHoursTemplate?: number[] }>;
   employeeRates?:       Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   onUpdateName: (id: string, name: string) => void;
   onUpdateRoster: (mi: number, field: 'ratio' | 'rate' | 'payType' | 'annualSalary' | 'role', val: number | string) => void;
+  onUpdateDailyHoursTemplate: (id: string, hours: number[]) => void;
   onRemove: (id: string) => void;
   onReorder: (newOrder: string[]) => void;
   onRefreshRatio: (id: string, name: string) => void;
@@ -1333,43 +1337,46 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
       <div className="space-y-2">
         {team.map((m, mi) => (
           <div key={m.id}
-            className={`grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
+            className={`space-y-1 pb-2 border-b border-slate-50 last:border-0 rounded transition-colors ${dragOverId === m.id ? 'bg-indigo-50' : ''}`}
             onDragOver={e => handleDragOver(e, m.id)}
             onDrop={() => handleDrop(m.id)}>
-            <span
-              draggable
-              onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
-              onDragEnd={handleDragEnd}
-              className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex-1 min-w-0">
-                <EmployeeAutocomplete
-                  value={m.name}
-                  location={deptLocation ?? 'Utah'}
-                  department="Fulfillment"
-                  onChange={val => onUpdateName(m.id, val)}
-                  onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); onUpdateRoster(mi, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(mi, 'payType', emp.pay_type); onUpdateRoster(mi, 'annualSalary', emp.annual_salary ?? 0); }}
-                />
+            <div className="grid grid-cols-[16px_1fr_80px_90px_20px] gap-2 items-center">
+              <span
+                draggable
+                onDragStart={e => { e.stopPropagation(); handleDragStart(m.id); }}
+                onDragEnd={handleDragEnd}
+                className="text-slate-300 cursor-grab active:cursor-grabbing text-center select-none px-1">⠿</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex-1 min-w-0">
+                  <EmployeeAutocomplete
+                    value={m.name}
+                    location={deptLocation ?? 'Utah'}
+                    department="Fulfillment"
+                    onChange={val => onUpdateName(m.id, val)}
+                    onSelect={(emp: RipplingEmployee) => { onUpdateName(m.id, emp.full_name); onUpdateRoster(mi, 'role', emp.role); onUpdateRoster(mi, 'rate', emp.hourly_rate ?? 0); onUpdateRoster(mi, 'payType', emp.pay_type); onUpdateRoster(mi, 'annualSalary', emp.annual_salary ?? 0); }}
+                  />
+                </div>
+                {m.isManager && (
+                  <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+                )}
               </div>
-              {m.isManager && (
-                <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
-              )}
+              <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
+                className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                <option value="specialist">Specialist</option>
+                <option value="senior">Senior</option>
+                <option value="master">Master</option>
+              </select>
+              <div className="flex items-center gap-1">
+                <input type="number" value={m.ratio} step="0.05" min="0.05"
+                  onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
+                  className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
+                  className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
+              </div>
+              <button onClick={() => onRemove(m.id)}
+                className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
             </div>
-            <select value={m.role ?? 'specialist'} onChange={e => onUpdateRoster(mi, 'role', e.target.value)}
-              className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-              <option value="specialist">Specialist</option>
-              <option value="senior">Senior</option>
-              <option value="master">Master</option>
-            </select>
-            <div className="flex items-center gap-1">
-              <input type="number" value={m.ratio} step="0.05" min="0.05"
-                onChange={e => onUpdateRoster(mi, 'ratio', parseFloat(e.target.value) || 0)}
-                className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-              <button onClick={() => onRefreshRatio(m.id, m.name)} title="Update from last 4 weeks"
-                className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0">↻</button>
-            </div>
-            <button onClick={() => onRemove(m.id)}
-              className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+            <DailyHoursTemplateEditor value={ffRoster[m.id]?.dailyHoursTemplate} onChange={hours => onUpdateDailyHoursTemplate(m.id, hours)} />
           </div>
         ))}
       </div>
@@ -1390,13 +1397,13 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   presCheckHours:        Record<string, number[]>;
   onPresDailyHoursChange:(h: Record<string, number[]>) => void;
   onPresCheckHoursChange:(h: Record<string, number[]>) => void;
-  presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
+  presRoster:            Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean; dailyHoursTemplate?: number[] }>;
   employeeRates?:         Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
   presSettings:          { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } };
   mgrTotalHours:         Record<string, Record<string, number>>;
   mgrTotalDailyHours:    Record<string, number[]>;
   onPresHoursChange:     (h: Record<string, Record<string, number>>) => void;
-  onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
+  onPresRosterChange:    (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; dailyHoursTemplate?: number[] }>) => void;
   onPresSettingsChange:  (s: { dateFrom?: string; dateTo?: string; weekOverrides?: Record<string, { ut: number; ga: number }>; dayPcts?: number[]; dayOverrides?: Record<string, { ut: number; ga: number }>; dailyReceived?: Record<string, number>; checkSettings?: { c1Min?: number; c1Max?: number; c2Min?: number; c2Max?: number; c3Min?: number; c3Max?: number; c1Mins?: number; c2Mins?: number; c3Mins?: number } }) => void;
   onMgrTotalHoursChange: (h: Record<string, Record<string, number>>) => void;
   onMgrTotalDailyHoursChange: (h: Record<string, number[]>) => void;
@@ -1731,6 +1738,21 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   const team = buildPresTeam(false);
   const fullTeam = buildPresTeam(true);
 
+  // Pre-populate daily hours from weekly schedule on first load — same pattern
+  // as Design/Fulfillment: a member's dailyHoursTemplate wins if set, otherwise
+  // fall back to an even Mon-Fri split of their weekly total.
+  useEffect(() => {
+    const todayKey = isoMonday(0);
+    const init: Record<string, number[]> = {};
+    team.forEach(m => {
+      const key = `${todayKey}-${m.id}`;
+      if (presDailyHours[key]) return;
+      const filled = fillDailyHours(presHours[m.id]?.[todayKey] ?? 0, presRoster[m.id]?.dailyHoursTemplate);
+      if (filled) init[key] = filled;
+    });
+    if (Object.keys(init).length > 0) onPresDailyHoursChange({ ...presDailyHours, ...init });
+  }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function updateHours(memberId: string, weekIdx: number, val: number) {
     const key = isoMonday(weekIdx);
     const newHours = { ...presHours, [memberId]: { ...(presHours[memberId] ?? {}), [key]: val } };
@@ -1761,6 +1783,10 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   function updateRoster(memberId: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) {
     const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member', payType: 'hourly' as const, annualSalary: 0 };
     onPresRosterChange({ ...presRoster, [memberId]: { ...existing, [field]: val } });
+  }
+  function updateDailyHoursTemplate(memberId: string, hours: number[]) {
+    const existing = presRoster[memberId] ?? { ratio: 1, rate: 0, name: 'Team Member', payType: 'hourly' as const, annualSalary: 0 };
+    onPresRosterChange({ ...presRoster, [memberId]: { ...existing, dailyHoursTemplate: hours } });
   }
 
   function handleAddMember() {
@@ -1954,6 +1980,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   presRoster={presRoster}
                   deptLocation={location}
                   onUpdateRoster={updateRoster}
+                  onUpdateDailyHoursTemplate={updateDailyHoursTemplate}
                   onRemove={handleRemoveMember}
                   employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
@@ -2467,11 +2494,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   teamActuals:     { department: string; week_of: string; member_name: string; actual_hours: number; actual_orders: number }[];
   onActualsSaved:  () => void;
   ffHours:              Record<string, Record<string, number>>;
-  ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean }>;
+  ffRoster:             Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean; dailyHoursTemplate?: number[] }>;
   mgrTotalHours:        Record<string, Record<string, number>>;
   mgrTotalDailyHours:   Record<string, number[]>;
   onFfHoursChange:      (h: Record<string, Record<string, number>>) => void;
-  onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number }>) => void;
+  onFfRosterChange:     (r: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; dailyHoursTemplate?: number[] }>) => void;
   onMgrTotalHoursChange:(h: Record<string, Record<string, number>>) => void;
   onMgrTotalDailyHoursChange: (h: Record<string, number[]>) => void;
   employeeRates?:        Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
@@ -2490,14 +2517,17 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
   useEffect(() => {
     const init: Record<string, number[]> = {};
     const todayKey = isoMonday(0);
+    function fillFor(id: string) {
+      return fillDailyHours(ffHours[id]?.[todayKey] ?? 0, ffRoster[id]?.dailyHoursTemplate);
+    }
     (location === 'Utah' ? UTAH_FULFILLMENT_TEAM : GEORGIA_FULFILLMENT_TEAM).forEach(m => {
-      const weeklyHrs = ffHours[m.id]?.[todayKey] ?? 0;
-      if (weeklyHrs > 0) init[`${todayKey}-${m.id}`] = distributeHours(weeklyHrs);
+      const filled = fillFor(m.id);
+      if (filled) init[`${todayKey}-${m.id}`] = filled;
     });
     Object.keys(ffRoster).forEach(id => {
       if (!init[`${todayKey}-${id}`]) {
-        const weeklyHrs = ffHours[id]?.[todayKey] ?? 0;
-        if (weeklyHrs > 0) init[`${todayKey}-${id}`] = distributeHours(weeklyHrs);
+        const filled = fillFor(id);
+        if (filled) init[`${todayKey}-${id}`] = filled;
       }
     });
     if (Object.keys(init).length > 0) setFfDailyHours(prev => {
@@ -2572,6 +2602,11 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     if (!id) return;
     const existing = ffRoster[id] ?? { ratio: team[mi].ratio, rate: team[mi].rate, name: team[mi].name, payType: 'hourly' as const, annualSalary: 0 };
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, [field]: val } });
+  }
+  function updateDailyHoursTemplate(id: string, hours: number[]) {
+    const mi = team.findIndex(m => m.id === id);
+    const existing = ffRoster[id] ?? { ratio: team[mi]?.ratio ?? 1, rate: team[mi]?.rate ?? 0, name: team[mi]?.name ?? '', payType: 'hourly' as const, annualSalary: 0 };
+    onFfRosterChange({ ...ffRoster, [id]: { ...existing, dailyHoursTemplate: hours } });
   }
 
   const weekCap    = team.reduce((s, m) => s + (m.ratio > 0 ? (m.hours[isoMonday(0)] ?? m.defaultHrs ?? 0) / m.ratio : 0), 0);
@@ -2763,6 +2798,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   deptLocation={location}
                   onUpdateName={updateFfRosterName}
                   onUpdateRoster={updateRoster}
+                  onUpdateDailyHoursTemplate={updateDailyHoursTemplate}
                   onRemove={handleRemoveFfMember}
                   employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
@@ -3425,7 +3461,7 @@ export function SchedulePage({
   // Permission derived from current location
   const canEditCurrent = location === 'Utah' ? canEditUtah : canEditGeorgia;
   const defaultDept = (userDepartment as 'design' | 'preservation' | 'fulfillment' | null) ?? 'design';
-  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin'>(defaultDept);
+  const [dept, setDept] = useState<'design' | 'preservation' | 'fulfillment' | 'master' | 'payroll' | 'resin' | 'openShifts'>(defaultDept);
 
   // ── Supabase-persisted settings ───────────────────────────────────────────────
   const { settings, loading: settingsLoading, saveState, update } = useScheduleSettings(location);
@@ -3639,8 +3675,8 @@ export function SchedulePage({
     const init: Record<string, number[]> = {};
     const todayKey = isoMonday(0);
     designers.forEach(d => {
-      const weeklyHrs = schedule[0]?.[d.id] ?? 0;
-      if (weeklyHrs > 0) init[`${todayKey}-${d.id}`] = distributeHours(weeklyHrs);
+      const filled = fillDailyHours(schedule[0]?.[d.id] ?? 0, settings.designRoster[d.id]?.dailyHoursTemplate);
+      if (filled) init[`${todayKey}-${d.id}`] = filled;
     });
     if (Object.keys(init).length > 0) setDesignDailyHours(prev => {
       // Only pre-populate members that have no saved entry at all
@@ -3663,6 +3699,12 @@ export function SchedulePage({
     if (field === 'name')    currentRoster[id] = { ...existing, name: value } as typeof currentRoster[string];
     else if (field === 'payType') currentRoster[id] = { ...existing, payType: value as PayType } as typeof currentRoster[string];
     else currentRoster[id] = { ...existing, [field]: parseFloat(value) || 0 } as typeof currentRoster[string];
+    update('designRoster', currentRoster);
+  }
+  function handleDesignerDailyHoursChange(id: string, hours: number[]) {
+    const currentRoster = { ...settings.designRoster };
+    const existing = currentRoster[id] ?? designers.find(d => d.id === id) ?? {};
+    currentRoster[id] = { ...existing, dailyHoursTemplate: hours } as typeof currentRoster[string];
     update('designRoster', currentRoster);
   }
   function handleAddDesigner() {
@@ -4086,9 +4128,10 @@ export function SchedulePage({
               ['master',       'Master Schedule'],
               ['payroll',      'Payroll Upload'],
               ['resin',        'Resin'],
+              ['openShifts',   'Open Shifts'],
             ] as const).filter(([id]) => {
               if (userRole === 'manager' && userDepartment) {
-                return id === userDepartment;
+                return id === userDepartment || id === 'openShifts';
               }
               if (userRole === 'viewer') {
                 return ['design', 'preservation', 'resin'].includes(id);
@@ -4282,7 +4325,9 @@ export function SchedulePage({
               <div className="mt-3 bg-white border border-slate-100 rounded-xl p-5">
                 <RosterEditor
                   designers={designers}
+                  designRoster={settings.designRoster}
                   onChange={handleDesignerChange}
+                  onDailyHoursTemplateChange={handleDesignerDailyHoursChange}
                   onAdd={handleAddDesigner}
                   onRemove={handleRemoveDesigner}
                   location={location}
@@ -5083,6 +5128,15 @@ export function SchedulePage({
           ffRoster={settings.ffRoster}
         />
         </>
+      )}
+
+      {dept === 'openShifts' && (
+        <OpenShiftsSection
+          location={location}
+          canEdit={canEditCurrent}
+          userRole={userRole}
+          userDepartment={userDepartment}
+        />
       )}
 
     </div>
