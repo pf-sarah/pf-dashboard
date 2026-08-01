@@ -12,6 +12,11 @@ export interface DesignerRoster {
     // grid, future editing) while keeping their historical scheduled hours
     // intact for past-period goal/CPO calculations.
     _removed?: boolean;
+    // Default hours per day, Mon..Sun (0 = day off). When set, drives the This
+    // Week auto-fill directly instead of splitting a weekly total evenly, so
+    // members whose hours vary by day (e.g. 8/0/4/0/6/0/0) don't need manual
+    // re-entry every week.
+    dailyHoursTemplate?: number[];
   };
 }
 
@@ -27,7 +32,7 @@ export interface PresSettings {
 }
 
 export interface TeamRoster {
-  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master'; _removed?: boolean };
+  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master'; _removed?: boolean; dailyHoursTemplate?: number[] };
 }
 
 // memberId → { isoMonday → hours }. Week-of-year is anchored to a calendar

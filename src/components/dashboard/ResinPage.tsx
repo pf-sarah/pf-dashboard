@@ -6,6 +6,7 @@ import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 import { HistoricalsSection } from './HistoricalsSection';
 import { EmployeeAutocomplete, type RipplingEmployee } from './EmployeeAutocomplete';
+import { DailyHoursTemplateEditor, fillDailyHours } from './DailyHoursTemplate';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,9 @@ export interface ResinMember {
   annualSalary: number;
   isManager?:  boolean;
   role?:       'specialist' | 'senior' | 'master';
+  // Default hours per day, Mon..Sun (0 = day off). Drives the This Week
+  // auto-fill directly instead of splitting a weekly total evenly.
+  dailyHoursTemplate?: number[];
 }
 
 interface CohortRow {
@@ -200,6 +204,26 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
     const key = isoMonday(weekIdx);
     const next = { ...hours, [key]: { ...(hours[key] ?? {}), [memberId]: val } };
     setHours(next);
+
+    // Keep This Week's daily breakdown in sync with the new weekly total.
+    const member = roster.find(m => m.id === memberId);
+    const filled = fillDailyHours(val, member?.dailyHoursTemplate) ?? [0, 0, 0, 0, 0, 0, 0];
+    const dailyKey = `${key}-${memberId}`;
+    setResinDailyHours({ ...resinDailyHours, [dailyKey]: filled });
+  }
+
+  function setDH(memberId: string, weekIdx: number, di: number, val: number) {
+    const key = `${isoMonday(weekIdx)}-${memberId}`;
+    const prev = resinDailyHours[key] ?? Array(7).fill(0);
+    const dayValues = prev.map((h: number, j: number) => j === di ? val : h);
+    setResinDailyHours({ ...resinDailyHours, [key]: dayValues });
+
+    // Keep the weekly total (used by the 52-week planner) in sync. Written
+    // directly (not via updateHours) so it doesn't re-trigger a daily
+    // redistribution that would clobber the exact values just entered.
+    const weekTotal = dayValues.reduce((s: number, h: number) => s + h, 0);
+    const weekKey = isoMonday(weekIdx);
+    setHours({ ...hours, [weekKey]: { ...(hours[weekKey] ?? {}), [memberId]: weekTotal } });
   }
 
   function updateMgrTotalHours(weekIdx: number, memberId: string, val: number) {
@@ -242,6 +266,25 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
   function updateRosterField(id: string, field: keyof ResinMember, val: string | number | boolean) {
     setRoster(roster.map(m => m.id === id ? { ...m, [field]: val } : m));
   }
+
+  function updateDailyHoursTemplate(id: string, dailyHoursTemplate: number[]) {
+    setRoster(roster.map(m => m.id === id ? { ...m, dailyHoursTemplate } : m));
+  }
+
+  // Pre-populate daily hours from weekly schedule on first load — same pattern
+  // as Design/Preservation/Fulfillment: a member's dailyHoursTemplate wins if
+  // set, otherwise fall back to an even Mon-Fri split of their weekly total.
+  useEffect(() => {
+    const todayKey = isoMonday(0);
+    const init: Record<string, number[]> = {};
+    roster.forEach(m => {
+      const key = `${todayKey}-${m.id}`;
+      if (resinDailyHours[key]) return;
+      const filled = fillDailyHours(hours[todayKey]?.[m.id] ?? 0, m.dailyHoursTemplate);
+      if (filled) init[key] = filled;
+    });
+    if (Object.keys(init).length > 0) setResinDailyHours({ ...resinDailyHours, ...init });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function addMember() {
     const id = `resin-${Date.now()}`;
@@ -424,47 +467,50 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
             </div>
             <div className="space-y-2">
               {roster.map(m => (
-                <div key={m.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <div className="flex-1 min-w-0">
-                      <EmployeeAutocomplete
-                        value={m.name}
-                        location="Utah"
-                        department="Resin"
-                        onChange={val => updateRosterField(m.id, 'name', val)}
-                        onSelect={(emp: RipplingEmployee) => {
-                          updateRosterField(m.id, 'name', emp.full_name);
-                          updateRosterField(m.id, 'role', emp.role);
-                          updateRosterField(m.id, 'payType', emp.pay_type);
-                          updateRosterField(m.id, 'hourlyRate', emp.hourly_rate ?? 0);
-                          updateRosterField(m.id, 'annualSalary', emp.annual_salary ?? 0);
-                          updateRosterField(m.id, 'isManager', /manager|head of|director/i.test(emp.title ?? ''));
-                        }}
-                      />
+                <div key={m.id} className="space-y-1 pb-2 border-b border-slate-50 last:border-0">
+                  <div className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex-1 min-w-0">
+                        <EmployeeAutocomplete
+                          value={m.name}
+                          location="Utah"
+                          department="Resin"
+                          onChange={val => updateRosterField(m.id, 'name', val)}
+                          onSelect={(emp: RipplingEmployee) => {
+                            updateRosterField(m.id, 'name', emp.full_name);
+                            updateRosterField(m.id, 'role', emp.role);
+                            updateRosterField(m.id, 'payType', emp.pay_type);
+                            updateRosterField(m.id, 'hourlyRate', emp.hourly_rate ?? 0);
+                            updateRosterField(m.id, 'annualSalary', emp.annual_salary ?? 0);
+                            updateRosterField(m.id, 'isManager', /manager|head of|director/i.test(emp.title ?? ''));
+                          }}
+                        />
+                      </div>
+                      {m.isManager && (
+                        <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
+                      )}
                     </div>
-                    {m.isManager && (
-                      <span className="shrink-0 text-[9px] font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">Manager</span>
-                    )}
+                    <select value={m.role ?? 'specialist'} onChange={e => updateRosterField(m.id, 'role', e.target.value)}
+                      className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                      <option value="specialist">Specialist</option>
+                      <option value="senior">Senior</option>
+                      <option value="master">Master</option>
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <input type="number" value={m.ratio} step="0.01" min="0.01"
+                        onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0)}
+                        className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                      <button onClick={() => refreshRatio(m)} title="Update ratio from last 8 weeks of historicals"
+                        className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
+                        disabled={refreshingId === m.id}>
+                        {refreshingId === m.id ? '…' : '↻'}
+                      </button>
+                    </div>
+                    {roster.length > 1 ? (
+                      <button onClick={() => removeMember(m.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
+                    ) : <span />}
                   </div>
-                  <select value={m.role ?? 'specialist'} onChange={e => updateRosterField(m.id, 'role', e.target.value)}
-                    className="border border-slate-200 rounded px-1.5 py-1.5 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                    <option value="specialist">Specialist</option>
-                    <option value="senior">Senior</option>
-                    <option value="master">Master</option>
-                  </select>
-                  <div className="flex items-center gap-1">
-                    <input type="number" value={m.ratio} step="0.01" min="0.01"
-                      onChange={e => updateRosterField(m.id, 'ratio', parseFloat(e.target.value) || 0)}
-                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm text-center text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                    <button onClick={() => refreshRatio(m)} title="Update ratio from last 8 weeks of historicals"
-                      className="text-slate-300 hover:text-indigo-500 transition-colors text-sm shrink-0"
-                      disabled={refreshingId === m.id}>
-                      {refreshingId === m.id ? '…' : '↻'}
-                    </button>
-                  </div>
-                  {roster.length > 1 ? (
-                    <button onClick={() => removeMember(m.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
-                  ) : <span />}
+                  <DailyHoursTemplateEditor value={m.dailyHoursTemplate} onChange={dailyHours => updateDailyHoursTemplate(m.id, dailyHours)} />
                 </div>
               ))}
             </div>
@@ -550,10 +596,7 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                               onChange={e => {
                                 const raw = parseFloat(e.target.value) || 0;
                                 const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
-                                const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
-                                const prev = resinDailyHours[key] ?? Array(7).fill(0);
-                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? newHours : h) };
-                                setResinDailyHours(next);
+                                setDH(m.id, thisWeekOffset, di, newHours);
                               }}
                               className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
                             {m.isManager && (
