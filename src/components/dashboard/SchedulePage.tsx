@@ -13,7 +13,7 @@ import {
   type KpiDept, type KpiLocation, type KpiState,
 } from '@/hooks/useKpiMetrics';
 import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
-import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, isoMondayFromDate, weeksUntilEndOfYear } from '@/lib/weekDates';
+import { getMondayDate, isoMonday, getWeekLabel, getMonthKey, weeksUntilEndOfYear } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -40,22 +40,13 @@ interface WeekSchedule {
 const WEEKS              = 52;
 const WINDOW             = 8;
 const PRESERVATION_WEEKS = 8;
-// Stretch-goal turnaround bands. Fulfillment always adds FULFILLMENT_WEEKS
-// on top of the design-only figure, so the two bands are meant to line up:
-// 8 + 2 = 10 and 14 + 2 = 16.
-const FULFILLMENT_WEEKS      = 2;
 const DESIGN_TARGET_MIN      = 8;
 const DESIGN_TARGET_MAX      = 14;
-const TOTAL_TARGET_MIN       = DESIGN_TARGET_MIN + FULFILLMENT_WEEKS;
-const TOTAL_TARGET_MAX       = DESIGN_TARGET_MAX + FULFILLMENT_WEEKS;
 // Ratio assumed for a hypothetical new hire on the Queue & Turnaround planner —
 // a specialist pace, not the team's blended average, since a new hire isn't
 // presumed to start at whatever mix of senior/junior ratios happens to be
 // scheduled that week.
 const NEW_HIRE_RATIO = 2.0;
-// How many weeks past the November checkpoint the capacity solver requires the
-// goal to hold, so a handful of near-tail cohorts don't dominate the solve.
-const SUSTAIN_CHECK_WEEKS    = 16;
 // Default projection ratio for auto-filled "bouquets received" estimates:
 // same week last year × this multiplier. Editable per week.
 const DEFAULT_INTAKE_MULTIPLIER = 1.2;
@@ -3500,7 +3491,6 @@ export function SchedulePage({
   const [weekOffset,   setWeekOffset]  = useState(0);
   const [showCPO,      setShowCPO]     = useState(true);
   const [designInputMode, setDesignInputMode] = useState<InputMode>('hours');
-  const [goalUnit, setGoalUnit] = useState<InputMode>('output');
   const [queueUnit, setQueueUnit] = useState<InputMode>('hours');
   const [activeTab,    setActiveTab]   = useState<'thisweek' | 'schedule' | 'monthly' | 'queue' | 'historicals'>('thisweek');
   const [showDoneCohorts, setShowDoneCohorts] = useState(false);
@@ -3693,161 +3683,6 @@ export function SchedulePage({
     });
   }, [avgIntake, presActuals, weeklyEstimates, location, teamActuals, actualIntakeByWeek, weeklyMultipliers]);
 
-  // Actual completed design output, by week — once entered via Historicals, this
-  // takes over from the schedule/plan for that week when running the simulation,
-  // so real progress (not just what was planned) drives the capacity goal below.
-  const designActualFramesByWeek = useMemo(() => {
-    const map: Record<string, number> = {};
-    teamActuals.filter(r => r.department === 'design').forEach(r => {
-      map[r.week_of] = (map[r.week_of] ?? 0) + r.actual_orders;
-    });
-    return map;
-  }, [teamActuals]);
-
-
-  // ── November capacity goal ───────────────────────────────────────────────────
-  // Stretch goal: design-only turnaround should be back inside
-  // [DESIGN_TARGET_MIN, DESIGN_TARGET_MAX] before November and stay there.
-  // Solves (via binary search over the shared FIFO simulation) for a DECLINING
-  // per-week capacity target — front-loaded highest this week, tapering to zero
-  // extra by the end of the checked window — rather than one flat number repeated
-  // everywhere. The taper's slope depends directly on how many weeks are left, and
-  // its starting point uses actual completed output (once entered) instead of the
-  // plan for any week that already happened, so the whole curve responds to real
-  // progress, not just what was scheduled.
-  const capacityGoal = useMemo(() => {
-    const now = getMondayDate(0);
-    let novDate = new Date(now.getFullYear(), 10, 1);
-    if (novDate < now) novDate = new Date(now.getFullYear() + 1, 10, 1);
-    const novMonday = isoMondayFromDate(novDate);
-    const weeksToNovember = Math.max(0, Math.round(
-      (new Date(novMonday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
-    ));
-    // Nov 1 can land any day of the week, so the checkpoint's Monday sometimes
-    // rolls back into late October — display through the week of Nov 9 as well
-    // so the goal bubble always visibly reaches into November itself.
-    const nov9Date   = new Date(novDate.getFullYear(), 10, 9);
-    const nov9Monday = isoMondayFromDate(nov9Date);
-    const weeksToNov9 = Math.max(0, Math.round(
-      (new Date(nov9Monday + 'T12:00:00').getTime() - now.getTime()) / (7 * 24 * 60 * 60 * 1000)
-    ));
-    const baseCapacity = weeklyTotals.map(t => t.totalFrames);
-    // Prefer actual completed frames over the plan wherever they're known (in
-    // practice this only ever differs for the current/just-passed week — future
-    // weeks have no actuals yet).
-    const simCapacity = baseCapacity.map((f, w) => designActualFramesByWeek[isoMonday(w)] ?? f);
-    const projected     = simulateDesignTurnarounds(designableQueue, graduatingCohorts, simCapacity);
-    const atNovemberIdx = Math.min(weeksToNovember, WEEKS - 1);
-    const projectedAtNovember = projected[atNovemberIdx] ?? null;
-    // The last PRESERVATION_WEEKS entries of any simulation are structurally null
-    // (their graduation week falls past the 52-week horizon) regardless of capacity —
-    // exclude them, and cap how far past November we require the goal to hold so a
-    // handful of near-tail cohorts don't dominate the solve (see SUSTAIN_CHECK_WEEKS).
-    const lastCheckableWeek = Math.max(1, Math.min(WEEKS - PRESERVATION_WEEKS - 1, atNovemberIdx + SUSTAIN_CHECK_WEEKS));
-
-    // Worst overage (weeks above the ceiling) from the November checkpoint onward.
-    function worstOverage(capacity: number[]): number {
-      if (atNovemberIdx > lastCheckableWeek) return 0;
-      const sim = simulateDesignTurnarounds(designableQueue, graduatingCohorts, capacity);
-      let worst = 0;
-      for (let w = atNovemberIdx; w <= lastCheckableWeek; w++) {
-        const t = sim[w];
-        if (t === null) return Infinity;
-        if (t > DESIGN_TARGET_MAX) worst = Math.max(worst, t - DESIGN_TARGET_MAX);
-      }
-      return worst;
-    }
-
-    // Declining ramp: extra[w] = peak at w=0, linearly down to 0 by lastCheckableWeek.
-    // Binary search the single "peak" scalar against the real simulation so the
-    // curve is verified to actually work, not just a plausible-looking taper.
-    function rampExtra(peak: number, w: number): number {
-      return Math.max(0, peak * (1 - w / lastCheckableWeek));
-    }
-    function worstOverageWithRamp(peak: number): number {
-      return worstOverage(simCapacity.map((f, w) => f + rampExtra(peak, w)));
-    }
-    let peak = 0;
-    if (worstOverage(simCapacity) > 0) {
-      let lo = 0, hi = Math.max(40, ...simCapacity, 1);
-      while (worstOverageWithRamp(hi) > 0 && hi < 5000) hi *= 2;
-      for (let i = 0; i < 24; i++) {
-        const mid = (lo + hi) / 2;
-        if (worstOverageWithRamp(mid) > 0) lo = mid; else hi = mid;
-      }
-      peak = Math.ceil(hi);
-    }
-
-    const requiredCapacity = simCapacity.map((f, w) => f + Math.round(rampExtra(peak, w)));
-    const onTrack = peak === 0 && worstOverage(simCapacity) !== Infinity;
-
-    // First intake week (as currently scheduled/actual, no ramp) whose projected
-    // turnaround breaks the ceiling — a pointer back to where in the Weekly Schedule
-    // capacity starts falling short, rather than just the aggregate target number.
-    let firstOverWeek: number | null = null;
-    for (let w = 0; w <= lastCheckableWeek; w++) {
-      const t = projected[w];
-      if (t === null || t > DESIGN_TARGET_MAX) { firstOverWeek = w; break; }
-    }
-
-    // Hours equivalent — frames are the real planning unit (they drive the queue
-    // simulation), so hours are derived from each week's actual scheduled hours/frame
-    // ratio, falling back to a blended ratio across all scheduled weeks for weeks
-    // with nothing entered yet (e.g. far-future weeks, or the gap frames, which have
-    // no hours of their own to derive a ratio from).
-    const baseHours = weeklyTotals.map(t => t.totalHours);
-    let ratioSumFrames = 0, ratioSumHours = 0;
-    weeklyTotals.forEach(t => { if (t.totalFrames > 0) { ratioSumFrames += t.totalFrames; ratioSumHours += t.totalHours; } });
-    const blendedRatio = ratioSumFrames > 0 ? ratioSumHours / ratioSumFrames
-      : (designers.length > 0 ? designers.reduce((s, d) => s + d.ratio, 0) / designers.length : 0);
-    const hoursPerFrame = weeklyTotals.map(t => t.totalFrames > 0 ? t.totalHours / t.totalFrames : blendedRatio);
-    // Gap always compares the target against the PLAN (baseCapacity), not the
-    // actual-aware simCapacity, since this is what tells a manager how much more
-    // to schedule — a week that already over-delivered vs. plan shouldn't show a
-    // gap just because the ramp math used its higher actual internally.
-    const frameGap    = baseCapacity.map((f, w) => Math.max(0, requiredCapacity[w] - f));
-    const requiredHours = baseHours.map((h, w) => h + frameGap[w] * hoursPerFrame[w]);
-    const thisWeekTarget      = requiredCapacity[0] ?? 0;
-    const thisWeekTargetHours = requiredHours[0] ?? 0;
-
-    // ── Overstaffing ceiling ──────────────────────────────────────────────────
-    // Mirror of the ramp-up search above, but in the other direction: how much
-    // would a manager need to cut from every week's capacity, right now, to
-    // bring turnaround back up to the DESIGN_TARGET_MIN floor anywhere it's
-    // currently dipping under it in the rolling window? Modeled as a flat
-    // (non-tapering) cut rather than a ramp, since overstaffing is a standing
-    // schedule problem, not a one-time emergency the way a backlog spike is.
-    function worstUnderage(capacity: number[]): number {
-      const sim = simulateDesignTurnarounds(designableQueue, graduatingCohorts, capacity);
-      let worst = 0;
-      for (let w = 0; w <= lastCheckableWeek; w++) {
-        const t = sim[w];
-        if (t !== null && t < DESIGN_TARGET_MIN) worst = Math.max(worst, DESIGN_TARGET_MIN - t);
-      }
-      return worst;
-    }
-    function worstUnderageWithCut(cut: number): number {
-      return worstUnderage(simCapacity.map(f => Math.max(0, f - cut)));
-    }
-    let requiredCut = 0;
-    if (worstUnderage(simCapacity) > 0) {
-      let lo = 0, hi = Math.max(40, ...simCapacity, 1);
-      while (worstUnderageWithCut(hi) > 0 && hi < 5000) hi *= 2;
-      for (let i = 0; i < 24; i++) {
-        const mid = (lo + hi) / 2;
-        if (worstUnderageWithCut(mid) > 0) lo = mid; else hi = mid;
-      }
-      requiredCut = Math.ceil(hi);
-    }
-    const overstaffedByFrames = requiredCut;
-    const overstaffedByHours  = overstaffedByFrames * (hoursPerFrame[0] ?? blendedRatio);
-
-    return {
-      novDate, weeksToNovember, weeksToNov9, projectedAtNovember, thisWeekTarget, thisWeekTargetHours,
-      baseCapacity, requiredCapacity, onTrack, baseHours, requiredHours, firstOverWeek,
-      overstaffedByFrames, overstaffedByHours,
-    };
-  }, [designableQueue, graduatingCohorts, weeklyTotals, designers, designActualFramesByWeek]);
 
   // ── Hiring / what-if plan ────────────────────────────────────────────────────
   // Powers the Design hours columns on the Queue & Turnaround tab. The only
@@ -4026,11 +3861,9 @@ export function SchedulePage({
   // (from designPromises) gets missed. Each active cohort's `remaining` count
   // becomes "due" in the earliest schedule week on/after its promised_by_date;
   // due amounts accumulate, and each week's minimum is whatever's needed on top
-  // of what's already scheduled in prior weeks to keep cumulative pace — same
-  // gap-to-target spirit as the "Still needed" row above, just driven by
-  // per-cohort deadlines instead of a single turnaround curve. Never below
-  // what's already scheduled that week, and a week that falls short simply
-  // raises next week's requirement, same self-correcting behavior as "Still needed".
+  // of what's already scheduled in prior weeks to keep cumulative pace. Never
+  // below what's already scheduled that week, and a week that falls short
+  // simply raises next week's requirement, so it self-corrects.
   const mustDesignByWeek = useMemo(() => {
     const cumulativeRequired = Array.from({ length: WEEKS }, () => 0);
     historicalRemaining
@@ -4253,115 +4086,6 @@ export function SchedulePage({
             )}
           </div>
 
-          {/* ── Turnaround capacity goal ─────────────────────────────────────── */}
-          <div className="bg-white border border-slate-100 rounded-xl p-5">
-            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-700">Turnaround goal — before November</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Stretch goal: {DESIGN_TARGET_MIN}–{DESIGN_TARGET_MAX} wks design-only ({TOTAL_TARGET_MIN}–{TOTAL_TARGET_MAX} wks incl. ~{FULFILLMENT_WEEKS}-wk fulfillment), held all year — not just at one deadline.
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-slate-500 whitespace-nowrap">
-                  wk of {getMondayDate(capacityGoal.weeksToNovember).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  {' · '}{capacityGoal.weeksToNovember} wk{capacityGoal.weeksToNovember !== 1 ? 's' : ''} away
-                </span>
-                <InputModeToggle mode={goalUnit} onChange={setGoalUnit} unitLabel="Frames" />
-              </div>
-            </div>
-
-            {capacityGoal.projectedAtNovember !== null ? (() => {
-              const t       = capacityGoal.projectedAtNovember;
-              const onTrack = t >= DESIGN_TARGET_MIN && t <= DESIGN_TARGET_MAX;
-              const over    = t > DESIGN_TARGET_MAX;
-              const gap     = over ? t - DESIGN_TARGET_MAX : (onTrack ? 0 : DESIGN_TARGET_MIN - t);
-              const barColor  = onTrack ? 'bg-green-400' : over ? (t <= 18 ? 'bg-amber-400' : 'bg-red-600') : 'bg-orange-400';
-              const textColor = onTrack ? 'text-green-700' : over ? (t <= 18 ? 'text-amber-700' : 'text-red-800') : 'text-orange-700';
-              return (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-slate-500 w-28 shrink-0">Projected, {getWeekLabel(capacityGoal.weeksToNovember)}</span>
-                    <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden relative">
-                      <div className="absolute top-0 bottom-0 bg-green-100"
-                        style={{ left: `${(DESIGN_TARGET_MIN / 22) * 100}%`, width: `${((DESIGN_TARGET_MAX - DESIGN_TARGET_MIN) / 22) * 100}%` }} />
-                      <div className={`h-2.5 relative ${barColor}`} style={{ width: `${Math.min(100, (t / 22) * 100)}%` }} />
-                    </div>
-                    <span className={`text-xs font-semibold w-48 text-right shrink-0 ${textColor}`}>
-                      ~{t} wks{onTrack ? ' — on track' : over ? ' — over goal' : ' — ahead of goal'}
-                    </span>
-                  </div>
-                  {onTrack ? (
-                    capacityGoal.overstaffedByFrames > 0 ? (
-                      <p className="text-xs text-orange-700">
-                        Currently scheduled capacity holds design-only turnaround in the target band through November, but dips under the {DESIGN_TARGET_MIN}-wk floor somewhere in the window — team may be overstaffed by ~{Math.round(capacityGoal.overstaffedByFrames)}f (~{Math.round(capacityGoal.overstaffedByHours)}h)/wk relative to intake.
-                      </p>
-                    ) : (
-                      <p className="text-xs text-green-700">Currently scheduled capacity holds design-only turnaround in the target band through the planning window.</p>
-                    )
-                  ) : over ? (
-                    <>
-                      <p className={`text-xs font-medium ${textColor}`}>
-                        {gap} wk{gap !== 1 ? 's' : ''} over the {DESIGN_TARGET_MAX}-wk ceiling as scheduled — needs to ramp up to ~{Math.round(goalUnit === 'output' ? capacityGoal.thisWeekTarget : capacityGoal.thisWeekTargetHours)}{goalUnit === 'output' ? 'f' : 'h'} this week, tapering down toward the current pace as the backlog clears through November.
-                      </p>
-                      {capacityGoal.firstOverWeek !== null && (
-                        <p className="text-xs text-slate-400">
-                          As scheduled, turnaround first breaks {DESIGN_TARGET_MAX} wks for orders arriving {getWeekLabel(capacityGoal.firstOverWeek)} — check Weekly Schedule capacity around then (a common cause: designer hours not yet entered that far out).
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className={`text-xs ${textColor}`}>{gap} wk{gap !== 1 ? 's' : ''} ahead of the {DESIGN_TARGET_MIN}-wk floor — team may be overstaffed relative to intake.</p>
-                  )}
-                  {!capacityGoal.onTrack && (() => {
-                    const scheduledSeries = goalUnit === 'output' ? capacityGoal.baseCapacity     : capacityGoal.baseHours;
-                    const neededSeries    = goalUnit === 'output' ? capacityGoal.requiredCapacity : capacityGoal.requiredHours;
-                    const unit = goalUnit === 'output' ? 'f' : 'h';
-                    // Show every week through the November checkpoint (not just an
-                    // arbitrary first-8), so the gap stays visible all the way to
-                    // the actual goal date instead of cutting off around 8/31.
-                    const weeksShown = Math.min(Math.max(capacityGoal.weeksToNovember, capacityGoal.weeksToNov9) + 1, WEEKS - PRESERVATION_WEEKS - 1);
-                    return (
-                      <div className="overflow-x-auto -mx-1">
-                        <table className="text-xs min-w-full">
-                          <thead>
-                            <tr className="text-slate-400">
-                              <th className="sticky left-0 bg-white text-left font-medium px-1 py-1">Week</th>
-                              {Array.from({ length: weeksShown }, (_, w) => (
-                                <th key={w} className="text-center font-medium px-2 py-1 min-w-[64px]">
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="whitespace-nowrap">{getWeekLabel(w)}</span>
-                                    {w === 0 && <span className="text-[9px] bg-indigo-100 text-indigo-600 rounded px-1 leading-tight">now</span>}
-                                  </div>
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Scheduled</td>
-                              {Array.from({ length: weeksShown }, (_, w) => (
-                                <td key={w} className="text-center px-2 py-1 text-slate-600">{Math.round(scheduledSeries[w])}{unit}</td>
-                              ))}
-                            </tr>
-                            <tr>
-                              <td className="sticky left-0 bg-white text-left text-slate-500 px-1 py-1 whitespace-nowrap">Needed</td>
-                              {Array.from({ length: weeksShown }, (_, w) => (
-                                <td key={w} className="text-center px-2 py-1 font-semibold text-amber-700">{Math.round(neededSeries[w])}{unit}</td>
-                              ))}
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })() : (
-              <p className="text-xs text-red-600 italic">Queue isn&apos;t projected to clear within the 52-week planning window — increase capacity to get a projection.</p>
-            )}
-          </div>
-
           {/* Inner tabs */}
           <div className="flex border-b border-slate-200">
             {([
@@ -4431,20 +4155,6 @@ export function SchedulePage({
                     <button onClick={() => setDesignThisWeekOffset(Math.min(maxDesignThisWeekOffset, designThisWeekOffset + 1))} disabled={designThisWeekOffset >= maxDesignThisWeekOffset} className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
                   </div>
                 </div>
-                {(() => {
-                  const required  = capacityGoal.requiredCapacity[designThisWeekOffset] ?? capacityGoal.baseCapacity[designThisWeekOffset] ?? 0;
-                  const remaining = Math.max(0, required - teamWeekFrames);
-                  const onPace    = remaining <= 0.05;
-                  return (
-                    <div className={`px-5 py-2 border-b border-slate-100 flex items-center gap-2 flex-wrap ${onPace ? 'bg-green-50/50' : 'bg-amber-50/50'}`}>
-                      <span className={`text-xs font-medium ${onPace ? 'text-green-700' : 'text-amber-700'}`}>
-                        {onPace
-                          ? `On pace for the turnaround goal — ${Math.round(teamWeekFrames * 10) / 10}f scheduled of ${Math.round(required)}f needed this week.`
-                          : `${Math.round(remaining * 10) / 10} more frame${remaining >= 1.05 || remaining < 0.95 ? 's' : ''} still needed this week to stay on the turnaround goal (${Math.round(teamWeekFrames * 10) / 10}f of ${Math.round(required)}f scheduled).`}
-                      </span>
-                    </div>
-                  );
-                })()}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-xs">
                     <thead>
@@ -4631,33 +4341,10 @@ export function SchedulePage({
                         );
                       })}
                     </tr>
-                    {/* Still needed row — the gap toward the November turnaround goal,
-                        shown right where hours get entered so paging past 8/31 with
-                        Next → makes it obvious how much more each future week needs. */}
-                    <tr className="border-t border-slate-100 bg-amber-50/40">
-                      <td className="sticky left-0 bg-amber-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Still needed</td>
-                      {windowWeeks.map(w => {
-                        const gapFrames = Math.max(0, Math.round(capacityGoal.requiredCapacity[w] - weeklyTotals[w].totalFrames));
-                        const gapHours  = Math.max(0, Math.round((capacityGoal.requiredHours[w] - weeklyTotals[w].totalHours) * 10) / 10);
-                        return (
-                          <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
-                            {gapFrames > 0 ? (
-                              <>
-                                <div className="font-semibold text-amber-700">+{gapFrames}f</div>
-                                <div className="text-[10px] text-slate-400">+{gapHours}h</div>
-                              </>
-                            ) : (
-                              <div className="text-green-600 text-[10px]">on pace</div>
-                            )}
-                          </td>
-                        );
-                      })}
-                    </tr>
                     {/* Must design row — the minimum this week needs to hit so no client
                         promise locked in via "Snapshot promises" (Queue & Turnaround tab)
                         gets missed. Never below what's already scheduled; a short week
-                        just raises next week's minimum, same self-correcting behavior
-                        as "Still needed" above. */}
+                        just raises next week's minimum, so it self-corrects. */}
                     <tr className="border-t border-slate-100 bg-red-50/40">
                       <td className="sticky left-0 bg-red-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Must design</td>
                       {windowWeeks.map(w => {
