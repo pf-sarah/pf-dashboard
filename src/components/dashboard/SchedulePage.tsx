@@ -3422,6 +3422,49 @@ export function SchedulePage({
       .catch(() => {});
   }, [location]);
 
+  // Design delivery promises — "weeks until designed" locked in for clients,
+  // see the Snapshot button on the Queue & Turnaround tab. Keyed by intake week.
+  const [designPromises, setDesignPromises] = useState<Record<string, {
+    promisedByDate: string; promisedWeeks: number; lastConfirmedWeeks: number; lastConfirmedAt: string;
+  }>>({});
+  const [snapshotting, setSnapshotting] = useState(false);
+
+  function loadDesignPromises() {
+    fetch(`/api/design-promises?location=${location}`)
+      .then(r => r.json())
+      .then((d: { promises?: { week_of: string; promised_by_date: string; promised_weeks: number; last_confirmed_weeks: number; last_confirmed_at: string }[] }) => {
+        const map: Record<string, { promisedByDate: string; promisedWeeks: number; lastConfirmedWeeks: number; lastConfirmedAt: string }> = {};
+        (d.promises ?? []).forEach(row => {
+          map[row.week_of] = {
+            promisedByDate:    row.promised_by_date,
+            promisedWeeks:     row.promised_weeks,
+            lastConfirmedWeeks: row.last_confirmed_weeks,
+            lastConfirmedAt:   row.last_confirmed_at,
+          };
+        });
+        setDesignPromises(map);
+      })
+      .catch(() => {});
+  }
+
+  useEffect(() => { loadDesignPromises(); }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function takeDesignSnapshot() {
+    const cohorts = historicalRemaining
+      .filter(r => !('alreadyDone' in r && r.alreadyDone) && r.weeksFromNow !== null)
+      .map(r => ({ weekOf: r.weekOf, weeksFromNow: r.weeksFromNow as number }));
+    if (cohorts.length === 0) return;
+    setSnapshotting(true);
+    fetch('/api/design-promises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ location, cohorts }),
+    })
+      .then(() => loadDesignPromises())
+      .catch(() => {})
+      .finally(() => setSnapshotting(false));
+  }
+
   const weeklyEstimates = settings.weeklyEstimates;
   const weeklyMultipliers = settings.weeklyMultipliers ?? {};
 
@@ -3938,8 +3981,8 @@ export function SchedulePage({
         trimRemaining = 0;
       }
     }
-    const results: { weekOf: string; weeksFromNow: number | null; alreadyDone: boolean }[] =
-      queueCohorts.map(c => ({ weekOf: c.weekOf, weeksFromNow: null, alreadyDone: c.remaining === 0 }));
+    const results: { weekOf: string; weeksFromNow: number | null; alreadyDone: boolean; remaining: number }[] =
+      queueCohorts.map(c => ({ weekOf: c.weekOf, weeksFromNow: null, alreadyDone: c.remaining === 0, remaining: c.remaining }));
     let cohortIdx = queueCohorts.findIndex(c => c.remaining > 0);
     if (cohortIdx === -1) cohortIdx = queueCohorts.length;
     let remainingInCohort = queueCohorts[cohortIdx]?.remaining ?? 0;
@@ -3973,10 +4016,45 @@ export function SchedulePage({
         remaining -= weeklyTotals[fw].totalFrames;
         if (remaining <= 0) { designedAtWeek = fw; break; }
       }
-      return { weekOf: c.weekOf, weeksFromNow: designedAtWeek, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft };
+      return { weekOf: c.weekOf, weeksFromNow: designedAtWeek, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft, remaining: c.count };
     });
     return [...results, ...presResults].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
   }, [location, designableQueue, weeklyTotals, presActuals, teamActuals]);
+
+  // ── Must design ───────────────────────────────────────────────────────────────
+  // Minimum output each schedule week needs so no locked-in client promise
+  // (from designPromises) gets missed. Each active cohort's `remaining` count
+  // becomes "due" in the earliest schedule week on/after its promised_by_date;
+  // due amounts accumulate, and each week's minimum is whatever's needed on top
+  // of what's already scheduled in prior weeks to keep cumulative pace — same
+  // gap-to-target spirit as the "Still needed" row above, just driven by
+  // per-cohort deadlines instead of a single turnaround curve. Never below
+  // what's already scheduled that week, and a week that falls short simply
+  // raises next week's requirement, same self-correcting behavior as "Still needed".
+  const mustDesignByWeek = useMemo(() => {
+    const cumulativeRequired = Array.from({ length: WEEKS }, () => 0);
+    historicalRemaining
+      .filter(row => !('alreadyDone' in row && row.alreadyDone) && row.remaining > 0)
+      .forEach(row => {
+        const promise = designPromises[row.weekOf];
+        if (!promise) return;
+        let dueWeek = WEEKS - 1;
+        for (let w = 0; w < WEEKS; w++) {
+          if (isoMonday(w) >= promise.promisedByDate) { dueWeek = w; break; }
+        }
+        cumulativeRequired[dueWeek] += row.remaining;
+      });
+    for (let w = 1; w < WEEKS; w++) cumulativeRequired[w] += cumulativeRequired[w - 1];
+
+    const mustDesign: number[] = [];
+    let cumulativeScheduled = 0;
+    for (let w = 0; w < WEEKS; w++) {
+      const scheduled = weeklyTotals[w].totalFrames;
+      mustDesign.push(Math.max(scheduled, cumulativeRequired[w] - cumulativeScheduled));
+      cumulativeScheduled += scheduled;
+    }
+    return mustDesign;
+  }, [historicalRemaining, designPromises, weeklyTotals]);
 
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => i + weekOffset).filter(i => i < WEEKS);
   const hasRates    = canViewCPO && designers.some(d =>
@@ -4575,6 +4653,32 @@ export function SchedulePage({
                         );
                       })}
                     </tr>
+                    {/* Must design row — the minimum this week needs to hit so no client
+                        promise locked in via "Snapshot promises" (Queue & Turnaround tab)
+                        gets missed. Never below what's already scheduled; a short week
+                        just raises next week's minimum, same self-correcting behavior
+                        as "Still needed" above. */}
+                    <tr className="border-t border-slate-100 bg-red-50/40">
+                      <td className="sticky left-0 bg-red-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Must design</td>
+                      {windowWeeks.map(w => {
+                        const must      = mustDesignByWeek[w];
+                        const scheduled = weeklyTotals[w].totalFrames;
+                        const short     = must - scheduled;
+                        const hpf       = hiringPlan.hoursPerFrame[w] || 1;
+                        return (
+                          <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/30' : ''}`}>
+                            {short > 0.5 ? (
+                              <>
+                                <div className="font-semibold text-red-700">{Math.round(must)}f</div>
+                                <div className="text-[10px] text-red-400">short {Math.round(short)}f / {Math.round(short * hpf)}h</div>
+                              </>
+                            ) : (
+                              <div className="text-green-600 text-[10px]">on pace</div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -4765,15 +4869,33 @@ export function SchedulePage({
                       Based on {location} designable queue of {designableQueue.toLocaleString()} orders and scheduled capacity.
                     </p>
                   </div>
-                  {(() => {
-                    const doneCount = historicalRemaining.filter(row => 'alreadyDone' in row && row.alreadyDone).length;
-                    return doneCount > 0 ? (
-                      <button onClick={() => setShowDoneCohorts(v => !v)}
-                        className="shrink-0 text-xs px-2.5 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 whitespace-nowrap">
-                        {showDoneCohorts ? `Hide ${doneCount} completed ▲` : `Show ${doneCount} completed ▼`}
-                      </button>
-                    ) : null;
-                  })()}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {(() => {
+                      const lastSnapshotAt = Object.values(designPromises)
+                        .map(p => p.lastConfirmedAt)
+                        .sort()
+                        .pop();
+                      return lastSnapshotAt ? (
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap" title="Most recent time any cohort's promise was confirmed or tightened">
+                          Last snapshot: {new Date(lastSnapshotAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      ) : null;
+                    })()}
+                    <button onClick={takeDesignSnapshot} disabled={snapshotting}
+                      className="text-xs px-2.5 py-1 border border-indigo-200 bg-indigo-50 rounded text-indigo-700 hover:bg-indigo-100 whitespace-nowrap disabled:opacity-50"
+                      title="Lock in today's &quot;weeks until designed&quot; for every active cohort as the client-facing promise. A promise can only get tighter over time, never later.">
+                      {snapshotting ? 'Snapshotting…' : 'Snapshot promises'}
+                    </button>
+                    {(() => {
+                      const doneCount = historicalRemaining.filter(row => 'alreadyDone' in row && row.alreadyDone).length;
+                      return doneCount > 0 ? (
+                        <button onClick={() => setShowDoneCohorts(v => !v)}
+                          className="text-xs px-2.5 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 whitespace-nowrap">
+                          {showDoneCohorts ? `Hide ${doneCount} completed ▲` : `Show ${doneCount} completed ▼`}
+                        </button>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                     <table className="min-w-full text-xs">
@@ -4795,10 +4917,17 @@ export function SchedulePage({
                           const weeksElapsed = Math.round((getMondayDate(0).getTime() - new Date(row.weekOf + 'T12:00:00').getTime()) / (7 * 24 * 60 * 60 * 1000));
                           const totalToDesign        = (!done && weeksLeft !== null) ? weeksElapsed + weeksLeft : null;
                           const totalWithFulfillment = totalToDesign !== null ? totalToDesign + 2 : null;
-                          // Received: presActuals (from preservation historicals) take priority over hardcoded
-                          const receivedVal = presActuals[row.weekOf]
-                            ?? (location === 'Utah' ? UTAH_HISTORICAL_INTAKE : GEORGIA_HISTORICAL_INTAKE).find(h => h.weekOf === row.weekOf)?.actual
-                            ?? '—';
+                          // Received: same merged source as the "Bouquets received" row on the
+                          // preservation Historicals tab — explicit presActuals override, else
+                          // the team's logged order totals for that week, else hardcoded history.
+                          const receivedVal = actualIntakeByWeek[row.weekOf] || null;
+                          const receivedIsOverride = presActuals[row.weekOf] !== undefined;
+                          // At risk: the live calc now points past a date we already promised
+                          // a client. The live numbers above still show the true estimate —
+                          // this is purely a flag that the promise needs attention.
+                          const promise = designPromises[row.weekOf];
+                          const atRisk = !done && weeksLeft !== null && !!promise
+                            && addDays(isoMonday(0), weeksLeft * 7) > promise.promisedByDate;
                           return (
                             <tr key={i} className={`border-b border-slate-50 ${
                               done ? 'bg-slate-50 opacity-50' : inPres ? 'bg-green-50/30' : weeksLeft === 0 ? 'bg-indigo-50/40' : 'hover:bg-slate-50'
@@ -4806,11 +4935,17 @@ export function SchedulePage({
                               <td className="px-4 py-2 font-medium text-slate-700 whitespace-nowrap">
                                 {fmtDate(row.weekOf)}
                                 {done && <span className="ml-2 text-[10px] bg-slate-200 text-slate-500 rounded px-1 py-px">✓ designed</span>}
+                                {atRisk && (
+                                  <span className="ml-2 text-[10px] bg-red-100 text-red-700 rounded px-1 py-px"
+                                    title={`Promised by ${fmtDate(promise!.promisedByDate)} (~${promise!.promisedWeeks} wks when locked in) — currently trending later than that.`}>
+                                    behind promise
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-right text-slate-600">
-                                {presActuals[row.weekOf] !== undefined
+                                {receivedVal === null ? '—' : receivedIsOverride
                                   ? <span className="text-green-700 font-medium">{receivedVal}</span>
-                                  : receivedVal}
+                                  : <span className="text-indigo-400">{receivedVal}</span>}
                               </td>
                               <td className="px-3 py-2 text-right">
                                 {done ? (
