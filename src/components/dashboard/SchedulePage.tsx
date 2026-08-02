@@ -2335,7 +2335,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                           const totalCPO = weeklyTotals[w] > 0 && totalCost > 0 ? totalCost / weeklyTotals[w] : null;
                           return (
                             <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/50' : ''}`}>
-                              <div className="text-indigo-700">{weeklyTotals[w]} ord</div>
+                              <div className="text-indigo-700">{round2(weeklyTotals[w])} ord</div>
                               {totalCPO !== null && <div className="text-amber-600 text-[10px]">{fmt$(totalCPO)}</div>}
                             </td>
                           );
@@ -2402,7 +2402,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                                 <div className="flex flex-col items-center gap-0.5">
                                   <span className="text-[11px] font-medium text-indigo-600">{designEstimate}</span>
                                   <div className={`text-[10px] font-medium ${!isUnderstaffed ? 'text-green-600' : 'text-red-500'}`}>
-                                    {!isUnderstaffed ? '✓' : `${designEstimate - weeklyTotals[w]} short`}
+                                    {!isUnderstaffed ? '✓' : `${round2(designEstimate - weeklyTotals[w])} short`}
                                   </div>
                                 </div>
                               ) : (
@@ -2832,7 +2832,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                       const cpo = c > 0 && cost > 0 ? cost / c : null;
                       return (
                         <td key={w} className={`px-2 py-2 text-center ${w === 0 ? 'bg-indigo-50/50' : ''}`}>
-                          <div className="text-amber-700">{c} ord</div>
+                          <div className="text-amber-700">{round2(c)} ord</div>
                           {cpo !== null && <div className="text-[10px] text-amber-600">{fmt$(cpo)}</div>}
                         </td>
                       );
