@@ -9,7 +9,7 @@ export function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 export function hoursFromOutput(output: number, ratio: number): number {
-  return ratio > 0 ? output * ratio : 0;
+  return ratio > 0 ? round2(output * ratio) : 0;
 }
 
 export function InputModeToggle({ mode, onChange, unitLabel }: { mode: InputMode; onChange: (m: InputMode) => void; unitLabel: string }) {
