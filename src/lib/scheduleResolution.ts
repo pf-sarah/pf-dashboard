@@ -59,17 +59,29 @@ export function resolveWeekHours(params: {
 
 // Returns the 7-element array a daily-hours setter should start mutating from
 // for a given member+week: the already-stored array if one exists, otherwise
-// a freshly materialized array from any legacy weekly value (so fixing one
-// day doesn't silently revert the other six from "whatever was already
-// planned" to "the template"), otherwise a fresh all-null array.
+// — for the current week or earlier only — a freshly materialized array from
+// any legacy weekly value (so fixing one day doesn't silently revert days
+// that may already represent real worked hours back to "the template"),
+// otherwise a fresh all-null array.
+//
+// currentWeekKey (the caller's isoMonday(0)) gates the legacy-materialize
+// path to the current/past week specifically. A future week has no
+// already-worked hours to protect — materializing a stale legacy default
+// there (e.g. a flat pre-template placeholder repeated across dozens of
+// future weeks) would freeze every other day in that week away from the
+// template the moment just one day gets edited, defeating the template
+// entirely for any future week that happens to carry one of these old
+// numbers.
 export function baseDailyArray(
   dailyMap: DailyHoursMap,
   weekKey: string,
   legacyWeeklyValue: number | undefined,
+  currentWeekKey: string,
 ): (number | null)[] {
   const existing = dailyMap[weekKey];
   if (existing) return existing;
-  if (legacyWeeklyValue !== undefined && legacyWeeklyValue > 0) {
+  const isCurrentOrPast = weekKey <= currentWeekKey;
+  if (isCurrentOrPast && legacyWeeklyValue !== undefined && legacyWeeklyValue > 0) {
     return distributeHours(legacyWeeklyValue) as (number | null)[];
   }
   return [null, null, null, null, null, null, null];

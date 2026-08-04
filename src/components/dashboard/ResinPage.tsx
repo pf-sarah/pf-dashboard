@@ -237,7 +237,7 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
   function setDH(memberId: string, weekIdx: number, di: number, val: number) {
     const weekIso = isoMonday(weekIdx);
     const key = `${weekIso}-${memberId}`;
-    const padded = [...baseDailyArray(resinDailyHours, key, hours[weekIso]?.[memberId])];
+    const padded = [...baseDailyArray(resinDailyHours, key, hours[weekIso]?.[memberId], isoMonday(0))];
     padded[di] = val;
     setResinDailyHours({ ...resinDailyHours, [key]: padded });
   }

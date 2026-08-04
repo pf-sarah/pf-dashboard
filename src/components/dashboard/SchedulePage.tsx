@@ -1808,7 +1808,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
   function updateDailyHours(memberId: string, dayIdx: number, val: number) {
     const weekIso = isoMonday(presThisWeekOffset);
     const key = `${weekIso}-${memberId}`;
-    const padded = [...baseDailyArray(presDailyHours, key, presHours[memberId]?.[weekIso])];
+    const padded = [...baseDailyArray(presDailyHours, key, presHours[memberId]?.[weekIso], isoMonday(0))];
     padded[dayIdx] = val;
     onPresDailyHoursChange({ ...presDailyHours, [key]: padded });
   }
@@ -2709,7 +2709,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
         function setFFH(id: string, di: number, val: number) {
           const weekIso = isoMonday(ffThisWeekOffset);
           const key = `${weekIso}-${id}`;
-          const padded = [...baseDailyArray(ffDailyHours, key, ffHours[id]?.[weekIso])];
+          const padded = [...baseDailyArray(ffDailyHours, key, ffHours[id]?.[weekIso], isoMonday(0))];
           padded[di] = val;
           const next = { ...ffDailyHours, [key]: padded };
           setFfDailyHours(next);
@@ -4304,7 +4304,7 @@ export function SchedulePage({
             function setDH(id: string, di: number, val: number) {
               const weekIso = isoMonday(designThisWeekOffset);
               const key = `${weekIso}-${id}`;
-              const padded = [...baseDailyArray(designDailyHours, key, settings.designHours[id]?.[weekIso])];
+              const padded = [...baseDailyArray(designDailyHours, key, settings.designHours[id]?.[weekIso], isoMonday(0))];
               padded[di] = val;
               const next = { ...designDailyHours, [key]: padded };
               setDesignDailyHours(next);
