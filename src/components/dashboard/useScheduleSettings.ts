@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { DailyHoursMap } from '@/lib/scheduleResolution';
+export type { DailyHoursMap };
 
 export interface DesignerRoster {
   [designerId: string]: {
@@ -12,6 +14,10 @@ export interface DesignerRoster {
     // grid, future editing) while keeping their historical scheduled hours
     // intact for past-period goal/CPO calculations.
     _removed?: boolean;
+    // Standard Mon-Sun hours (index 0=Monday..6=Sunday) — the base "This Week"
+    // falls back to wherever no explicit daily override exists. See
+    // src/lib/scheduleResolution.ts.
+    standardWeeklyHours?: number[];
   };
 }
 
@@ -27,17 +33,17 @@ export interface PresSettings {
 }
 
 export interface TeamRoster {
-  [memberId: string]: { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; isManager?: boolean; role?: 'specialist'|'senior'|'master'; _removed?: boolean };
+  [memberId: string]: {
+    ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number;
+    isManager?: boolean; role?: 'specialist'|'senior'|'master'; _removed?: boolean;
+    // Standard Mon-Sun hours (index 0=Monday..6=Sunday) — see DesignerRoster.
+    standardWeeklyHours?: number[];
+  };
 }
 
 // memberId → { isoMonday → hours }. Week-of-year is anchored to a calendar
 // date, not an integer offset, so entries never silently drift as time passes.
 export type WeeklyHoursMap = Record<string, Record<string, number>>;
-
-// "${isoMonday}-${memberId}" → daily hours array (parallel to the visible
-// week's weekdays). The date component of the key is the Monday of the week
-// this daily breakdown belongs to.
-export type DailyHoursMap = Record<string, number[]>;
 
 // personId → { defaultHours, overrides: { isoDate → hours } }
 export interface MasterAvailability {
