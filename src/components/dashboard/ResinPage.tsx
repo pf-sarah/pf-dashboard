@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useScheduleSettings } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
+import { resolveDayHours, resolveWeekHours, baseDailyArray, WEEKDAY_LABELS, type DailyHoursMap } from '@/lib/scheduleResolution';
 import { HistoricalsSection } from './HistoricalsSection';
 import { EmployeeAutocomplete, type RipplingEmployee } from './EmployeeAutocomplete';
 
@@ -18,6 +19,8 @@ export interface ResinMember {
   annualSalary: number;
   isManager?:  boolean;
   role?:       'specialist' | 'senior' | 'master';
+  // Standard Mon-Sun hours (index 0=Monday..6=Sunday) — see src/lib/scheduleResolution.ts.
+  standardWeeklyHours?: number[];
 }
 
 interface CohortRow {
@@ -58,9 +61,9 @@ function mondayOf(dateStr: string): Date {
 function useResinSettings() {
   const { settings, loading, saveState, update } = useScheduleSettings('Utah');
 
-  const resinDailyHours: Record<string, number[]> = settings.resinDailyHours ?? {};
+  const resinDailyHours: DailyHoursMap = settings.resinDailyHours ?? {};
 
-  function setResinDailyHours(h: Record<string, number[]>) { update('resinDailyHours', h); }
+  function setResinDailyHours(h: DailyHoursMap) { update('resinDailyHours', h); }
 
     const roster: ResinMember[] = Array.isArray(settings.resinRoster)
     ? (settings.resinRoster as unknown as ResinMember[])
@@ -73,16 +76,14 @@ function useResinSettings() {
   // fulfillment (member ids don't collide across departments), same pattern
   // used there: production hours drive units/ratio, total hours drive cost.
   const mgrTotalHours: Record<string, Record<string, number>> = settings.mgrTotalHours ?? {};
-  const mgrTotalDailyHours: Record<string, number[]> = settings.mgrTotalDailyHours ?? {};
+  const mgrTotalDailyHours: DailyHoursMap = settings.mgrTotalDailyHours ?? {};
 
   function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
-  function setHours(h: Record<string, Record<string, number>>) { update('resinHours', h); }
-  function setMgrTotalHours(h: Record<string, Record<string, number>>) { update('mgrTotalHours', h); }
-  function setMgrTotalDailyHours(h: Record<string, number[]>) { update('mgrTotalDailyHours', h); }
+  function setMgrTotalDailyHours(h: DailyHoursMap) { update('mgrTotalDailyHours', h); }
 
   return {
-    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
-    mgrTotalHours, setMgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
+    roster, setRoster, hours, resinDailyHours, setResinDailyHours,
+    mgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
     loading, saveState,
   };
 }
@@ -110,8 +111,8 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const {
-    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
-    mgrTotalHours, setMgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
+    roster, setRoster, hours, resinDailyHours, setResinDailyHours,
+    mgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
     loading, saveState,
   } = useResinSettings();
 
@@ -127,21 +128,43 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
   // ── Derived: weekly capacity ───────────────────────────────────────────────
   const windowWeeks = Array.from({ length: WINDOW }, (_, i) => weekOffset + i);
 
+  function memberWeekHours(weekIdx: number, m: ResinMember): number {
+    const weekIso = isoMonday(weekIdx);
+    return resolveWeekHours({
+      dailyMap: resinDailyHours, weekKey: `${weekIso}-${m.id}`,
+      legacyWeeklyValue: hours[weekIso]?.[m.id],
+      standardWeeklyHours: m.standardWeeklyHours,
+    });
+  }
+
   function weeklyCapacity(weekIdx: number): number {
-    const schedule = hours[isoMonday(weekIdx)] ?? {};
-    return roster.reduce((sum, m) => {
-      const h = schedule[m.id] ?? 0;
-      return sum + (m.ratio > 0 ? h / m.ratio : 0);
-    }, 0);
+    return roster.reduce((sum, m) => sum + (m.ratio > 0 ? memberWeekHours(weekIdx, m) / m.ratio : 0), 0);
+  }
+
+  // Same idea as Design's resolveMgrTotalWeekHours: a day's fallback is that
+  // day's already-resolved PRODUCTION hours, not a flat template.
+  function resolveMgrTotalWeekHours(weekIdx: number, m: ResinMember, productionHrs: number): number {
+    const weekIso = isoMonday(weekIdx);
+    const weekKey = `${weekIso}-${m.id}`;
+    const dailyOverrides = mgrTotalDailyHours[weekKey];
+    if (dailyOverrides !== undefined) {
+      let sum = 0;
+      for (let day = 0; day < 7; day++) {
+        const override = dailyOverrides[day];
+        sum += override != null ? override : resolveDayHours(resinDailyHours, weekKey, day, m.standardWeeklyHours).hours;
+      }
+      return sum;
+    }
+    return mgrTotalHours[m.id]?.[weekIso] ?? productionHrs;
   }
 
   // Production hours drive units/ratio; managers' total hours (production +
   // managerial) drive cost instead, and managers are excluded from CPO since
   // their per-unit number isn't meaningful. Mirrors Design's weekStats.
   function weekMemberStats(weekIdx: number, m: ResinMember) {
-    const hrs      = hours[isoMonday(weekIdx)]?.[m.id] ?? 0;
+    const hrs      = memberWeekHours(weekIdx, m);
     const units    = m.ratio > 0 ? hrs / m.ratio : 0;
-    const totalHrs = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(weekIdx)] ?? hrs) : hrs;
+    const totalHrs = m.isManager ? resolveMgrTotalWeekHours(weekIdx, m, hrs) : hrs;
     const cost     = m.payType === 'salary' ? m.annualSalary / 52 : totalHrs * m.hourlyRate;
     const cpo      = !m.isManager && units > 0 && cost > 0 ? cost / units : null;
     return { hrs, units, cost, cpo };
@@ -196,42 +219,35 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
-  function updateHours(weekIdx: number, memberId: string, val: number) {
-    const key = isoMonday(weekIdx);
-    const next = { ...hours, [key]: { ...(hours[key] ?? {}), [memberId]: val } };
-    setHours(next);
-  }
-
-  function updateMgrTotalHours(weekIdx: number, memberId: string, val: number) {
-    const key = isoMonday(weekIdx);
-    const next = { ...mgrTotalHours, [key]: { ...(mgrTotalHours[key] ?? {}), [memberId]: val } };
-    setMgrTotalHours(next);
-  }
-
-  function applyToAllWeeks(memberId: string, val: number) {
-    if (!window.confirm(`Copy ${val} hours to all ${WEEKS} weeks for this team member?`)) return;
-    const next = { ...hours };
-    for (let w = 0; w < WEEKS; w++) {
-      const key = isoMonday(w);
-      next[key] = { ...(next[key] ?? {}), [memberId]: val };
-    }
-    setHours(next);
-  }
-
   function getDH(memberId: string, weekIdx: number, di: number): number {
-    return resinDailyHours[`${isoMonday(weekIdx)}-${memberId}`]?.[di] ?? 0;
+    const template = roster.find(m => m.id === memberId)?.standardWeeklyHours;
+    return resolveDayHours(resinDailyHours, `${isoMonday(weekIdx)}-${memberId}`, di, template).hours;
+  }
+
+  function isDHOverride(memberId: string, weekIdx: number, di: number): boolean {
+    const template = roster.find(m => m.id === memberId)?.standardWeeklyHours;
+    return resolveDayHours(resinDailyHours, `${isoMonday(weekIdx)}-${memberId}`, di, template).isOverride;
+  }
+
+  function setDH(memberId: string, weekIdx: number, di: number, val: number) {
+    const weekIso = isoMonday(weekIdx);
+    const key = `${weekIso}-${memberId}`;
+    const padded = [...baseDailyArray(resinDailyHours, key, hours[weekIso]?.[memberId])];
+    padded[di] = val;
+    setResinDailyHours({ ...resinDailyHours, [key]: padded });
   }
 
   function getMgrTotalDH(memberId: string, weekIdx: number, di: number): number {
-    return mgrTotalDailyHours[`${isoMonday(weekIdx)}-${memberId}`]?.[di] ?? getDH(memberId, weekIdx, di);
+    const override = mgrTotalDailyHours[`${isoMonday(weekIdx)}-${memberId}`]?.[di];
+    return override != null ? override : getDH(memberId, weekIdx, di);
   }
 
   function setMgrTotalDH(memberId: string, weekIdx: number, di: number, val: number) {
     const key = `${isoMonday(weekIdx)}-${memberId}`;
-    const prev = mgrTotalDailyHours[key] ?? [];
-    const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? 0);
-    const next = { ...mgrTotalDailyHours, [key]: padded.map((h, j) => j === di ? val : h) };
-    setMgrTotalDailyHours(next);
+    const prev = mgrTotalDailyHours[key] ?? [null, null, null, null, null, null, null];
+    const padded = Array.from({ length: 7 }, (_, j) => prev[j] ?? null);
+    padded[di] = val;
+    setMgrTotalDailyHours({ ...mgrTotalDailyHours, [key]: padded });
   }
 
   function dailyCost(m: ResinMember, weekIdx: number, di: number): number {
@@ -241,6 +257,14 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
 
   function updateRosterField(id: string, field: keyof ResinMember, val: string | number | boolean) {
     setRoster(roster.map(m => m.id === id ? { ...m, [field]: val } : m));
+  }
+
+  function updateTemplate(id: string, dayIdx: number, value: number) {
+    setRoster(roster.map(m => {
+      if (m.id !== id) return m;
+      const prevTemplate = m.standardWeeklyHours ?? [0, 0, 0, 0, 0, 0, 0];
+      return { ...m, standardWeeklyHours: prevTemplate.map((h, j) => j === dayIdx ? value : h) };
+    }));
   }
 
   function addMember() {
@@ -422,9 +446,10 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
               <span className="text-center">Ratio</span>
               <span />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {roster.map(m => (
-                <div key={m.id} className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
+                <div key={m.id} className="space-y-1.5">
+                <div className="grid grid-cols-[1fr_80px_90px_20px] gap-2 items-center">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <div className="flex-1 min-w-0">
                       <EmployeeAutocomplete
@@ -465,6 +490,22 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                   {roster.length > 1 ? (
                     <button onClick={() => removeMember(m.id)} className="text-slate-300 hover:text-red-400 transition-colors text-xl leading-none text-center">×</button>
                   ) : <span />}
+                </div>
+                <div className="flex items-center gap-1.5 pl-1">
+                  <span className="text-[10px] text-slate-400 w-32 shrink-0">
+                    Standard schedule{!m.standardWeeklyHours && <span className="text-amber-500"> — not set</span>}
+                  </span>
+                  {WEEKDAY_LABELS.map((label, di) => (
+                    <label key={di} className="flex flex-col items-center gap-0.5">
+                      <span className="text-[9px] text-slate-300">{label[0]}</span>
+                      <input type="number" min="0" step="0.5" placeholder="0"
+                        value={m.standardWeeklyHours?.[di] || ''}
+                        onChange={e => updateTemplate(m.id, di, parseFloat(e.target.value) || 0)}
+                        title={`${label} standard hours`}
+                        className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                    </label>
+                  ))}
+                </div>
                 </div>
               ))}
             </div>
@@ -508,7 +549,7 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
               <InputModeToggle mode={resinInputMode} onChange={setResinInputMode} unitLabel="Orders" />
               <button onClick={() => setThisWeekOffset(Math.max(0, thisWeekOffset - 1))} disabled={thisWeekOffset === 0}
                 className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">← Prev</button>
-              <button onClick={() => setThisWeekOffset(Math.min(4, thisWeekOffset + 1))} disabled={thisWeekOffset >= 4}
+              <button onClick={() => setThisWeekOffset(Math.min(WEEKS - 1, thisWeekOffset + 1))} disabled={thisWeekOffset >= WEEKS - 1}
                 className="px-2 py-1 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-30">Next →</button>
             </div>
           </div>
@@ -537,6 +578,7 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                       </td>
                       {[0,1,2,3,4,5,6].map(di => {
                         const dayVal = getDH(m.id, thisWeekOffset, di);
+                        const isOverride = isDHOverride(m.id, thisWeekOffset, di);
                         const dayUnits = m.ratio > 0 ? dayVal / m.ratio : 0;
                         const totalDayVal = m.isManager ? getMgrTotalDH(m.id, thisWeekOffset, di) : dayVal;
                         const cost = dailyCost(m, thisWeekOffset, di);
@@ -546,16 +588,16 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                             <input type="number"
                               value={resinInputMode === 'output' ? (dayUnits ? round2(dayUnits) : '') : (dayVal || '')}
                               placeholder="0" min={0} step={resinInputMode === 'output' ? 0.1 : 0.5}
-                              title={m.isManager ? 'Production hours' : undefined}
+                              title={isOverride ? 'Explicit override for this day' : 'Following the standard weekly schedule — edit to override just this day'}
                               onChange={e => {
                                 const raw = parseFloat(e.target.value) || 0;
                                 const newHours = resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw;
-                                const key = `${isoMonday(thisWeekOffset)}-${m.id}`;
-                                const prev = resinDailyHours[key] ?? Array(7).fill(0);
-                                const next = { ...resinDailyHours, [key]: prev.map((h: number, j: number) => j === di ? newHours : h) };
-                                setResinDailyHours(next);
+                                setDH(m.id, thisWeekOffset, di, newHours);
                               }}
-                              className="w-12 text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none" />
+                              className={`w-12 text-center border rounded px-1 py-1 text-xs focus:outline-none ${
+                                isOverride ? 'bg-white border-slate-100 hover:border-purple-300 focus:border-purple-400 text-slate-700'
+                                           : 'bg-white border-slate-50 text-slate-400 italic hover:border-purple-300 focus:border-purple-400'
+                              }`} />
                             {m.isManager && (
                               <input type="number" value={totalDayVal || ''} min={0} step={0.5} placeholder="total h"
                                 title="Total hours (production + managerial)"
@@ -655,33 +697,17 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                       <div className="text-[10px] text-slate-400 font-normal">{m.ratio}h/unit</div>
                     </td>
                     {windowWeeks.map(w => {
-                      const h    = hours[isoMonday(w)]?.[m.id] ?? 0;
+                      const h    = memberWeekHours(w, m);
                       const units = m.ratio > 0 ? h / m.ratio : 0;
                       const { cpo }  = weekMemberStats(w, m);
-                      const totalH = m.isManager ? (mgrTotalHours[m.id]?.[isoMonday(w)] ?? h) : h;
+                      const totalH = m.isManager ? resolveMgrTotalWeekHours(w, m, h) : h;
                       return (
                         <td key={w} className="px-1 py-1 text-center">
-                          <input
-                            type="number"
-                            value={resinInputMode === 'output' ? (units ? round2(units) : '') : (h || '')}
-                            placeholder="0"
-                            min={0}
-                            step={resinInputMode === 'output' ? 0.1 : 1}
-                            onChange={e => {
-                              const raw = parseFloat(e.target.value) || 0;
-                              updateHours(w, m.id, resinInputMode === 'output' ? hoursFromOutput(raw, m.ratio) : raw);
-                            }}
-                            onContextMenu={e => { e.preventDefault(); applyToAllWeeks(m.id, h); }}
-                            title={m.isManager ? 'Production hours' : 'Right-click to apply to all weeks'}
-                            className="w-full text-center bg-white border border-slate-100 rounded px-1 py-1 text-xs hover:border-purple-300 focus:border-purple-400 focus:outline-none"
-                          />
-                          {m.isManager && (
-                            <input
-                              type="number" value={totalH || ''} min={0} step={1} placeholder="total h"
-                              title="Total hours (production + managerial)"
-                              onChange={e => updateMgrTotalHours(w, m.id, parseFloat(e.target.value) || 0)}
-                              className="w-full mt-0.5 text-center bg-violet-50 border border-violet-200 rounded px-1 py-0.5 text-[10px] text-violet-600 focus:outline-none focus:ring-1 focus:ring-violet-300"
-                            />
+                          <div className="text-slate-700 font-medium" title="Set on the Roster (standard schedule) or the This week tab (one-off exceptions) — the 52-week planner is a read-only view">
+                            {resinInputMode === 'output' ? round2(units) : round2(h)}
+                          </div>
+                          {m.isManager && totalH !== h && (
+                            <div className="text-[10px] text-violet-600">{round2(totalH)}h total</div>
                           )}
                           {resinInputMode === 'output'
                             ? (h > 0 && <div className="text-[10px] text-slate-400 mt-0.5">{round2(h)}h</div>)
