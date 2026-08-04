@@ -80,9 +80,14 @@ function useResinSettings() {
 
   function setRoster(r: ResinMember[]) { update('resinRoster', r as unknown); }
   function setMgrTotalDailyHours(h: DailyHoursMap) { update('mgrTotalDailyHours', h); }
+  // No longer written going forward (daily entries/template supersede it),
+  // but a "reset to template" action still needs to be able to clear any
+  // legacy value left over from before the daily-hours linkage existed —
+  // otherwise it would keep outranking the template in resolveWeekHours.
+  function setHours(h: Record<string, Record<string, number>>) { update('resinHours', h); }
 
   return {
-    roster, setRoster, hours, resinDailyHours, setResinDailyHours,
+    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
     mgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
     loading, saveState,
   };
@@ -111,7 +116,7 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const {
-    roster, setRoster, hours, resinDailyHours, setResinDailyHours,
+    roster, setRoster, hours, setHours, resinDailyHours, setResinDailyHours,
     mgrTotalHours, mgrTotalDailyHours, setMgrTotalDailyHours,
     loading, saveState,
   } = useResinSettings();
@@ -265,6 +270,29 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
       const prevTemplate = m.standardWeeklyHours ?? [0, 0, 0, 0, 0, 0, 0];
       return { ...m, standardWeeklyHours: prevTemplate.map((h, j) => j === dayIdx ? value : h) };
     }));
+  }
+  // Clears every frozen day/week override for this member from the current
+  // week forward (past weeks untouched) so they fall back to the template.
+  function resetMemberToTemplate(id: string) {
+    if (!window.confirm('Clear this person’s scheduled hours from this week forward and go back to following their standard schedule? Past weeks are not affected.')) return;
+    const newDaily = { ...resinDailyHours };
+    let changedDaily = false;
+    // `hours` is date-keyed (isoMonday -> { memberId -> hours }), the inverse
+    // shape of the other three departments' legacy weekly maps.
+    const newWeekly = { ...hours };
+    let changedWeekly = false;
+    for (let w = 0; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
+      const dailyKey = `${weekIso}-${id}`;
+      if (newDaily[dailyKey]) { delete newDaily[dailyKey]; changedDaily = true; }
+      if (newWeekly[weekIso]?.[id] !== undefined) {
+        newWeekly[weekIso] = { ...newWeekly[weekIso] };
+        delete newWeekly[weekIso][id];
+        changedWeekly = true;
+      }
+    }
+    if (changedDaily) setResinDailyHours(newDaily);
+    if (changedWeekly) setHours(newWeekly);
   }
 
   function addMember() {
@@ -505,6 +533,11 @@ export default function ResinPage({ resinQueue, canViewCPO = true }: ResinPagePr
                         className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                     </label>
                   ))}
+                  <button onClick={() => resetMemberToTemplate(m.id)}
+                    title="Clear scheduled hours from this week forward and go back to following this template"
+                    className="text-[10px] text-slate-400 hover:text-indigo-600 whitespace-nowrap ml-1">
+                    ↺ Reset to template
+                  </button>
                 </div>
                 </div>
               ))}

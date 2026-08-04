@@ -16,6 +16,7 @@ import { useScheduleSettings, usePaidHolidays } from './useScheduleSettings';
 import { getMondayDate, isoMonday, getWeekLabel, getMonthKey } from '@/lib/weekDates';
 import { InputModeToggle, round2, hoursFromOutput, type InputMode } from './InputModeToggle';
 import { distributeHours, resolveDayHours, resolveWeekHours, baseDailyArray, WEEKDAY_LABELS, type DailyHoursMap } from '@/lib/scheduleResolution';
+import { BloomUpdateModal, BloomHistoryModal, type BloomUpdateRow } from './BloomUpdateModal';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,9 @@ const DEFAULT_INTAKE_MULTIPLIER = 1.2;
 // Calibration for the designed-to-date anchor: frames designed before design-historicals
 // coverage began (Dec 29, 2025). Can be negative — it also absorbs frames-vs-bouquet unit
 // differences. Utah calibrated Jun 10, 2026 so the queue front = Mar 16 intake week.
-const DESIGNED_BASELINE: Record<'Utah' | 'Georgia', number> = { Utah: -636, Georgia: 170 };
+// Georgia recalibrated Aug 4, 2026 (design team confirmed front = May 4 intake week)
+// after drifting ~2 weeks ahead of reality.
+const DESIGNED_BASELINE: Record<'Utah' | 'Georgia', number> = { Utah: -636, Georgia: -40 };
 
 const UTAH_HISTORICAL_INTAKE: { weekOf: string; actual: number }[] = [
   { weekOf: '2025-09-29', actual: 187 },
@@ -218,7 +221,7 @@ function simulateDesignTurnarounds(startQueue: number, graduatingByWeek: number[
 
 // ─── RosterEditor ──────────────────────────────────────────────────────────────
 
-function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, location, standardWeeklyHoursById, onTemplateChange }: {
+function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, location, standardWeeklyHoursById, onTemplateChange, onResetToTemplate }: {
   designers: Designer[];
   onChange:  (id: string, field: keyof Designer, value: string) => void;
   onAdd:     () => void;
@@ -227,6 +230,7 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
   location?: string;
   standardWeeklyHoursById: Record<string, number[] | undefined>;
   onTemplateChange: (id: string, dayIdx: number, value: number) => void;
+  onResetToTemplate?: (id: string) => void;
 }) {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
@@ -307,6 +311,13 @@ function RosterEditor({ designers, onChange, onAdd, onRemove, onReorder, locatio
                     className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                 </label>
               ))}
+              {onResetToTemplate && (
+                <button onClick={() => onResetToTemplate(d.id)}
+                  title="Clear scheduled hours from this week forward and go back to following this template"
+                  className="text-[10px] text-slate-400 hover:text-indigo-600 whitespace-nowrap ml-1">
+                  ↺ Reset to template
+                </button>
+              )}
             </div>
           </div>
           );
@@ -1235,7 +1246,7 @@ function useDraggableOrder<T extends { id: string }>(
 }
 
 // ─── PresRosterEditor ─────────────────────────────────────────────────────────
-function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {}, onTemplateChange }: {
+function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, employeeRates = {}, onTemplateChange, onResetToTemplate }: {
   team: (Omit<PresTeamMember, 'hours'> & { hours: unknown })[];
   presRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; role?: string; _removed?: boolean; standardWeeklyHours?: number[] }>;
   onUpdateRoster: (id: string, field: 'ratio' | 'rate' | 'name' | 'payType' | 'annualSalary' | 'role' | 'excludeFromCost', val: string | number | boolean) => void;
@@ -1245,6 +1256,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
   deptLocation?: string;
   employeeRates?: Record<string, { hourlyRate: number }>;
   onTemplateChange: (id: string, dayIdx: number, value: number) => void;
+  onResetToTemplate?: (id: string) => void;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1327,6 +1339,13 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
                     className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                 </label>
               ))}
+              {onResetToTemplate && (
+                <button onClick={() => onResetToTemplate(m.id)}
+                  title="Clear scheduled hours from this week forward and go back to following this template"
+                  className="text-[10px] text-slate-400 hover:text-indigo-600 whitespace-nowrap ml-1">
+                  ↺ Reset to template
+                </button>
+              )}
             </div>
           </div>
           );
@@ -1338,7 +1357,7 @@ function PresRosterEditor({ team, presRoster, onUpdateRoster, onRemove, onReorde
 }
 
 // ─── FfRosterEditor ────────────────────────────────────────────────────────────
-function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, onTemplateChange }: {
+function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove, onReorder, onRefreshRatio, deptLocation, onTemplateChange, onResetToTemplate }: {
   team: (Omit<FfTeamMember, 'hours'> & { hours: unknown })[];
   ffRoster: Record<string, { ratio: number; rate: number; name: string; payType?: 'hourly'|'salary'; annualSalary?: number; _removed?: boolean; standardWeeklyHours?: number[] }>;
   employeeRates?:       Record<string, { hourlyRate: number; annualSalary: number; payType: 'hourly'|'salary' }>;
@@ -1349,6 +1368,7 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
   onRefreshRatio: (id: string, name: string) => void;
   deptLocation?: string;
   onTemplateChange: (id: string, dayIdx: number, value: number) => void;
+  onResetToTemplate?: (id: string) => void;
 }) {
   const { dragOverId, handleDragStart, handleDragOver, handleDrop, handleDragEnd } =
     useDraggableOrder(team, onReorder);
@@ -1415,6 +1435,13 @@ function FfRosterEditor({ team, ffRoster, onUpdateName, onUpdateRoster, onRemove
                     className="w-10 border border-slate-200 rounded px-1 py-0.5 text-center text-[11px] text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300" />
                 </label>
               ))}
+              {onResetToTemplate && (
+                <button onClick={() => onResetToTemplate(m.id)}
+                  title="Clear scheduled hours from this week forward and go back to following this template"
+                  className="text-[10px] text-slate-400 hover:text-indigo-600 whitespace-nowrap ml-1">
+                  ↺ Reset to template
+                </button>
+              )}
             </div>
           </div>
           );
@@ -1821,6 +1848,27 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
     const nextTemplate = prevTemplate.map((h, j) => j === dayIdx ? value : h);
     onPresRosterChange({ ...presRoster, [memberId]: { ...existing, standardWeeklyHours: nextTemplate } });
   }
+  // Clears every frozen day/week override for this member from the current
+  // week forward (past weeks untouched) so they fall back to the template.
+  function resetMemberToTemplate(memberId: string) {
+    if (!window.confirm('Clear this person’s scheduled hours from this week forward and go back to following their standard schedule? Past weeks are not affected.')) return;
+    const newDaily = { ...presDailyHours };
+    let changedDaily = false;
+    const newWeekly = { ...presHours };
+    let changedWeekly = false;
+    for (let w = 0; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
+      const dailyKey = `${weekIso}-${memberId}`;
+      if (newDaily[dailyKey]) { delete newDaily[dailyKey]; changedDaily = true; }
+      if (newWeekly[memberId]?.[weekIso] !== undefined) {
+        newWeekly[memberId] = { ...newWeekly[memberId] };
+        delete newWeekly[memberId][weekIso];
+        changedWeekly = true;
+      }
+    }
+    if (changedDaily) onPresDailyHoursChange({ ...newDaily });
+    if (changedWeekly) onPresHoursChange(newWeekly);
+  }
 
   function handleAddMember() {
     const id = `${location.toLowerCase()}-p-${Date.now()}`;
@@ -2010,6 +2058,7 @@ function PreservationSection({ location, preservationQueue, countsLoading, teamA
                   deptLocation={location}
                   onUpdateRoster={updateRoster}
                   onTemplateChange={updateTemplate}
+                  onResetToTemplate={resetMemberToTemplate}
                   onRemove={handleRemoveMember}
                   employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
@@ -2616,6 +2665,27 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
     const nextTemplate = prevTemplate.map((h, j) => j === dayIdx ? value : h);
     onFfRosterChange({ ...ffRoster, [id]: { ...existing, standardWeeklyHours: nextTemplate } });
   }
+  // Clears every frozen day/week override for this member from the current
+  // week forward (past weeks untouched) so they fall back to the template.
+  function resetFfMemberToTemplate(id: string) {
+    if (!window.confirm('Clear this person’s scheduled hours from this week forward and go back to following their standard schedule? Past weeks are not affected.')) return;
+    const newDaily = { ...ffDailyHours };
+    let changedDaily = false;
+    const newWeekly = { ...ffHours };
+    let changedWeekly = false;
+    for (let w = 0; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
+      const dailyKey = `${weekIso}-${id}`;
+      if (newDaily[dailyKey]) { delete newDaily[dailyKey]; changedDaily = true; }
+      if (newWeekly[id]?.[weekIso] !== undefined) {
+        newWeekly[id] = { ...newWeekly[id] };
+        delete newWeekly[id][weekIso];
+        changedWeekly = true;
+      }
+    }
+    if (changedDaily) { setFfDailyHours(newDaily); onFfDailyHoursChange?.(newDaily); }
+    if (changedWeekly) onFfHoursChange(newWeekly);
+  }
 
   return (
     <div className="space-y-4">
@@ -2785,6 +2855,7 @@ function FulfillmentSection({ location, fulfillmentQueue, countsLoading, teamAct
                   onUpdateName={updateFfRosterName}
                   onUpdateRoster={updateRoster}
                   onTemplateChange={updateFfTemplate}
+                  onResetToTemplate={resetFfMemberToTemplate}
                   onRemove={handleRemoveFfMember}
                   employeeRates={employeeRates}
                   onRefreshRatio={async (id, name) => {
@@ -3509,11 +3580,15 @@ export function SchedulePage({
   }, [location]);
 
   // Design delivery promises — "weeks until designed" locked in for clients,
-  // see the Snapshot button on the Queue & Turnaround tab. Keyed by intake week.
+  // see the "Send biweekly bloom update" button on the Queue & Turnaround tab.
+  // Keyed by intake week.
   const [designPromises, setDesignPromises] = useState<Record<string, {
     promisedByDate: string; promisedWeeks: number; lastConfirmedWeeks: number; lastConfirmedAt: string;
   }>>({});
-  const [snapshotting, setSnapshotting] = useState(false);
+  const [bloomModalOpen, setBloomModalOpen] = useState(false);
+  const [bloomHistoryOpen, setBloomHistoryOpen] = useState(false);
+  const [bloomHistory, setBloomHistory] = useState<{ id: number; sent_at: string; rows: BloomUpdateRow[] }[]>([]);
+  const [bloomHistoryLoading, setBloomHistoryLoading] = useState(false);
 
   function loadDesignPromises() {
     fetch(`/api/design-promises?location=${location}`)
@@ -3535,20 +3610,15 @@ export function SchedulePage({
 
   useEffect(() => { loadDesignPromises(); }, [location]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function takeDesignSnapshot() {
-    const cohorts = historicalRemaining
-      .filter(r => !('alreadyDone' in r && r.alreadyDone) && r.weeksFromNow !== null)
-      .map(r => ({ weekOf: r.weekOf, weeksFromNow: r.weeksFromNow as number }));
-    if (cohorts.length === 0) return;
-    setSnapshotting(true);
-    fetch('/api/design-promises', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ location, cohorts }),
-    })
-      .then(() => loadDesignPromises())
+  function loadBloomHistory() {
+    setBloomHistoryLoading(true);
+    fetch(`/api/bloom-updates?location=${location}`)
+      .then(r => r.json())
+      .then((d: { updates?: { id: number; sent_at: string; rows: BloomUpdateRow[] }[] }) => {
+        setBloomHistory(d.updates ?? []);
+      })
       .catch(() => {})
-      .finally(() => setSnapshotting(false));
+      .finally(() => setBloomHistoryLoading(false));
   }
 
   const weeklyEstimates = settings.weeklyEstimates;
@@ -3621,6 +3691,31 @@ export function SchedulePage({
     const nextTemplate = prevTemplate.map((h, j) => j === dayIdx ? value : h);
     currentRoster[id] = { ...existing, standardWeeklyHours: nextTemplate } as typeof currentRoster[string];
     update('designRoster', currentRoster);
+  }
+  // Clears every frozen day/week override for this designer from the current
+  // week forward (never touches already-elapsed weeks) so they fall back to
+  // following whatever the standard schedule template says. Without this,
+  // editing someone's template has no visible effect on any week that
+  // already has explicit hours sitting in it — which for an actively-used
+  // schedule is most near-term weeks.
+  function handleResetDesignerToTemplate(id: string) {
+    if (!window.confirm('Clear this designer’s scheduled hours from this week forward and go back to following their standard schedule? Past weeks are not affected.')) return;
+    const newDaily = { ...designDailyHours };
+    let changedDaily = false;
+    const newWeekly = { ...settings.designHours };
+    let changedWeekly = false;
+    for (let w = 0; w < WEEKS; w++) {
+      const weekIso = isoMonday(w);
+      const dailyKey = `${weekIso}-${id}`;
+      if (newDaily[dailyKey]) { delete newDaily[dailyKey]; changedDaily = true; }
+      if (newWeekly[id]?.[weekIso] !== undefined) {
+        newWeekly[id] = { ...newWeekly[id] };
+        delete newWeekly[id][weekIso];
+        changedWeekly = true;
+      }
+    }
+    if (changedDaily) { setDesignDailyHours(newDaily); update('designDailyHours', newDaily); }
+    if (changedWeekly) update('designHours', newWeekly);
   }
   function handleAddDesigner() {
     const id = `${location.toLowerCase()}-${Date.now()}`;
@@ -3892,7 +3987,6 @@ export function SchedulePage({
       .reduce((s, r) => s + (r.actual_orders ?? 0), 0);
     const alreadyDesigned = Math.max(0, Math.min(totalFromHistory,
       (DESIGNED_BASELINE[location] ?? 0) + designedActualsTotal));
-    const remainingQueue = Math.max(0, totalFromHistory - alreadyDesigned);
     let trimRemaining = alreadyDesigned;
     const queueCohorts: { weekOf: string; remaining: number }[] = [];
     for (const c of designableCohorts) {
@@ -3906,42 +4000,40 @@ export function SchedulePage({
     }
     const results: { weekOf: string; weeksFromNow: number | null; alreadyDone: boolean; remaining: number }[] =
       queueCohorts.map(c => ({ weekOf: c.weekOf, weeksFromNow: null, alreadyDone: c.remaining === 0, remaining: c.remaining }));
-    let cohortIdx = queueCohorts.findIndex(c => c.remaining > 0);
-    if (cohortIdx === -1) cohortIdx = queueCohorts.length;
-    let remainingInCohort = queueCohorts[cohortIdx]?.remaining ?? 0;
-    for (let w = 0; w < WEEKS && cohortIdx < queueCohorts.length; w++) {
+    const presResults: { weekOf: string; weeksFromNow: number | null; alreadyDone: boolean; inPreservation: boolean; preservationWeeksLeft: number; remaining: number }[] =
+      inPreservationCohorts.map(c => ({ weekOf: c.weekOf, weeksFromNow: null, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft, remaining: c.count }));
+    // Single FIFO simulation across the already-graduated queue AND every
+    // still-drying cohort together, in chronological order. A still-drying
+    // cohort's preservationWeeksLeft only makes it ELIGIBLE to start
+    // consuming capacity once it graduates — it does not give it its own
+    // private copy of every future week's capacity. Simulating drying
+    // cohorts independently (each assuming it alone gets full access to
+    // capacity from its own join week onward) let multiple cohorts land on
+    // the same "weeks until designed" even though only one of them can
+    // actually be designed at a time — this keeps every cohort honestly
+    // queued behind whichever ones (graduated or still drying) are ahead of
+    // it, so promised dates line up with what the schedule can deliver.
+    type Row = (typeof results)[number] | (typeof presResults)[number];
+    const allRows: Row[] = [...results, ...presResults];
+    const joinWeekOf = (r: Row) => 'preservationWeeksLeft' in r ? r.preservationWeeksLeft : 0;
+    let idx = allRows.findIndex(r => r.remaining > 0);
+    if (idx === -1) idx = allRows.length;
+    let remainingInRow = allRows[idx]?.remaining ?? 0;
+    for (let w = 0; w < WEEKS && idx < allRows.length; w++) {
       let capacity = weeklyTotals[w].totalFrames;
-      while (capacity > 0 && cohortIdx < queueCohorts.length) {
-        if (remainingInCohort <= capacity) {
-          results[cohortIdx].weeksFromNow = w;
-          capacity -= remainingInCohort;
-          cohortIdx++;
-          remainingInCohort = queueCohorts[cohortIdx]?.remaining ?? 0;
+      while (capacity > 0 && idx < allRows.length && joinWeekOf(allRows[idx]) <= w) {
+        if (remainingInRow <= capacity) {
+          allRows[idx].weeksFromNow = w;
+          capacity -= remainingInRow;
+          idx++;
+          remainingInRow = allRows[idx]?.remaining ?? 0;
         } else {
-          remainingInCohort -= capacity;
+          remainingInRow -= capacity;
           capacity = 0;
         }
       }
     }
-    const queueAfterWeek: number[] = [];
-    { let q = remainingQueue;
-      for (let w = 0; w < WEEKS; w++) {
-        q = Math.max(0, q - weeklyTotals[w].totalFrames);
-        queueAfterWeek.push(q);
-      }
-    }
-    const presResults = inPreservationCohorts.map(c => {
-      const joinWeek   = c.weeksLeft;
-      const queueAtJoin = joinWeek === 0 ? remainingQueue : (queueAfterWeek[joinWeek - 1] ?? 0);
-      let remaining    = queueAtJoin + c.count;
-      let designedAtWeek: number | null = null;
-      for (let fw = joinWeek; fw < WEEKS; fw++) {
-        remaining -= weeklyTotals[fw].totalFrames;
-        if (remaining <= 0) { designedAtWeek = fw; break; }
-      }
-      return { weekOf: c.weekOf, weeksFromNow: designedAtWeek, alreadyDone: false, inPreservation: true, preservationWeeksLeft: c.weeksLeft, remaining: c.count };
-    });
-    return [...results, ...presResults].sort((a, b) => a.weekOf.localeCompare(b.weekOf));
+    return allRows.sort((a, b) => a.weekOf.localeCompare(b.weekOf));
   }, [location, designableQueue, weeklyTotals, presActuals, teamActuals]);
 
   // ── Must design ───────────────────────────────────────────────────────────────
@@ -4165,6 +4257,7 @@ export function SchedulePage({
                   location={location}
                   standardWeeklyHoursById={Object.fromEntries(designers.map(d => [d.id, settings.designRoster[d.id]?.standardWeeklyHours]))}
                   onTemplateChange={handleDesignerTemplateChange}
+                  onResetToTemplate={handleResetDesignerToTemplate}
                 />
                 {deletedStack.length > 0 && (
                   <button onClick={handleUndo}
@@ -4426,8 +4519,8 @@ export function SchedulePage({
                       })}
                     </tr>
                     {/* Must design row — the minimum this week needs to hit so no client
-                        promise locked in via "Snapshot promises" (Queue & Turnaround tab)
-                        gets missed. Never below what's already scheduled; a short week
+                        promise locked in via "Send biweekly bloom update" (Queue & Turnaround
+                        tab) gets missed. Never below what's already scheduled; a short week
                         just raises next week's minimum, so it self-corrects. */}
                     <tr className="border-t border-slate-100 bg-red-50/40">
                       <td className="sticky left-0 bg-red-50/40 px-4 py-2 text-xs text-slate-500 whitespace-nowrap">Must design</td>
@@ -4642,20 +4735,24 @@ export function SchedulePage({
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {(() => {
-                      const lastSnapshotAt = Object.values(designPromises)
+                      const lastSentAt = Object.values(designPromises)
                         .map(p => p.lastConfirmedAt)
                         .sort()
                         .pop();
-                      return lastSnapshotAt ? (
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap" title="Most recent time any cohort's promise was confirmed or tightened">
-                          Last snapshot: {new Date(lastSnapshotAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      return lastSentAt ? (
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap" title="Most recent time a biweekly bloom update was locked in and sent">
+                          Last sent: {new Date(lastSentAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       ) : null;
                     })()}
-                    <button onClick={takeDesignSnapshot} disabled={snapshotting}
-                      className="text-xs px-2.5 py-1 border border-indigo-200 bg-indigo-50 rounded text-indigo-700 hover:bg-indigo-100 whitespace-nowrap disabled:opacity-50"
-                      title="Lock in today's &quot;weeks until designed&quot; for every active cohort as the client-facing promise. A promise can only get tighter over time, never later.">
-                      {snapshotting ? 'Snapshotting…' : 'Snapshot promises'}
+                    <button onClick={() => { loadBloomHistory(); setBloomHistoryOpen(true); }}
+                      className="text-xs px-2.5 py-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-50 whitespace-nowrap">
+                      Past bloom updates
+                    </button>
+                    <button onClick={() => setBloomModalOpen(true)}
+                      className="text-xs px-2.5 py-1 border border-indigo-200 bg-indigo-50 rounded text-indigo-700 hover:bg-indigo-100 whitespace-nowrap"
+                      title="Preview today's biweekly bloom update — locking it in makes it the client-facing promise. A promise can only get tighter over time, never later.">
+                      Send biweekly bloom update
                     </button>
                     {(() => {
                       const doneCount = historicalRemaining.filter(row => 'alreadyDone' in row && row.alreadyDone).length;
@@ -4784,6 +4881,28 @@ export function SchedulePage({
                   </div>
               </div>
             </div>
+          )}
+
+          {bloomModalOpen && (() => {
+            const bloomRows: BloomUpdateRow[] = historicalRemaining
+              .filter(r => !('alreadyDone' in r && r.alreadyDone) && r.weeksFromNow !== null)
+              .map(r => ({ weekOf: r.weekOf, weeksUntilDesigned: r.weeksFromNow as number }));
+            return (
+              <BloomUpdateModal
+                rows={bloomRows}
+                location={location}
+                onClose={() => setBloomModalOpen(false)}
+                onConfirmed={loadDesignPromises}
+              />
+            );
+          })()}
+          {bloomHistoryOpen && (
+            <BloomHistoryModal
+              updates={bloomHistory}
+              loading={bloomHistoryLoading}
+              location={location}
+              onClose={() => setBloomHistoryOpen(false)}
+            />
           )}
 
           {/* ── MONTHLY SUMMARY TAB ─────────────────────────────────────────── */}
