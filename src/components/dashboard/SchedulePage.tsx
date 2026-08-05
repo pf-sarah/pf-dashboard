@@ -42,7 +42,6 @@ interface WeekSchedule {
 const WEEKS              = 52;
 const WINDOW             = 8;
 const PRESERVATION_WEEKS = 8;
-const DESIGN_TARGET_MIN      = 8;
 const DESIGN_TARGET_MAX      = 14;
 // Ratio assumed for a hypothetical new hire on the Queue & Turnaround planner —
 // a specialist pace, not the team's blended average, since a new hire isn't
@@ -212,6 +211,34 @@ function simulateDesignTurnarounds(startQueue: number, graduatingByWeek: number[
     const cohortSize = graduatingByWeek[w] ?? 0;
     let remaining    = queueAhead + cohortSize;
     for (let fw = graduateWeek; fw < weeks; fw++) {
+      remaining -= frameCapacityByWeek[fw];
+      if (remaining <= 0) return fw - w;
+    }
+    return null;
+  });
+}
+
+// Same simulation, but treats each cohort as competing for capacity starting
+// in its own intake week instead of PRESERVATION_WEEKS later — i.e. pretends
+// there's no mandatory drying wait. Never used to decide anything real (a
+// bouquet genuinely can't be designed before it finishes drying, so the real
+// turnaround can never read below PRESERVATION_WEEKS) — purely a "how
+// overstaffed are we" gauge for weeks that have already hit that floor,
+// where the real number would otherwise just repeat PRESERVATION_WEEKS with
+// no sense of degree.
+function simulateDesignTurnaroundsUnclamped(startQueue: number, graduatingByWeek: number[], frameCapacityByWeek: number[]): (number | null)[] {
+  const weeks = frameCapacityByWeek.length;
+  const queueAtStart: number[] = [startQueue];
+  for (let w = 0; w < weeks - 1; w++) {
+    const afterDrain    = Math.max(0, queueAtStart[w] - frameCapacityByWeek[w]);
+    const afterGraduate = afterDrain + (graduatingByWeek[w + 1] ?? 0);
+    queueAtStart.push(afterGraduate);
+  }
+  return Array.from({ length: weeks }, (_, w) => {
+    const queueAhead = queueAtStart[w];
+    const cohortSize = graduatingByWeek[w] ?? 0;
+    let remaining    = queueAhead + cohortSize;
+    for (let fw = w; fw < weeks; fw++) {
       remaining -= frameCapacityByWeek[fw];
       if (remaining <= 0) return fw - w;
     }
@@ -3930,9 +3957,23 @@ export function SchedulePage({
       ? simulateDesignTurnarounds(designableQueue, graduatingCohorts, planCapacity.map(f => f * trendRatio))
       : planTurnaround;
 
+    // Unclamped mirrors of the same four — see simulateDesignTurnaroundsUnclamped's
+    // comment. Only consulted once a week has already hit the real
+    // PRESERVATION_WEEKS floor, to size how overstaffed it is.
+    const scheduledTurnaroundUnclamped = simulateDesignTurnaroundsUnclamped(designableQueue, graduatingCohorts, baseCapacity);
+    const planTurnaroundUnclamped      = simulateDesignTurnaroundsUnclamped(designableQueue, graduatingCohorts, planCapacity);
+    const scheduledTurnaroundTrendUnclamped = trendRatio !== null
+      ? simulateDesignTurnaroundsUnclamped(designableQueue, graduatingCohorts, baseCapacity.map(f => f * trendRatio))
+      : scheduledTurnaroundUnclamped;
+    const planTurnaroundTrendUnclamped = trendRatio !== null
+      ? simulateDesignTurnaroundsUnclamped(designableQueue, graduatingCohorts, planCapacity.map(f => f * trendRatio))
+      : planTurnaroundUnclamped;
+
     return {
       scheduledHours, plannedHours, planTurnaround, scheduledTurnaround, hireHoursByWeek,
       scheduledTurnaroundTrend, planTurnaroundTrend, hoursPerFrame,
+      scheduledTurnaroundUnclamped, planTurnaroundUnclamped,
+      scheduledTurnaroundTrendUnclamped, planTurnaroundTrendUnclamped,
     };
   }, [weeklyTotals, designers, settings.newHireHours, settings.designHours, teamActuals, designableQueue, graduatingCohorts]);
 
@@ -4592,10 +4633,27 @@ export function SchedulePage({
                             // pace, should read as the risk it actually is, not green.
                             const planWorst  = (total === null || planTrend === null) ? null : Math.max(total, planTrend);
                             const schedWorst = (schedTotal === null || schedTrend === null) ? null : Math.max(schedTotal, schedTrend);
-                            const overstaffed = planWorst !== null && planWorst < DESIGN_TARGET_MIN;
-                            const { bar, text, label } = turnaroundColors(planWorst, overstaffed);
-                            const schedOverstaffed = schedWorst !== null && schedWorst < DESIGN_TARGET_MIN;
-                            const schedColors = turnaroundColors(schedWorst, schedOverstaffed);
+                            // This total always includes the fixed PRESERVATION_WEEKS drying
+                            // time, so it can structurally never go below that floor no matter
+                            // how much capacity is scheduled — comparing it against
+                            // DESIGN_TARGET_MIN (a design-only figure) made "overstaffed"
+                            // unreachable. Landing exactly at the floor means the design queue
+                            // isn't the bottleneck at all, which is the real overstaffed signal.
+                            const overstaffed = planWorst !== null && planWorst <= PRESERVATION_WEEKS;
+                            const schedOverstaffed = schedWorst !== null && schedWorst <= PRESERVATION_WEEKS;
+                            // Once overstaffed, the real number just repeats PRESERVATION_WEEKS
+                            // with no sense of degree — swap in the unclamped (drying-wait-free)
+                            // figure so "overstaffed" can actually say how overstaffed, e.g. "6w".
+                            const planUnclampedTotal  = hiringPlan.planTurnaroundUnclamped[w];
+                            const planUnclampedTrend  = hiringPlan.planTurnaroundTrendUnclamped[w];
+                            const planUnclampedWorst  = (planUnclampedTotal === null || planUnclampedTrend === null) ? null : Math.max(planUnclampedTotal, planUnclampedTrend);
+                            const schedUnclampedTotal = hiringPlan.scheduledTurnaroundUnclamped[w];
+                            const schedUnclampedTrend = hiringPlan.scheduledTurnaroundTrendUnclamped[w];
+                            const schedUnclampedWorst = (schedUnclampedTotal === null || schedUnclampedTrend === null) ? null : Math.max(schedUnclampedTotal, schedUnclampedTrend);
+                            const planDisplayWeeks  = overstaffed && planUnclampedWorst !== null ? planUnclampedWorst : planWorst;
+                            const schedDisplayWeeks = schedOverstaffed && schedUnclampedWorst !== null ? schedUnclampedWorst : schedWorst;
+                            const { bar, text, label } = turnaroundColors(planDisplayWeeks, overstaffed);
+                            const schedColors = turnaroundColors(schedDisplayWeeks, schedOverstaffed);
                             const categoryOf = (l: string) => l.split('—')[1]?.trim() ?? l;
                             const weekIso = isoMonday(w);
                             const _weVal = weeklyEstimates[weekIso];
@@ -4681,9 +4739,9 @@ export function SchedulePage({
                                       {schedTotal !== null ? (
                                         <>
                                           <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
-                                            <div className={`h-2 rounded-full ${schedColors.bar}`} style={{ width: `${Math.min(100, ((schedWorst ?? schedTotal) / maxWeeksScale) * 100)}%` }} />
+                                            <div className={`h-2 rounded-full ${schedColors.bar}`} style={{ width: `${Math.min(100, ((schedDisplayWeeks ?? schedTotal) / maxWeeksScale) * 100)}%` }} />
                                           </div>
-                                          <span className={`text-[10px] font-medium w-14 text-right shrink-0 ${schedColors.text}`}>{turnaroundRangeLabel(schedTotal, schedTrend)}</span>
+                                          <span className={`text-[10px] font-medium w-14 text-right shrink-0 ${schedColors.text}`}>{schedOverstaffed ? turnaroundRangeLabel(schedUnclampedTotal, schedUnclampedTrend) : turnaroundRangeLabel(schedTotal, schedTrend)}</span>
                                         </>
                                       ) : (
                                         <span className="text-[10px] text-red-500 italic">52wk+</span>
@@ -4694,9 +4752,9 @@ export function SchedulePage({
                                       {total !== null ? (
                                         <>
                                           <div className="flex-1 bg-slate-100 rounded-full h-2 overflow-hidden">
-                                            <div className={`h-2 rounded-full ${bar}`} style={{ width: `${Math.min(100, ((planWorst ?? total) / maxWeeksScale) * 100)}%` }} />
+                                            <div className={`h-2 rounded-full ${bar}`} style={{ width: `${Math.min(100, ((planDisplayWeeks ?? total) / maxWeeksScale) * 100)}%` }} />
                                           </div>
-                                          <span className={`text-[10px] font-semibold w-14 text-right shrink-0 ${text}`}>{turnaroundRangeLabel(total, planTrend)}</span>
+                                          <span className={`text-[10px] font-semibold w-14 text-right shrink-0 ${text}`}>{overstaffed ? turnaroundRangeLabel(planUnclampedTotal, planUnclampedTrend) : turnaroundRangeLabel(total, planTrend)}</span>
                                         </>
                                       ) : (
                                         <span className="text-[10px] text-red-600 italic">52wk+</span>
@@ -4718,9 +4776,10 @@ export function SchedulePage({
                 <div className="flex gap-4 mt-4 pt-3 border-t border-slate-100 flex-wrap">
                   <span className="text-[10px] text-slate-500">Design hours: Scheduled = the real Weekly Schedule. Planned = Scheduled + any new hire above — same numbers driving the Planned bar.</span>
                   <span className="text-[10px] text-slate-500 border-l border-slate-200 pl-4">Turnaround ranges reflect recent clocked-vs-scheduled hours.</span>
-                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500 border-l border-slate-200 pl-4"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" /> &lt;{DESIGN_TARGET_MIN} wks overstaffed</span>
-                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block" /> ≤{DESIGN_TARGET_MAX} wks ideal</span>
-                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> &gt;{DESIGN_TARGET_MAX} wks over goal</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500 border-l border-slate-200 pl-4"><span className="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block" /> {PRESERVATION_WEEKS} wks (floor) — overstaffed</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-green-400 inline-block" /> ≤10 wks ideal</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> ≤18 wks backlog building</span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" /> &gt;18 wks large backlog</span>
                 </div>
               </div>
 
